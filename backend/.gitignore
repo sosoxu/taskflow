@@ -1,0 +1,14 @@
+build/
+*.yaml
+!*.yaml.example
+logs/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+cmake_install.cmake
+CMakeCache.txt
+CMakeFiles/
+Makefile
+compile_commands.json

@@ -1,0 +1,31 @@
+server:
+  http_port: 8080
+  grpc_port: 50051
+
+database:
+  host: localhost
+  port: 5432
+  name: taskflow
+  user: taskflow
+  password: "taskflow123"
+  min_connections: 5
+  max_connections: 20
+
+auth:
+  jwt_secret: "taskflow-jwt-secret-key-must-be-at-least-32-chars"
+  access_token_ttl: 86400
+  refresh_token_ttl: 604800
+
+encryption:
+  aes_key: "taskflow-aes-key-must-be-32-characters"
+
+log:
+  level: info
+  file_path: logs/scheduler.log
+
+schedule:
+  dag_drive_interval: 2
+  heartbeat_check_interval: 10
+  heartbeat_timeout: 30
+  timeout_check_interval: 10
+  leader_lease_interval: 5

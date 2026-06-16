@@ -1,0 +1,18 @@
+server:
+  grpc_port: 50052
+
+scheduler:
+  address: "localhost:50051"
+
+worker:
+  name: ""
+  max_tasks: 10
+  resource_tags: []
+
+log:
+  level: info
+  file_path: logs/worker.log
+
+task_log:
+  dir: logs/tasks
+  retention_days: 30

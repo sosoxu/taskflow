@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package taskflow.v1;
+
+option cc_enable_arenas = true;
+
+// Worker 服务 - 由 Worker 端实现，Scheduler 调用
+service WorkerService {
+    // 下发任务到 Worker 执行
+    rpc DispatchTask(TaskDispatchRequest) returns (TaskDispatchResponse);
+    // 取消正在执行的任务
+    rpc CancelTask(TaskCancelRequest) returns (TaskCancelResponse);
+    // 获取任务日志（流式）
+    rpc GetTaskLog(TaskLogRequest) returns (stream LogChunk);
+}
+
+// Scheduler 服务 - 由 Scheduler 端实现，Worker 调用
+service SchedulerService {
+    // Worker 注册
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    // Worker 心跳上报
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    // Worker 上报任务执行结果
+    rpc ReportTaskResult(TaskResultRequest) returns (TaskResultResponse);
+}
+
+// === Worker Service Messages ===
+
+// 任务下发请求
+message TaskDispatchRequest {
+    string task_instance_id = 1;  // 任务实例 ID
+    string task_type = 2;         // 任务类型: command / script / sql
+    string config_json = 3;       // 任务配置 JSON（SQL 密码已解密）
+    int32 timeout = 4;            // 超时时间（秒）
+    int32 retry_count = 5;        // 当前重试次数
+}
+
+// 任务下发响应
+message TaskDispatchResponse {
+    bool accepted = 1;            // 是否接受任务
+    string error_message = 2;     // 拒绝原因
+}
+
+// 任务取消请求
+message TaskCancelRequest {
+    string task_instance_id = 1;  // 任务实例 ID
+}
+
+// 任务取消响应
+message TaskCancelResponse {
+    bool cancelled = 1;           // 是否成功取消
+    string error_message = 2;     // 失败原因
+}
+
+// 任务日志请求
+message TaskLogRequest {
+    string task_instance_id = 1;  // 任务实例 ID
+    bool follow = 2;              // 是否持续追踪（实时日志）
+}
+
+// 日志数据块
+message LogChunk {
+    string task_instance_id = 1;  // 任务实例 ID
+    bytes data = 2;               // 日志内容
+    bool eof = 3;                 // 是否结束
+}
+
+// === Scheduler Service Messages ===
+
+// Worker 注册请求
+message RegisterRequest {
+    string name = 1;              // Worker 名称
+    string address = 2;           // Worker gRPC 地址
+    int32 max_tasks = 3;          // 最大并发任务数
+    repeated string resource_tags = 4;  // 资源标签
+}
+
+// Worker 注册响应
+message RegisterResponse {
+    bool success = 1;             // 是否注册成功
+    string worker_id = 2;         // 分配的 Worker ID
+    string error_message = 3;     // 失败原因
+}
+
+// 心跳请求
+message HeartbeatRequest {
+    string worker_id = 1;         // Worker ID
+    double cpu_usage = 2;         // CPU 使用率 (0.0-1.0)
+    double memory_usage = 3;      // 内存使用率 (0.0-1.0)
+    int32 running_tasks = 4;      // 当前运行任务数
+}
+
+// 心跳响应
+message HeartbeatResponse {
+    bool acknowledged = 1;        // 是否确认
+}
+
+// 任务结果上报请求
+message TaskResultRequest {
+    string task_instance_id = 1;  // 任务实例 ID
+    string status = 2;            // 执行状态: SUCCESS / FAILED / TIMEOUT
+    int32 exit_code = 3;          // 退出码
+    string error_message = 4;     // 错误信息
+}
+
+// 任务结果上报响应
+message TaskResultResponse {
+    bool acknowledged = 1;        // 是否确认
+}

@@ -1,0 +1,7 @@
+build/
+logs/
+*.log
+.git/
+.gitignore
+scheduler.yaml
+worker.yaml

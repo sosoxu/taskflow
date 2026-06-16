@@ -1,0 +1,35 @@
+add_executable(scheduler
+    main.cpp
+    api/health_controller.cpp
+    api/auth_controller.cpp
+    dao/user_dao.cpp
+    dao/task_dao.cpp
+    dao/workflow_dao.cpp
+    dao/workflow_instance_dao.cpp
+    dao/task_instance_dao.cpp
+    dao/worker_dao.cpp
+    dao/cron_job_dao.cpp
+    service/auth_service.cpp
+    service/task_service.cpp
+    service/workflow_service.cpp
+    service/instance_service.cpp
+    api/task_controller.cpp
+    api/workflow_controller.cpp
+    api/instance_controller.cpp
+    api/worker_controller.cpp
+    middleware/auth_middleware.cpp
+    middleware/role_middleware.cpp
+    grpc/scheduler_service.cpp
+    grpc/heartbeat_checker.cpp
+    engine/dag_engine.cpp
+    engine/dag_driver.cpp
+    engine/cron_scheduler.cpp
+    grpc/leader_election.cpp
+)
+
+target_link_libraries(scheduler PRIVATE
+    taskflow_common
+    taskflow_proto
+    Drogon::Drogon
+    gRPC::grpc++
+)

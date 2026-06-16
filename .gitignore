@@ -1,0 +1,29 @@
+# Build
+backend/build/
+**/build/
+frontend/node_modules/
+frontend/dist/
+*.o
+*.a
+
+# Logs
+backend/logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets
+backend/scheduler.yaml
+backend/worker.yaml
+
+# Temp
+*.tmp
+*.bak

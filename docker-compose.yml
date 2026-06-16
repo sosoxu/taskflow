@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: taskflow
+      POSTGRES_USER: taskflow
+      POSTGRES_PASSWORD: taskflow123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  scheduler:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.scheduler
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - scheduler-logs:/app/logs
+    configs:
+      - source: scheduler_config
+        target: /app/scheduler.yaml
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.worker
+    depends_on:
+      - scheduler
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - worker-logs:/app/logs
+      - worker-task-logs:/app/logs/tasks
+    configs:
+      - source: worker_config
+        target: /app/worker.yaml
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - scheduler
+    restart: unless-stopped
+
+configs:
+  scheduler_config:
+    content: |
+      server:
+        http_port: 8080
+        grpc_port: 50051
+      database:
+        host: postgres
+        port: 5432
+        name: taskflow
+        user: taskflow
+        password: "taskflow123"
+        min_connections: 5
+        max_connections: 20
+      auth:
+        jwt_secret: "taskflow-jwt-secret-key-must-be-at-least-32-chars"
+        access_token_ttl: 86400
+        refresh_token_ttl: 604800
+      encryption:
+        aes_key: "taskflow-aes-key-must-be-32-characters"
+      log:
+        level: info
+        file_path: logs/scheduler.log
+      schedule:
+        dag_drive_interval: 2
+        heartbeat_check_interval: 10
+        heartbeat_timeout: 30
+        timeout_check_interval: 10
+        leader_lease_interval: 5
+
+  worker_config:
+    content: |
+      server:
+        grpc_port: 50052
+      scheduler:
+        address: "scheduler:50051"
+      worker:
+        name: ""
+        max_tasks: 10
+        resource_tags: []
+      log:
+        level: info
+        file_path: logs/worker.log
+      task_log:
+        dir: logs/tasks
+        retention_days: 30
+
+volumes:
+  pgdata:
+  scheduler-logs:
+  worker-logs:
+  worker-task-logs:
