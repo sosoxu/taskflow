@@ -1,5 +1,6 @@
 #include "scheduler/api/instance_controller.h"
 
+#include <sstream>
 #include <drogon/HttpResponse.h>
 
 namespace taskflow::scheduler::api {
@@ -205,6 +206,53 @@ void InstanceController::getTaskLog(
     auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
         nlohmannToJsoncpp(response));
     httpResp->setStatusCode(drogon::k200OK);
+    callback(httpResp);
+}
+
+void InstanceController::streamTaskLog(
+    const drogon::HttpRequestPtr& /*req*/,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+    const std::string& id,
+    const std::string& taskInstanceId) {
+
+    // Validate the task instance exists
+    auto validate_result = instance_service_->validateTaskInstance(id, taskInstanceId);
+    if (!validate_result.ok()) {
+        sendError(std::move(callback), 400, 40000, validate_result.error());
+        return;
+    }
+
+    // Create SSE response with proper headers
+    auto httpResp = drogon::HttpResponse::newHttpResponse();
+    httpResp->setStatusCode(drogon::k200OK);
+    httpResp->setContentTypeString("text/event-stream");
+    httpResp->addHeader("Cache-Control", "no-cache");
+    httpResp->addHeader("Connection", "keep-alive");
+    httpResp->addHeader("Access-Control-Allow-Origin", "*");
+
+    // Fetch log content via gRPC and send as SSE events
+    auto log_result = instance_service_->getTaskLog(id, taskInstanceId);
+
+    if (!log_result.ok()) {
+        std::string sse_data = "data: " + log_result.error() + "\n\n";
+        httpResp->setBody(sse_data);
+        callback(httpResp);
+        return;
+    }
+
+    const std::string& log_content = log_result.value();
+
+    // Send log content as SSE events, line by line
+    std::string sse_body;
+    std::istringstream stream(log_content);
+    std::string line;
+    while (std::getline(stream, line)) {
+        sse_body += "data: " + line + "\n\n";
+    }
+    // Send final event to signal completion
+    sse_body += "event: done\ndata: \n\n";
+
+    httpResp->setBody(sse_body);
     callback(httpResp);
 }
 

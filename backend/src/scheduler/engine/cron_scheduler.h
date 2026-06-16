@@ -13,12 +13,13 @@
 #include "scheduler/dao/task_instance_dao.h"
 #include "scheduler/dao/workflow_dao.h"
 #include "scheduler/dao/workflow_instance_dao.h"
+#include "scheduler/grpc/leader_election.h"
 
 namespace taskflow::scheduler::engine {
 
 class CronScheduler {
 public:
-    CronScheduler();
+    explicit CronScheduler(std::shared_ptr<grpc::LeaderElection> leader_election);
 
     void start();
     void stop();
@@ -27,6 +28,7 @@ private:
     void cronLoop();
     void triggerCronJob(const common::models::CronJob& cron_job);
 
+    std::shared_ptr<grpc::LeaderElection> leader_election_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 

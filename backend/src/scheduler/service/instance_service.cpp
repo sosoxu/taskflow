@@ -382,4 +382,52 @@ common::result::Result<std::string> InstanceService::getTaskLog(
     return log_content;
 }
 
+common::result::Result<void> InstanceService::validateTaskInstance(
+    const std::string& instance_id, const std::string& task_instance_id) {
+
+    auto instance_result = workflow_instance_dao_.findById(instance_id);
+    if (!instance_result.ok()) {
+        return common::result::Result<void>::failure(
+            "Workflow instance not found: " + instance_result.error());
+    }
+
+    auto task_result = task_instance_dao_.findById(task_instance_id);
+    if (!task_result.ok()) {
+        return common::result::Result<void>::failure(
+            "Task instance not found: " + task_result.error());
+    }
+
+    const auto& task_instance = task_result.value();
+    if (task_instance.workflow_instance_id != instance_id) {
+        return common::result::Result<void>::failure(
+            "Task instance does not belong to the specified workflow instance");
+    }
+
+    return common::result::Result<void>();
+}
+
+common::result::Result<std::string> InstanceService::getTaskWorkerAddress(
+    const std::string& /*instance_id*/, const std::string& task_instance_id) {
+
+    auto task_result = task_instance_dao_.findById(task_instance_id);
+    if (!task_result.ok()) {
+        return common::result::Result<std::string>::failure(
+            "Task instance not found: " + task_result.error());
+    }
+
+    const auto& task_instance = task_result.value();
+    if (task_instance.worker_id.empty()) {
+        return common::result::Result<std::string>::failure(
+            "Task instance has not been dispatched to a worker");
+    }
+
+    auto worker_result = worker_dao_.findById(task_instance.worker_id);
+    if (!worker_result.ok()) {
+        return common::result::Result<std::string>::failure(
+            "Worker not found: " + worker_result.error());
+    }
+
+    return worker_result.value().address;
+}
+
 }  // namespace taskflow::scheduler::service

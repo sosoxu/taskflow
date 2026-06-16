@@ -15,6 +15,7 @@
 #include "common/config/worker_config.h"
 #include "worker/grpc/worker_client.h"
 #include "worker/executor/task_executor.h"
+#include "worker/util/resource_collector.h"
 #include "taskflow.grpc.pb.h"
 
 using taskflow::v1::WorkerService;
@@ -82,8 +83,14 @@ public:
 
         std::string task_instance_id = request->task_instance_id();
         std::string task_type = request->task_type();
+        std::string workflow_instance_id = request->workflow_instance_id();
         int timeout = request->timeout();
         std::string log_dir = log_dir_;
+
+        if (!workflow_instance_id.empty()) {
+            log_dir += "/" + workflow_instance_id;
+        }
+        std::filesystem::create_directories(log_dir);
 
         auto result = executor_.submit(
             task_instance_id, task_type, config, timeout, log_dir,
@@ -131,7 +138,25 @@ public:
                             grpc::ServerWriter<LogChunk>* writer) override {
         spdlog::info("收到日志请求: task_instance_id={}", request->task_instance_id());
 
-        std::string log_path = log_dir_ + "/" + request->task_instance_id() + ".log";
+        std::string log_path;
+        std::string target_filename = request->task_instance_id() + ".log";
+
+        // Search in workflow_instance_id subdirectories for the log file
+        for (const auto& entry : std::filesystem::directory_iterator(log_dir_)) {
+            if (entry.is_directory()) {
+                auto candidate = entry.path() / target_filename;
+                if (std::filesystem::exists(candidate)) {
+                    log_path = candidate.string();
+                    break;
+                }
+            }
+        }
+
+        // Fallback to flat log directory for backward compatibility
+        if (log_path.empty()) {
+            log_path = log_dir_ + "/" + target_filename;
+        }
+
         std::ifstream ifs(log_path, std::ios::binary);
 
         if (!ifs.is_open()) {
@@ -230,12 +255,47 @@ int main(int argc, char* argv[]) {
     std::atomic<bool> running{true};
     std::thread heartbeat_thread([&scheduler_client, &worker_id, &running, &executor]() {
         while (running.load()) {
+            auto resources = taskflow::worker::util::ResourceCollector::collect();
             auto result = scheduler_client.sendHeartbeat(
-                worker_id, 0.0, 0.0, executor.runningCount());
+                worker_id, resources.cpu_usage, resources.memory_usage, executor.runningCount());
             if (!result.ok()) {
                 spdlog::warn("心跳发送失败: {}", result.error());
             }
             std::this_thread::sleep_for(std::chrono::seconds(10));
+        }
+    });
+
+    // 启动日志清理线程
+    std::string task_log_dir = config.task_log.dir;
+    int log_retention_days = config.task_log.retention_days;
+    std::thread log_cleanup_thread([&running, task_log_dir, log_retention_days]() {
+        while (running.load()) {
+            std::this_thread::sleep_for(std::chrono::hours(1));
+            if (!running.load()) {
+                break;
+            }
+
+            try {
+                if (!std::filesystem::exists(task_log_dir)) {
+                    continue;
+                }
+
+                auto now = std::filesystem::file_time_type::clock::now();
+                auto retention = std::chrono::hours(24 * log_retention_days);
+
+                for (const auto& entry : std::filesystem::directory_iterator(task_log_dir)) {
+                    if (!entry.is_directory()) {
+                        continue;
+                    }
+                    auto last_modified = std::filesystem::last_write_time(entry);
+                    if (now - last_modified > retention) {
+                        std::filesystem::remove_all(entry.path());
+                        spdlog::info("日志清理: 删除过期日志目录 {}", entry.path().string());
+                    }
+                }
+            } catch (const std::filesystem::filesystem_error& e) {
+                spdlog::warn("日志清理失败: {}", e.what());
+            }
         }
     });
 
@@ -252,6 +312,7 @@ int main(int argc, char* argv[]) {
         spdlog::error("gRPC 服务启动失败");
         running.store(false);
         heartbeat_thread.join();
+        log_cleanup_thread.join();
         return 1;
     }
 
@@ -261,6 +322,7 @@ int main(int argc, char* argv[]) {
     // 清理
     running.store(false);
     heartbeat_thread.join();
+    log_cleanup_thread.join();
 
     return 0;
 }

@@ -13,11 +13,13 @@
 #include "common/database/database_manager.h"
 #include "scheduler/api/health_controller.h"
 #include "scheduler/api/auth_controller.h"
+#include "scheduler/api/user_controller.h"
 #include "scheduler/api/task_controller.h"
 #include "scheduler/api/workflow_controller.h"
 #include "scheduler/api/instance_controller.h"
 #include "scheduler/api/worker_controller.h"
 #include "scheduler/service/auth_service.h"
+#include "scheduler/service/user_service.h"
 #include "scheduler/service/task_service.h"
 #include "scheduler/service/workflow_service.h"
 #include "scheduler/service/instance_service.h"
@@ -120,23 +122,24 @@ int main(int argc, char* argv[]) {
     heartbeat_checker.start();
     spdlog::info("心跳检测已启动");
 
+    // 启动选主（必须在 DagDriver 和 CronScheduler 之前）
+    auto leader_election = std::make_shared<taskflow::scheduler::grpc::LeaderElection>(
+        config.schedule.leader_lease_interval, 12345);
+    leader_election->start();
+    spdlog::info("选主机制已启动");
+
     // 启动 DAG 执行驱动
     taskflow::scheduler::engine::DagDriver dag_driver(
         config.schedule.dag_drive_interval,
-        config.encryption.aes_key);
+        config.encryption.aes_key,
+        leader_election);
     dag_driver.start();
     spdlog::info("DAG 执行驱动已启动");
 
     // 启动定时调度
-    taskflow::scheduler::engine::CronScheduler cron_scheduler;
+    taskflow::scheduler::engine::CronScheduler cron_scheduler(leader_election);
     cron_scheduler.start();
     spdlog::info("定时调度已启动");
-
-    // 启动选主
-    taskflow::scheduler::grpc::LeaderElection leader_election(
-        config.schedule.leader_lease_interval, 12345);
-    leader_election.start();
-    spdlog::info("选主机制已启动");
 
     // 配置 Drogon HTTP 服务
     drogon::app()
@@ -163,6 +166,10 @@ int main(int argc, char* argv[]) {
     auto authCtrl = std::make_shared<taskflow::scheduler::api::AuthController>(auth_service);
     drogon::app().registerController(authCtrl);
 
+    auto user_service = std::make_shared<taskflow::scheduler::service::UserService>();
+    auto userCtrl = std::make_shared<taskflow::scheduler::api::UserController>(user_service);
+    drogon::app().registerController(userCtrl);
+
     auto task_service = std::make_shared<taskflow::scheduler::service::TaskService>(
         config.encryption.aes_key);
     auto taskCtrl = std::make_shared<taskflow::scheduler::api::TaskController>(task_service);
@@ -185,7 +192,7 @@ int main(int argc, char* argv[]) {
 
     // 清理
     cron_scheduler.stop();
-    leader_election.stop();
+    leader_election->stop();
     dag_driver.stop();
     heartbeat_checker.stop();
     grpc_server->Shutdown();

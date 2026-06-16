@@ -33,6 +33,7 @@ message TaskDispatchRequest {
     string config_json = 3;       // 任务配置 JSON（SQL 密码已解密）
     int32 timeout = 4;            // 超时时间（秒）
     int32 retry_count = 5;        // 当前重试次数
+    string workflow_instance_id = 6;  // 工作流实例 ID
 }
 
 // 任务下发响应

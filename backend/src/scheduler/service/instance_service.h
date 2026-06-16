@@ -39,6 +39,14 @@ public:
     common::result::Result<std::string> getTaskLog(
         const std::string& instance_id, const std::string& task_instance_id);
 
+    // Validate that a task instance belongs to the given workflow instance
+    common::result::Result<void> validateTaskInstance(
+        const std::string& instance_id, const std::string& task_instance_id);
+
+    // Get the worker address for a task instance
+    common::result::Result<std::string> getTaskWorkerAddress(
+        const std::string& instance_id, const std::string& task_instance_id);
+
 private:
     dao::WorkflowInstanceDao workflow_instance_dao_;
     dao::TaskInstanceDao task_instance_dao_;

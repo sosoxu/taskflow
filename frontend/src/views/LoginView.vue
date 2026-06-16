@@ -102,7 +102,7 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -111,6 +111,7 @@ import { useUserStore } from '../stores/userStore'
 import { setToken } from '../utils/auth'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
 const loginFormRef = ref<FormInstance>()
@@ -176,7 +177,8 @@ async function handleLogin() {
     })
     setToken(data.access_token)
     ElMessage.success('登录成功')
-    router.push('/')
+    const redirect = route.query.redirect as string
+    router.push(redirect || '/')
   } catch (err: unknown) {
     const message =
       (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||

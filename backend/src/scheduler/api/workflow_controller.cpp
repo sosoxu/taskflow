@@ -141,6 +141,8 @@ void WorkflowController::updateWorkflow(
     std::string target_worker_id = (*json).get("target_worker_id", "").asString();
     std::string cron_expression = (*json).get("cron_expression", "").asString();
     bool cron_enabled = (*json).get("cron_enabled", false).asBool();
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
 
     nlohmann::json dag_json;
     if ((*json).isMember("dag_json")) {
@@ -149,7 +151,7 @@ void WorkflowController::updateWorkflow(
 
     auto result = workflow_service_->updateWorkflow(
         id, name, description, dag_json, schedule_strategy,
-        target_worker_id, cron_expression, cron_enabled);
+        target_worker_id, cron_expression, cron_enabled, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40000, result.error());
@@ -163,11 +165,14 @@ void WorkflowController::updateWorkflow(
 }
 
 void WorkflowController::deleteWorkflow(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
-    auto result = workflow_service_->deleteWorkflow(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+
+    auto result = workflow_service_->deleteWorkflow(id, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 404, 40400, result.error());

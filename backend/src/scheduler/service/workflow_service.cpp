@@ -113,7 +113,20 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     const std::string& schedule_strategy,
     const std::string& target_worker_id,
     const std::string& cron_expression,
-    bool cron_enabled) {
+    bool cron_enabled,
+    const std::string& user_id, const std::string& role) {
+
+    // Find existing workflow to check ownership
+    auto existingWfResult = workflow_dao_.findById(id);
+    if (!existingWfResult.ok()) {
+        return common::result::Result<nlohmann::json>::failure(
+            "Workflow not found: " + existingWfResult.error());
+    }
+
+    const auto& existing_workflow = existingWfResult.value();
+    if (role != "admin" && existing_workflow.creator_id != user_id) {
+        return common::result::Result<nlohmann::json>::failure("权限不足，只能编辑自己创建的工作流");
+    }
 
     // Validate DAG
     auto dagResult = DagValidator::validate(dag_json);
@@ -183,7 +196,21 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     return fetchResult.value().toJson();
 }
 
-common::result::Result<void> WorkflowService::deleteWorkflow(const std::string& id) {
+common::result::Result<void> WorkflowService::deleteWorkflow(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+
+    // Find workflow to check ownership
+    auto wfResult = workflow_dao_.findById(id);
+    if (!wfResult.ok()) {
+        return common::result::Result<void>::failure(
+            "Workflow not found: " + wfResult.error());
+    }
+
+    const auto& workflow = wfResult.value();
+    if (role != "admin" && workflow.creator_id != user_id) {
+        return common::result::Result<void>::failure("权限不足，只能删除自己创建的工作流");
+    }
+
     // Soft delete the workflow
     auto deleteResult = workflow_dao_.softDelete(id);
     if (!deleteResult.ok()) {

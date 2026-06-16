@@ -2,6 +2,8 @@ add_executable(scheduler
     main.cpp
     api/health_controller.cpp
     api/auth_controller.cpp
+    api/user_controller.cpp
+    api/task_controller.cpp
     dao/user_dao.cpp
     dao/task_dao.cpp
     dao/workflow_dao.cpp
@@ -10,6 +12,7 @@ add_executable(scheduler
     dao/worker_dao.cpp
     dao/cron_job_dao.cpp
     service/auth_service.cpp
+    service/user_service.cpp
     service/task_service.cpp
     service/workflow_service.cpp
     service/instance_service.cpp

@@ -104,7 +104,8 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     const std::string& id, const std::string& name, const std::string& type,
     const nlohmann::json& config_json, const std::string& description,
     int timeout, int max_retries, int retry_interval,
-    const nlohmann::json& resource_tags) {
+    const nlohmann::json& resource_tags,
+    const std::string& user_id, const std::string& role) {
 
     // Validate type
     if (type != "command" && type != "script" && type != "sql") {
@@ -116,6 +117,18 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     auto validateResult = validateConfig(type, config_json);
     if (!validateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(validateResult.error());
+    }
+
+    // Find existing task to check ownership
+    auto existingTaskResult = task_dao_.findById(id);
+    if (!existingTaskResult.ok()) {
+        return common::result::Result<nlohmann::json>::failure(
+            "Task not found: " + existingTaskResult.error());
+    }
+
+    const auto& existing_task = existingTaskResult.value();
+    if (role != "admin" && existing_task.creator_id != user_id) {
+        return common::result::Result<nlohmann::json>::failure("权限不足，只能编辑自己创建的任务");
     }
 
     // Encrypt sensitive fields
@@ -148,7 +161,21 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     return taskJson;
 }
 
-common::result::Result<void> TaskService::deleteTask(const std::string& id) {
+common::result::Result<void> TaskService::deleteTask(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+
+    // Find task to check ownership
+    auto taskResult = task_dao_.findById(id);
+    if (!taskResult.ok()) {
+        return common::result::Result<void>::failure(
+            "Task not found: " + taskResult.error());
+    }
+
+    const auto& task = taskResult.value();
+    if (role != "admin" && task.creator_id != user_id) {
+        return common::result::Result<void>::failure("权限不足，只能删除自己创建的任务");
+    }
+
     auto result = task_dao_.softDelete(id);
     if (!result.ok()) {
         return common::result::Result<void>::failure(

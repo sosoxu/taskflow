@@ -150,9 +150,28 @@
     <!-- Log Dialog -->
     <el-dialog v-model="logDialogVisible" title="任务日志" width="70%" destroy-on-close>
       <div class="log-toolbar">
+        <el-switch
+          v-model="autoScroll"
+          active-text="自动滚动"
+          inactive-text=""
+          size="small"
+          style="margin-right: 12px"
+        />
         <el-button size="small" @click="refreshLog">刷新</el-button>
+        <el-button
+          v-if="!logStreaming"
+          type="primary"
+          size="small"
+          @click="startLogStream"
+        >实时跟踪</el-button>
+        <el-button
+          v-else
+          type="danger"
+          size="small"
+          @click="stopLogStream"
+        >停止跟踪</el-button>
       </div>
-      <div class="log-content">
+      <div ref="logContainerRef" class="log-content">
         <pre><code>{{ logContent }}</code></pre>
       </div>
     </el-dialog>
@@ -160,11 +179,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getInstance, pauseInstance, resumeInstance, cancelInstance, retryTask, killTask } from '../../api/instance'
-import { getTaskLogs } from '../../api/log'
+import { getTaskLogs, getTaskLogStreamUrl } from '../../api/log'
 import { getWorkflow } from '../../api/workflow'
 import { formatTime } from '../../utils/format'
 import type { WorkflowInstance, TaskInstance, WorkflowInstanceStatus, TaskInstanceStatus } from '../../types/instance'
@@ -181,6 +200,10 @@ const dag = ref<DagGraph | null>(null)
 const logDialogVisible = ref(false)
 const logContent = ref('')
 const currentLogTask = ref<TaskInstance | null>(null)
+const autoScroll = ref(true)
+const logStreaming = ref(false)
+const logContainerRef = ref<HTMLElement | null>(null)
+let eventSource: EventSource | null = null
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -397,6 +420,7 @@ async function handleKillTask(task: TaskInstance) {
 
 async function openLogDialog(task: TaskInstance) {
   currentLogTask.value = task
+  logContent.value = ''
   logDialogVisible.value = true
   await fetchLog()
 }
@@ -406,12 +430,55 @@ async function fetchLog() {
   try {
     const res = await getTaskLogs(instance.value.id, currentLogTask.value.id)
     logContent.value = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2)
+    if (autoScroll.value) {
+      await nextTick()
+      scrollToBottom()
+    }
   } catch {
     logContent.value = '获取日志失败'
   }
 }
 
+function startLogStream() {
+  if (!instance.value || !currentLogTask.value) return
+  stopLogStream()
+
+  const url = getTaskLogStreamUrl(instance.value.id, currentLogTask.value.id)
+  eventSource = new EventSource(url)
+  logStreaming.value = true
+
+  eventSource.onmessage = (event) => {
+    logContent.value += event.data + '\n'
+    if (autoScroll.value) {
+      nextTick(() => scrollToBottom())
+    }
+  }
+
+  eventSource.addEventListener('done', () => {
+    stopLogStream()
+  })
+
+  eventSource.onerror = () => {
+    stopLogStream()
+  }
+}
+
+function stopLogStream() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  logStreaming.value = false
+}
+
+function scrollToBottom() {
+  if (logContainerRef.value) {
+    logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight
+  }
+}
+
 function refreshLog() {
+  stopLogStream()
   fetchLog()
 }
 
@@ -435,6 +502,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  stopLogStream()
 })
 </script>
 

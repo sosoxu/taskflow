@@ -40,10 +40,12 @@ public:
         const std::string& schedule_strategy,
         const std::string& target_worker_id,
         const std::string& cron_expression,
-        bool cron_enabled);
+        bool cron_enabled,
+        const std::string& user_id, const std::string& role);
 
     // Delete workflow (soft delete, disable CronJob)
-    common::result::Result<void> deleteWorkflow(const std::string& id);
+    common::result::Result<void> deleteWorkflow(
+        const std::string& id, const std::string& user_id, const std::string& role);
 
     // Trigger workflow execution: create WorkflowInstance + TaskInstances
     common::result::Result<nlohmann::json> triggerWorkflow(

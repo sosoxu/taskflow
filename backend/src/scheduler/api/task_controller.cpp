@@ -150,6 +150,8 @@ void TaskController::updateTask(
     int timeout = (*json).get("timeout", 3600).asInt();
     int max_retries = (*json).get("max_retries", 0).asInt();
     int retry_interval = (*json).get("retry_interval", 60).asInt();
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
 
     nlohmann::json config_json;
     if ((*json).isMember("config_json")) {
@@ -164,7 +166,7 @@ void TaskController::updateTask(
     auto result = task_service_->updateTask(
         id, name, type, config_json, description,
         timeout, max_retries, retry_interval,
-        resource_tags);
+        resource_tags, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40000, result.error());
@@ -178,11 +180,14 @@ void TaskController::updateTask(
 }
 
 void TaskController::deleteTask(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
-    auto result = task_service_->deleteTask(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+
+    auto result = task_service_->deleteTask(id, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 404, 40400, result.error());

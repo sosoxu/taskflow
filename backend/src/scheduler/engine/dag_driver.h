@@ -12,12 +12,14 @@
 #include "scheduler/dao/workflow_instance_dao.h"
 #include "scheduler/engine/dag_engine.h"
 #include "scheduler/engine/dispatcher.h"
+#include "scheduler/grpc/leader_election.h"
 
 namespace taskflow::scheduler::engine {
 
 class DagDriver {
 public:
-    DagDriver(int drive_interval, const std::string& aes_key);
+    DagDriver(int drive_interval, const std::string& aes_key,
+              std::shared_ptr<grpc::LeaderElection> leader_election);
 
     void start();
     void stop();
@@ -31,6 +33,7 @@ private:
 
     int drive_interval_;
     std::string aes_key_;
+    std::shared_ptr<grpc::LeaderElection> leader_election_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 

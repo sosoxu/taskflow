@@ -19,6 +19,7 @@ public:
     ADD_METHOD_TO(InstanceController::getInstance, "/api/v1/instances/{id}", drogon::Get);
     ADD_METHOD_TO(InstanceController::listInstances, "/api/v1/workflows/{id}/instances", drogon::Get);
     ADD_METHOD_TO(InstanceController::getTaskLog, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs", drogon::Get);
+    ADD_METHOD_TO(InstanceController::streamTaskLog, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs/stream", drogon::Get);
     METHOD_LIST_END
 
     void pauseInstance(const drogon::HttpRequestPtr& req,
@@ -55,6 +56,11 @@ public:
                     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                     const std::string& id,
                     const std::string& taskInstanceId);
+
+    void streamTaskLog(const drogon::HttpRequestPtr& req,
+                       std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                       const std::string& id,
+                       const std::string& taskInstanceId);
 
 private:
     std::shared_ptr<service::InstanceService> instance_service_;

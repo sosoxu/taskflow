@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/util/uuid.h"
+#include "scheduler/engine/cron_parser.h"
 
 namespace taskflow::scheduler::engine {
 
@@ -27,35 +28,25 @@ std::string formatCurrentTime() {
 }
 
 std::string computeNextTriggerTime(const std::string& cron_expression) {
-    // Simple interval-based calculation.
-    // Parse cron_expression as a duration in seconds for now.
-    // Proper cron parsing will be implemented later.
-    try {
-        int interval = std::stoi(cron_expression);
-        auto now = std::chrono::system_clock::now();
-        auto next = now + std::chrono::seconds(interval);
-        auto time_t_next = std::chrono::system_clock::to_time_t(next);
-        std::tm tm_next{};
-        gmtime_r(&time_t_next, &tm_next);
-        std::ostringstream oss;
-        oss << std::put_time(&tm_next, "%Y-%m-%d %H:%M:%S");
-        return oss.str();
-    } catch (...) {
-        // Default: add 60 seconds if parsing fails
-        auto now = std::chrono::system_clock::now();
-        auto next = now + std::chrono::seconds(60);
-        auto time_t_next = std::chrono::system_clock::to_time_t(next);
-        std::tm tm_next{};
-        gmtime_r(&time_t_next, &tm_next);
-        std::ostringstream oss;
-        oss << std::put_time(&tm_next, "%Y-%m-%d %H:%M:%S");
-        return oss.str();
+    auto result = CronParser::getNextTrigger(cron_expression, formatCurrentTime());
+    if (result.ok()) {
+        return result.value();
     }
+    // Fallback: return current time + 60 seconds
+    auto now = std::chrono::system_clock::now();
+    auto next = now + std::chrono::seconds(60);
+    auto time_t_next = std::chrono::system_clock::to_time_t(next);
+    std::tm tm_next{};
+    gmtime_r(&time_t_next, &tm_next);
+    std::ostringstream oss;
+    oss << std::put_time(&tm_next, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
 }
 
 }  // namespace
 
-CronScheduler::CronScheduler() = default;
+CronScheduler::CronScheduler(std::shared_ptr<grpc::LeaderElection> leader_election)
+    : leader_election_(std::move(leader_election)) {}
 
 void CronScheduler::start() {
     running_ = true;
@@ -77,6 +68,11 @@ void CronScheduler::cronLoop() {
 
         if (!running_) {
             break;
+        }
+
+        // 只有 leader 节点才执行定时调度
+        if (leader_election_ && !leader_election_->isLeader()) {
+            continue;
         }
 
         std::string current_time = formatCurrentTime();

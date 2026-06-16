@@ -1,9 +1,11 @@
 #include "scheduler/engine/dag_driver.h"
 
 #include <chrono>
+#include <iomanip>
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -21,8 +23,10 @@
 
 namespace taskflow::scheduler::engine {
 
-DagDriver::DagDriver(int drive_interval, const std::string& aes_key)
-    : drive_interval_(drive_interval), aes_key_(aes_key) {}
+DagDriver::DagDriver(int drive_interval, const std::string& aes_key,
+                     std::shared_ptr<grpc::LeaderElection> leader_election)
+    : drive_interval_(drive_interval), aes_key_(aes_key),
+      leader_election_(std::move(leader_election)) {}
 
 void DagDriver::start() {
     running_ = true;
@@ -42,6 +46,11 @@ void DagDriver::driveLoop() {
 
         if (!running_) {
             break;
+        }
+
+        // 只有 leader 节点才驱动 DAG 执行
+        if (leader_election_ && !leader_election_->isLeader()) {
+            continue;
         }
 
         auto instances_result = workflow_instance_dao_.listActive();
@@ -96,7 +105,45 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     const auto& workflow = workflow_result.value();
     const auto& dag_json = workflow.dag_json;
 
-    // 4. Find ready tasks (all upstream SUCCESS)
+    // 4. 检查超时的 RUNNING 任务
+    for (const auto& ti : task_instances) {
+        if (ti.status == "RUNNING" && !ti.started_at.empty()) {
+            // 解析 started_at 并检查是否超时
+            try {
+                std::tm tm_started{};
+                std::istringstream iss(ti.started_at);
+                iss >> std::get_time(&tm_started, "%Y-%m-%d %H:%M:%S");
+                if (!iss.fail()) {
+                    auto started_tp = std::chrono::system_clock::from_time_t(std::mktime(&tm_started));
+                    auto now_tp = std::chrono::system_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - started_tp).count();
+
+                    // 获取任务超时时间
+                    auto task_info_result = task_dao_.findById(ti.task_id);
+                    int timeout = 3600;  // 默认超时
+                    if (task_info_result.ok()) {
+                        timeout = task_info_result.value().timeout;
+                    }
+
+                    if (elapsed > timeout) {
+                        spdlog::warn("DagDriver: task instance {} timed out (elapsed={}s, timeout={}s)",
+                                     ti.id, elapsed, timeout);
+                        auto timeout_result = task_instance_dao_.markFinished(
+                            ti.id, "TIMEOUT", -1, "Task execution timed out");
+                        if (!timeout_result.ok()) {
+                            spdlog::error("DagDriver: failed to mark task instance {} as TIMEOUT: {}",
+                                          ti.id, timeout_result.error());
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                spdlog::warn("DagDriver: failed to parse started_at for task instance {}: {}",
+                             ti.id, e.what());
+            }
+        }
+    }
+
+    // 5. Find ready tasks (all upstream SUCCESS)
     auto ready_tasks = DagEngine::findReadyTasks(dag_json, task_statuses);
 
     // 5. For each ready task, dispatch it
@@ -219,7 +266,7 @@ common::result::Result<void> DagDriver::dispatchTask(
     }
 
     // 5. Call Worker's DispatchTask gRPC
-    auto channel = grpc::CreateChannel(worker.address, grpc::InsecureChannelCredentials());
+    auto channel = ::grpc::CreateChannel(worker.address, ::grpc::InsecureChannelCredentials());
     auto stub = taskflow::v1::WorkerService::NewStub(channel);
 
     taskflow::v1::TaskDispatchRequest request;
@@ -240,10 +287,11 @@ common::result::Result<void> DagDriver::dispatchTask(
                          task_instance.id, decrypt_result.error());
         }
     }
+    request.set_workflow_instance_id(task_instance.workflow_instance_id);
     request.set_config_json(config.dump());
 
     taskflow::v1::TaskDispatchResponse response;
-    grpc::ClientContext context;
+    ::grpc::ClientContext context;
     auto grpc_status = stub->DispatchTask(&context, request, &response);
 
     if (!grpc_status.ok()) {

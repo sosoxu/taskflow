@@ -33,10 +33,12 @@ public:
         const std::string& id, const std::string& name, const std::string& type,
         const nlohmann::json& config_json, const std::string& description,
         int timeout, int max_retries, int retry_interval,
-        const nlohmann::json& resource_tags);
+        const nlohmann::json& resource_tags,
+        const std::string& user_id, const std::string& role);
 
     // Delete task (soft delete)
-    common::result::Result<void> deleteTask(const std::string& id);
+    common::result::Result<void> deleteTask(
+        const std::string& id, const std::string& user_id, const std::string& role);
 
 private:
     std::string aes_key_;
