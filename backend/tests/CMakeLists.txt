@@ -4,7 +4,15 @@ add_executable(taskflow_tests
     test_dag_validator.cpp
     test_dispatcher.cpp
     test_cron_parser.cpp
+    test_security_util.cpp
+    test_executor.cpp
     ${CMAKE_SOURCE_DIR}/src/scheduler/engine/dag_engine.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/util/crypto_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/task_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/command_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/script_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/sql_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/log_sink.cpp
 )
 
 target_include_directories(taskflow_tests PRIVATE
@@ -14,6 +22,8 @@ target_include_directories(taskflow_tests PRIVATE
 target_link_libraries(taskflow_tests PRIVATE
     taskflow_common
     Catch2::Catch2WithMain
+    crypt
+    PkgConfig::PQXX
 )
 
 # Register tests

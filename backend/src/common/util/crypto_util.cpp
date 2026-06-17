@@ -76,10 +76,13 @@ common::result::Result<std::vector<unsigned char>> base64Decode(const std::strin
         int c = kTable[static_cast<unsigned char>(encoded[static_cast<size_t>(i + 2)])];
         int d = kTable[static_cast<unsigned char>(encoded[static_cast<size_t>(i + 3)])];
 
-        if (a < 0 || b < 0 || c < 0 || d < 0) {
+        if (a < 0 || b < 0) {
             return common::result::Result<std::vector<unsigned char>>::failure(
                 "Invalid base64 character");
         }
+        // c and d may be -1 for padding '=', treat as 0
+        if (c < 0) c = 0;
+        if (d < 0) d = 0;
 
         unsigned int n = (static_cast<unsigned int>(a) << 18) |
                          (static_cast<unsigned int>(b) << 12) |
