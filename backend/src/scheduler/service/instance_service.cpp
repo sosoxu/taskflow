@@ -1,5 +1,6 @@
 #include "scheduler/service/instance_service.h"
 
+#include <chrono>
 #include <map>
 #include <memory>
 #include <set>
@@ -236,6 +237,7 @@ common::result::Result<void> InstanceService::killTask(
 
             taskflow::v1::TaskCancelResponse response;
             grpc::ClientContext context;
+            context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
             auto grpc_status = stub->CancelTask(&context, request, &response);
 
             if (!grpc_status.ok()) {
@@ -362,6 +364,7 @@ common::result::Result<std::string> InstanceService::getTaskLog(
     request.set_follow(false);
 
     grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(300));
     auto reader = stub->GetTaskLog(&context, request);
 
     std::string log_content;

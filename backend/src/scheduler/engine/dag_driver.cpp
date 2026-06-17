@@ -313,6 +313,7 @@ common::result::Result<void> DagDriver::dispatchTask(
 
     taskflow::v1::TaskDispatchResponse response;
     ::grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
     auto grpc_status = stub->DispatchTask(&context, request, &response);
 
     if (!grpc_status.ok()) {

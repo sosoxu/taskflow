@@ -1,11 +1,21 @@
 server:
   grpc_port: 50052
+  # tls:
+  #   enabled: true
+  #   cert_path: /path/to/cert.pem
+  #   key_path: /path/to/key.pem
+  #   ca_path: /path/to/ca.pem
 
 scheduler:
-  address: "localhost:50051"
+  address: localhost:50051
+  # tls:
+  #   enabled: true
+  #   cert_path: /path/to/cert.pem
+  #   key_path: /path/to/key.pem
+  #   ca_path: /path/to/ca.pem
 
 worker:
-  name: ""
+  name: ""                # 留空则自动生成
   max_tasks: 10
   resource_tags: []
 
@@ -14,5 +24,8 @@ log:
   file_path: logs/worker.log
 
 task_log:
-  dir: logs/tasks
+  dir: logs/tasks         # 任务日志目录
   retention_days: 30
+  # sink_type: elasticsearch  # 预留：file（默认）或 elasticsearch
+  # es_url: http://localhost:9200
+  # es_index: taskflow-logs

@@ -84,14 +84,13 @@ ElasticLogSink::ElasticLogSink(const std::string& base_dir,
 bool ElasticLogSink::write(const std::string& workflow_instance_id,
                             const std::string& task_instance_id,
                             const std::string& data) {
-    // TODO: Push log data to Elasticsearch
-    // For now, fall back to file storage
+    // Elasticsearch push not yet implemented - falling back to file storage
     return file_sink_.write(workflow_instance_id, task_instance_id, data);
 }
 
 std::string ElasticLogSink::read(const std::string& workflow_instance_id,
                                   const std::string& task_instance_id) {
-    // TODO: Read from Elasticsearch
+    // Elasticsearch read not yet implemented - falling back to file storage
     return file_sink_.read(workflow_instance_id, task_instance_id);
 }
 
@@ -101,7 +100,7 @@ bool ElasticLogSink::exists(const std::string& workflow_instance_id,
 }
 
 void ElasticLogSink::cleanup(int retention_days) {
-    // TODO: Cleanup Elasticsearch indices older than retention_days
+    // Elasticsearch index cleanup not yet implemented - delegating to file cleanup
     file_sink_.cleanup(retention_days);
 }
 
@@ -115,7 +114,7 @@ std::unique_ptr<LogSink> createLogSink(const std::string& sink_type,
     if (sink_type == "file" || sink_type.empty()) {
         return std::make_unique<FileLogSink>(base_dir);
     } else if (sink_type == "elasticsearch") {
-        // TODO: Read ES config from worker config
+        // Elasticsearch config will be read from worker config when implemented
         return std::make_unique<ElasticLogSink>(base_dir);
     }
     spdlog::warn("createLogSink: unknown sink type '{}', falling back to file", sink_type);

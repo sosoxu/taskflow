@@ -8,7 +8,7 @@
 #include <fstream>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/daily_file_sink.h>
 #include <spdlog/async.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/server_credentials.h>
@@ -30,7 +30,7 @@ using taskflow::v1::LogChunk;
 static void initLogger(const taskflow::common::config::WorkerLogConfig& log_config) {
     try {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_config.file_path, true);
+        auto file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(log_config.file_path, 0, 0, false, 30);
 
         spdlog::init_thread_pool(8192, 1);
         auto logger = std::make_shared<spdlog::async_logger>(

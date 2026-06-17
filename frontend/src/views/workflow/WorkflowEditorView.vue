@@ -159,12 +159,37 @@ interface DagNodeData {
   task_type: string
   x: number
   y: number
-  param_overrides?: Record<string, any>
+  param_overrides?: Record<string, unknown>
 }
 
 interface DagEdgeData {
   source: string
   target: string
+}
+
+interface ApiDagNode {
+  id: string
+  task_id: string
+  task_name?: string
+  task_type?: string
+  x?: number
+  y?: number
+  param_overrides?: Record<string, unknown>
+}
+
+interface ApiDagEdge {
+  source: string
+  target: string
+}
+
+interface WorkflowPayload {
+  name: string
+  description: string
+  dag: { nodes: unknown[]; edges: unknown[] }
+  schedule_strategy: string
+  cron_enabled: boolean
+  cron_expression?: string
+  target_worker_id?: string
 }
 
 const route = useRoute()
@@ -381,7 +406,7 @@ async function loadWorkflow() {
       const apiEdges = data.dag.edges || []
 
       // Build Vue Flow nodes
-      vfNodes.value = apiNodes.map((n: any, i: number) => {
+      vfNodes.value = apiNodes.map((n: ApiDagNode, i: number) => {
         const nodeData: DagNodeData = {
           id: n.id,
           task_id: n.task_id,
@@ -402,7 +427,7 @@ async function loadWorkflow() {
       })
 
       // Build Vue Flow edges
-      vfEdges.value = apiEdges.map((e: any) => ({
+      vfEdges.value = apiEdges.map((e: ApiDagEdge) => ({
         id: `e-${e.source}-${e.target}`,
         source: e.source,
         target: e.target,
@@ -446,7 +471,7 @@ async function handleSave() {
 
     const dag = { nodes, edges }
 
-    const payload: any = {
+    const payload: WorkflowPayload = {
       name: form.name,
       description: form.description,
       dag,

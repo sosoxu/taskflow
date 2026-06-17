@@ -124,6 +124,20 @@ import { formatTime } from '../../utils/format'
 import type { WorkflowItem } from '../../types/workflow'
 import type { WorkflowInstance } from '../../types/instance'
 
+interface ApiDagNode {
+  id: string
+  task_id: string
+  task_name?: string
+  task_type?: string
+  x?: number
+  y?: number
+}
+
+interface ApiDagEdge {
+  source: string
+  target: string
+}
+
 interface DagNodeData {
   id: string
   task_id: string
@@ -210,7 +224,7 @@ async function fetchWorkflow() {
 
     if (data.dag) {
       const apiNodes = data.dag.nodes || []
-      dagNodes.value = apiNodes.map((n: any, i: number) => ({
+      dagNodes.value = apiNodes.map((n: ApiDagNode, i: number) => ({
         id: n.id,
         task_id: n.task_id,
         task_name: n.task_name || n.task_id,
@@ -218,7 +232,7 @@ async function fetchWorkflow() {
         x: n.x ?? 60 + i * 200,
         y: n.y ?? 60,
       }))
-      dagEdges.value = (data.dag.edges || []).map((e: any) => ({
+      dagEdges.value = (data.dag.edges || []).map((e: ApiDagEdge) => ({
         source: e.source,
         target: e.target,
       }))

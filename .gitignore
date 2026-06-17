@@ -1,29 +1,31 @@
 # Build
-backend/build/
-**/build/
-frontend/node_modules/
-frontend/dist/
+build/
+cmake-build-*/
 *.o
 *.a
-
-# Logs
-backend/logs/
-*.log
+*.so
+*.dylib
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# Config (contain secrets)
+*.yaml
+!*.yaml.example
+
+# Logs
+logs/
+
+# Dependencies
+node_modules/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Config with secrets
-backend/scheduler.yaml
-backend/worker.yaml
-
-# Temp
-*.tmp
-*.bak
+# Generated
+backend/generated/

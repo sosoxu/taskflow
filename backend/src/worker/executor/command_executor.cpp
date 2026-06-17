@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <chrono>
 #include <fstream>
+#include <sstream>
 #include <spdlog/spdlog.h>
 
 namespace taskflow::worker::executor {
@@ -27,6 +28,27 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
     std::string command = config["command"].get<std::string>();
     std::string log_path = log_dir + "/" + task_instance_id + ".log";
 
+    // Split command into argv array for execvp (avoid shell injection)
+    std::vector<std::string> args;
+    std::istringstream iss(command);
+    std::string token;
+    while (iss >> token) {
+        args.push_back(token);
+    }
+
+    if (args.empty()) {
+        result.status = "FAILED";
+        result.exit_code = 1;
+        result.error_message = "Empty command";
+        return result;
+    }
+
+    std::vector<char*> argv;
+    for (auto& arg : args) {
+        argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+
     pid_t pid = fork();
     if (pid < 0) {
         result.status = "FAILED";
@@ -45,7 +67,7 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
         dup2(fd, STDERR_FILENO);
         close(fd);
 
-        execl("/bin/sh", "sh", "-c", command.c_str(), nullptr);
+        execvp(argv[0], argv.data());
         _exit(127);
     }
 

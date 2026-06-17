@@ -1,5 +1,4 @@
-#ifndef TASKFLOW_COMMON_UTIL_CRYPTO_UTIL_H_
-#define TASKFLOW_COMMON_UTIL_CRYPTO_UTIL_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -20,5 +19,3 @@ public:
 };
 
 }  // namespace taskflow::common::util
-
-#endif  // TASKFLOW_COMMON_UTIL_CRYPTO_UTIL_H_
