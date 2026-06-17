@@ -7,6 +7,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ccache 加速重编译
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    message(STATUS "ccache enabled: ${CCACHE_PROGRAM}")
+endif()
+
 # 编译选项
 add_compile_options(-Wall -Wextra -Werror)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -17,6 +24,10 @@ endif()
 
 # 第三方依赖 - 优先使用系统包
 include(FetchContent)
+
+# FetchContent 优化：断开远程更新检查，使用本地缓存
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Don't check for updates on FetchContent repos" FORCE)
+set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/_deps_cache" CACHE PATH "FetchContent cache directory" FORCE)
 
 # spdlog - 优先系统包
 find_package(spdlog CONFIG QUIET)
@@ -66,10 +77,10 @@ endif()
 # Drogon
 find_package(Drogon CONFIG REQUIRED)
 
-# gRPC + Protobuf - 使用 CMake Find 模块
+# gRPC + Protobuf - find gRPC first (it pulls in Protobuf as a dependency)
+find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf REQUIRED)
 find_package(c-ares CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
 
 # libpqxx - 使用 pkg-config
 find_package(PkgConfig REQUIRED)

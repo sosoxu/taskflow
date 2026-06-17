@@ -1,40 +1,43 @@
 # 多阶段构建 - Worker
-# 阶段1: 编译
-FROM ubuntu:24.04 AS builder
+# 基于 taskflow-deps 基础镜像（已预编译 gRPC/Drogon/protobuf 等重依赖）
+# 构建命令: docker build -f Dockerfile.worker -t taskflow-worker:latest .
+
+# 阶段1: 编译项目源码
+FROM taskflow-deps:latest AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# 安装编译工具（基础镜像已有开发头文件和 .so）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git \
-    libdrogon-dev libjsoncpp-dev libmariadb-dev-compat libmariadb-dev \
-    libpqxx-dev libyaml-cpp-dev libspdlog-dev nlohmann-json3-dev \
-    libprotobuf-dev protobuf-compiler protobuf-compiler-grpc \
-    libgrpc++-dev libc-ares-dev libssl-dev \
+    build-essential cmake git ccache \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
+# 先复制 CMake 配置和公共模块（此层可被 Docker 缓存）
 COPY CMakeLists.txt .
-COPY src/ src/
+COPY src/proto/ src/proto/
+COPY src/common/ src/common/
+COPY src/pch.h src/pch.h
 
 RUN mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . -j$(nproc) --target taskflow_common
+
+# 源码变更时只需重编译此层
+COPY src/scheduler/ src/scheduler/
+COPY src/worker/ src/worker/
+
+RUN cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release && \
     cmake --build . -j$(nproc) --target worker
 
 # 阶段2: 运行
-FROM ubuntu:24.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libdrogon1 libjsoncpp5 libmariadb3 libpqxx-7.7 \
-    libyaml-cpp0.8 libspdlog1.15 libprotobuf32 libgrpc++1.51 \
-    libc-ares2 libssl3t64 \
-    && rm -rf /var/lib/apt/lists/*
+FROM taskflow-deps:latest
 
 WORKDIR /app
 
-COPY --from=builder /build/build/worker /app/worker
+COPY --from=builder /build/build/src/worker/worker /app/worker
 COPY worker.yaml.example /app/worker.yaml
 
 RUN mkdir -p /app/logs /app/logs/tasks

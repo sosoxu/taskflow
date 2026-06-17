@@ -17,3 +17,8 @@ target_link_libraries(taskflow_common PUBLIC
     PkgConfig::PQXX
     jwt-cpp::jwt-cpp
 )
+
+# 预编译头加速编译
+target_precompile_headers(taskflow_common PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pch.h
+)

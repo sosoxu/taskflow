@@ -1,0 +1,106 @@
+# TaskFlow 依赖基础镜像
+# 预编译所有 C++ 重依赖（gRPC、Drogon、protobuf 等），只需构建一次
+# 项目 Dockerfile 直接 FROM 此镜像，避免每次重复编译依赖
+#
+# 构建: docker build -f Dockerfile.deps -t taskflow-deps:latest .
+# 推送: docker push taskflow-deps:latest
+
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装编译工具和轻量系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake git pkg-config \
+    libssl-dev libjsoncpp-dev libc-ares-dev libpq-dev libuuid1-dev zlib1g-dev \
+    libspdlog-dev nlohmann-json3-dev libyaml-cpp-dev libpqxx-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================
+# 1. protobuf (从源码编译，确保版本一致)
+# ============================================================
+ARG PROTOBUF_VERSION=28.3
+RUN git clone --depth 1 --branch v${PROTOBUF_VERSION} https://github.com/protocolbuffers/protobuf.git /tmp/protobuf && \
+    cd /tmp/protobuf && mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_INSTALL_PREFIX=/usr/local \
+             -Dprotobuf_BUILD_TESTS=OFF \
+             -Dprotobuf_BUILD_SHARED_LIBS=ON && \
+    cmake --build . -j$(nproc) && cmake --install . && \
+    ldconfig && rm -rf /tmp/protobuf
+
+# ============================================================
+# 2. gRPC (依赖 protobuf，从源码编译)
+# ============================================================
+ARG GRPC_VERSION=1.65.5
+RUN git clone --depth 1 --branch v${GRPC_VERSION} https://github.com/grpc/grpc.git /tmp/grpc && \
+    cd /tmp/grpc && git submodule update --init --recursive --depth 1 && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_INSTALL_PREFIX=/usr/local \
+             -DgRPC_BUILD_TESTS=OFF \
+             -DgRPC_BUILD_CSHARP_EXT=OFF \
+             -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+             -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
+             -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+             -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
+             -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
+             -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
+             -DgRPC_PROTOBUF_PROVIDER=package \
+             -DgRPC_CA_PROVIDER=package \
+             -DgRPC_SSL_PROVIDER=package && \
+    cmake --build . -j$(nproc) && cmake --install . && \
+    ldconfig && rm -rf /tmp/grpc
+
+# ============================================================
+# 3. Drogon (从源码编译)
+# ============================================================
+ARG DROGON_VERSION=1.8.7
+RUN git clone --depth 1 --branch v${DROGON_VERSION} https://github.com/drogonframework/drogon.git /tmp/drogon && \
+    cd /tmp/drogon && git submodule update --init --recursive --depth 1 && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_INSTALL_PREFIX=/usr/local \
+             -DBUILD_TESTING=OFF \
+             -DBUILD_EXAMPLES=OFF \
+             -DCOZ_EXCLUDED=ON && \
+    cmake --build . -j$(nproc) && cmake --install . && \
+    ldconfig && rm -rf /tmp/drogon
+
+# ============================================================
+# 4. jwt-cpp (header-only，从源码安装)
+# ============================================================
+ARG JWT_CPP_VERSION=0.7.0
+RUN git clone --depth 1 --branch v${JWT_CPP_VERSION} https://github.com/Thalhammer/jwt-cpp.git /tmp/jwt-cpp && \
+    cd /tmp/jwt-cpp && mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_INSTALL_PREFIX=/usr/local \
+             -DJWT_BUILD_EXAMPLES=OFF \
+             -DJWT_BUILD_TESTS=OFF && \
+    cmake --install . && \
+    rm -rf /tmp/jwt-cpp
+
+# ============================================================
+# 运行时镜像：只包含编译好的 .so 和头文件
+# ============================================================
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 运行时轻量依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3t64 libjsoncpp5 libc-ares2 libpq5 libuuid1 zlib1g \
+    libspdlog1.15 libyaml-cpp0.8 libpqxx-7.7 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 从 builder 复制编译产物
+COPY --from=builder /usr/local /usr/local
+RUN ldconfig
+
+# 验证关键库可被找到
+RUN pkg-config --modversion libpqxx && \
+    ls /usr/local/lib/libdrogon.so && \
+    ls /usr/local/lib/libgrpc++.so && \
+    ls /usr/local/lib/libprotobuf.so && \
+    which protoc && \
+    echo "All dependencies verified OK"

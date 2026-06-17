@@ -45,6 +45,13 @@ case "${1:-}" in
         echo "构建 TaskFlow 镜像..."
         docker compose build
         ;;
+    deps)
+        echo "构建依赖基础镜像（只需执行一次）..."
+        docker build -f backend/Dockerfile.deps -t taskflow-deps:latest backend/
+        echo ""
+        echo "依赖基础镜像构建完成: taskflow-deps:latest"
+        echo "现在可以运行 ./start.sh build 构建项目镜像"
+        ;;
     logs)
         docker compose logs -f ${2:-}
         ;;
@@ -56,12 +63,13 @@ case "${1:-}" in
         docker compose down -v
         ;;
     *)
-        echo "用法: $0 {start|stop|restart|build|logs|status|clean}"
+        echo "用法: $0 {start|stop|restart|build|deps|logs|status|clean}"
         echo ""
         echo "  start    - 启动所有服务"
         echo "  stop     - 停止所有服务"
         echo "  restart  - 重启所有服务"
-        echo "  build    - 构建镜像"
+        echo "  build    - 构建项目镜像（需先执行 deps）"
+        echo "  deps     - 构建依赖基础镜像（只需执行一次）"
         echo "  logs     - 查看日志 (可指定服务名)"
         echo "  status   - 查看服务状态"
         echo "  clean    - 清理所有容器和数据卷"

@@ -88,7 +88,28 @@ CREATE INDEX idx_wf_instances_status ON workflow_instances(status);
 CREATE INDEX idx_wf_instances_created ON workflow_instances(created_at DESC);
 
 -- ============================================================
--- 5. 任务执行实例表
+-- 5. 执行节点表（必须在 task_instances 之前，因为 FK 引用）
+-- ============================================================
+CREATE TABLE workers (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(64) NOT NULL,
+    address         VARCHAR(256) NOT NULL UNIQUE,
+    status          VARCHAR(8) NOT NULL DEFAULT 'online'
+                        CHECK (status IN ('online', 'offline')),
+    cpu_usage       DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    memory_usage    DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    running_tasks   INTEGER NOT NULL DEFAULT 0,
+    max_tasks       INTEGER NOT NULL DEFAULT 10,
+    resource_tags   JSONB NOT NULL DEFAULT '[]',
+    last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    registered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_workers_status ON workers(status);
+CREATE UNIQUE INDEX idx_workers_name ON workers(name);
+
+-- ============================================================
+-- 6. 任务执行实例表
 -- ============================================================
 CREATE TABLE task_instances (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -113,27 +134,6 @@ CREATE TABLE task_instances (
 CREATE INDEX idx_task_instances_wf_instance ON task_instances(workflow_instance_id);
 CREATE INDEX idx_task_instances_status ON task_instances(status);
 CREATE INDEX idx_task_instances_worker ON task_instances(worker_id);
-
--- ============================================================
--- 6. 执行节点表
--- ============================================================
-CREATE TABLE workers (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            VARCHAR(64) NOT NULL,
-    address         VARCHAR(256) NOT NULL UNIQUE,
-    status          VARCHAR(8) NOT NULL DEFAULT 'online'
-                        CHECK (status IN ('online', 'offline')),
-    cpu_usage       DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    memory_usage    DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    running_tasks   INTEGER NOT NULL DEFAULT 0,
-    max_tasks       INTEGER NOT NULL DEFAULT 10,
-    resource_tags   JSONB NOT NULL DEFAULT '[]',
-    last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    registered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_workers_status ON workers(status);
-CREATE UNIQUE INDEX idx_workers_name ON workers(name);
 
 -- ============================================================
 -- 7. 定时任务表
