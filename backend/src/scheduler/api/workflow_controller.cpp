@@ -117,7 +117,17 @@ void WorkflowController::listWorkflows(
     }
 
     std::string keyword = std::string(req->getParameter("keyword"));
-    std::string creator_id = std::string(req->getParameter("creator_id"));
+
+    // Resource-level permission: non-admin users can only see their own workflows
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    std::string creator_id;
+    if (role != "admin") {
+        creator_id = user_id;
+    } else {
+        // Admin can optionally filter by creator_id
+        creator_id = std::string(req->getParameter("creator_id"));
+    }
 
     auto result = workflow_service_->listWorkflows(page, page_size, keyword, creator_id);
 
