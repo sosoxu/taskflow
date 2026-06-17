@@ -65,7 +65,9 @@ void WorkflowController::createWorkflow(
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
 
     nlohmann::json dag_json;
-    if ((*json).isMember("dag_json")) {
+    if ((*json).isMember("dag")) {
+        dag_json = jsoncppToNlohmann((*json)["dag"]);
+    } else if ((*json).isMember("dag_json")) {
         dag_json = jsoncppToNlohmann((*json)["dag_json"]);
     }
 
@@ -147,7 +149,9 @@ void WorkflowController::updateWorkflow(
     std::string role = req->getAttributes()->get<std::string>("role");
 
     nlohmann::json dag_json;
-    if ((*json).isMember("dag_json")) {
+    if ((*json).isMember("dag")) {
+        dag_json = jsoncppToNlohmann((*json)["dag"]);
+    } else if ((*json).isMember("dag_json")) {
         dag_json = jsoncppToNlohmann((*json)["dag_json"]);
     }
 
