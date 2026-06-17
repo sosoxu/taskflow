@@ -65,7 +65,9 @@ void TaskController::createTask(
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
 
     nlohmann::json config_json;
-    if ((*json).isMember("config_json")) {
+    if ((*json).isMember("config")) {
+        config_json = jsoncppToNlohmann((*json)["config"]);
+    } else if ((*json).isMember("config_json")) {
         config_json = jsoncppToNlohmann((*json)["config_json"]);
     }
 
@@ -155,7 +157,9 @@ void TaskController::updateTask(
     std::string role = req->getAttributes()->get<std::string>("role");
 
     nlohmann::json config_json;
-    if ((*json).isMember("config_json")) {
+    if ((*json).isMember("config")) {
+        config_json = jsoncppToNlohmann((*json)["config"]);
+    } else if ((*json).isMember("config_json")) {
         config_json = jsoncppToNlohmann((*json)["config_json"]);
     }
 
