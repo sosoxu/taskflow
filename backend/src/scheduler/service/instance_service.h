@@ -35,6 +35,9 @@ public:
     common::result::Result<nlohmann::json> listInstances(
         const std::string& workflow_id, int page, int page_size);
 
+    // List all workflow instances with pagination
+    common::result::Result<nlohmann::json> listAllInstances(int page, int page_size);
+
     // Get task log content (read from Worker via gRPC)
     common::result::Result<std::string> getTaskLog(
         const std::string& instance_id, const std::string& task_instance_id);

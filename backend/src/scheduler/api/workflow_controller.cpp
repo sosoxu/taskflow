@@ -59,6 +59,9 @@ void WorkflowController::createWorkflow(
     std::string name = (*json)["name"].asString();
     std::string description = (*json).get("description", "").asString();
     std::string schedule_strategy = (*json)["schedule_strategy"].asString();
+    if (schedule_strategy.empty()) {
+        schedule_strategy = "random";
+    }
     std::string target_worker_id = (*json).get("target_worker_id", "").asString();
     std::string cron_expression = (*json).get("cron_expression", "").asString();
     bool cron_enabled = (*json).get("cron_enabled", false).asBool();

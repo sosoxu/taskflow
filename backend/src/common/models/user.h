@@ -39,7 +39,6 @@ struct User {
         return nlohmann::json{
             {"id", id},
             {"username", username},
-            {"password_hash", "***"},
             {"role", role},
             {"created_at", created_at},
             {"updated_at", updated_at}

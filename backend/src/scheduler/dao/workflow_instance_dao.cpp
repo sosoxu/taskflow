@@ -129,4 +129,20 @@ common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowIn
         });
 }
 
+common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowInstanceDao::listAll(int offset, int limit) {
+    return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::WorkflowInstance>>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::WorkflowInstance>> {
+            auto res = txn.exec_params(
+                "SELECT * FROM workflow_instances ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+                limit, offset);
+
+            std::vector<common::models::WorkflowInstance> instances;
+            for (const auto& row : res) {
+                instances.push_back(common::models::WorkflowInstance::fromRow(row));
+            }
+
+            return instances;
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

@@ -14,6 +14,9 @@ public:
     // List users with pagination
     common::result::Result<nlohmann::json> listUsers(int page, int page_size);
 
+    // Get user by ID
+    common::result::Result<nlohmann::json> getUser(const std::string& id);
+
     // Create user (admin creates new user)
     common::result::Result<nlohmann::json> createUser(
         const std::string& username, const std::string& password, const std::string& role);

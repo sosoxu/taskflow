@@ -191,6 +191,33 @@ void InstanceController::listInstances(
     sendSuccess(std::move(callback), result.value());
 }
 
+void InstanceController::listAllInstances(
+    const drogon::HttpRequestPtr& req,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
+
+    int page = 1;
+    int page_size = 10;
+
+    std::string page_str = std::string(req->getParameter("page"));
+    std::string page_size_str = std::string(req->getParameter("page_size"));
+
+    if (!page_str.empty()) {
+        try { page = std::stoi(page_str); } catch (...) {}
+    }
+    if (!page_size_str.empty()) {
+        try { page_size = std::stoi(page_size_str); } catch (...) {}
+    }
+
+    auto result = instance_service_->listAllInstances(page, page_size);
+
+    if (!result.ok()) {
+        sendError(std::move(callback), 400, 50001, result.error());
+        return;
+    }
+
+    sendSuccess(std::move(callback), result.value());
+}
+
 void InstanceController::getTaskLog(
     const drogon::HttpRequestPtr&,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,

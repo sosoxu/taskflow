@@ -63,8 +63,13 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
         name, description, dag_json, schedule_strategy,
         target_worker_id, cron_expression, cron_enabled, creator_id);
     if (!createResult.ok()) {
+        std::string error = createResult.error();
+        if (error.find("duplicate key") != std::string::npos) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Workflow name '" + name + "' already exists");
+        }
         return common::result::Result<nlohmann::json>::failure(
-            "Failed to create workflow: " + createResult.error());
+            "Failed to create workflow: " + error);
     }
 
     // 5. If cron_enabled && !cron_expression.empty(), create CronJob

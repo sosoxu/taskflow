@@ -37,6 +37,14 @@ common::result::Result<nlohmann::json> UserService::listUsers(int page, int page
     return response;
 }
 
+common::result::Result<nlohmann::json> UserService::getUser(const std::string& id) {
+    auto userResult = user_dao_.findById(id);
+    if (!userResult.ok()) {
+        return common::result::Result<nlohmann::json>::failure("User not found: " + userResult.error());
+    }
+    return userResult.value().toSafeJson();
+}
+
 common::result::Result<nlohmann::json> UserService::createUser(
     const std::string& username, const std::string& password, const std::string& role) {
 

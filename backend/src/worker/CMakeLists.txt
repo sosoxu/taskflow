@@ -13,4 +13,5 @@ target_link_libraries(worker PRIVATE
     taskflow_proto
     gRPC::grpc++
     PkgConfig::PQXX
+    Drogon::Drogon
 )

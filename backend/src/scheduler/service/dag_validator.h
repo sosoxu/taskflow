@@ -14,7 +14,8 @@ public:
     DagValidator() = delete;
 
     // Validate a DAG JSON structure
-    // Expected format: {"nodes": [{"id": "n1", "task_id": "t1"}, ...], "edges": [{"source": "n1", "target": "n2"}, ...]}
+    // Expected format: {"nodes": [{"id": "n1", "task_id": "t1", "dependencies": []}, ...], "edges": [{"source": "n1", "target": "n2"}, ...]}
+    // Dependencies can be specified either via "edges" array or "dependencies" field on each node
     // Validations:
     // 1. Must have "nodes" array with at least 1 node
     // 2. Each node must have "id" and "task_id"
@@ -74,6 +75,25 @@ public:
             }
         }
 
+        // Also support "dependencies" field on nodes
+        for (const auto& node : nodes) {
+            if (node.contains("dependencies") && node["dependencies"].is_array()) {
+                std::string node_id = node["id"].get<std::string>();
+                for (const auto& dep : node["dependencies"]) {
+                    if (!dep.is_string()) continue;
+                    std::string dep_id = dep.get<std::string>();
+                    if (node_ids.find(dep_id) == node_ids.end()) {
+                        return common::result::Result<void>::failure(
+                            "Dependency '" + dep_id + "' in node '" + node_id +
+                            "' does not reference an existing node ID");
+                    }
+                    adj[dep_id].push_back(node_id);
+                    connected_nodes.insert(dep_id);
+                    connected_nodes.insert(node_id);
+                }
+            }
+        }
+
         // 4. No cycles (DFS cycle detection using 3-color marking)
         // WHITE=0, GRAY=1, BLACK=2
         std::unordered_map<std::string, int> color;
@@ -89,11 +109,13 @@ public:
             }
         }
 
-        // 5. No isolated nodes (every node must have at least one edge, unless there's only 1 node)
-        if (node_ids.size() > 1) {
+        // 5. No isolated nodes: a node is isolated if it has no edges AND other nodes DO have edges
+        //    (purely parallel DAGs where no nodes have edges are valid)
+        if (!connected_nodes.empty()) {
             for (const auto& id : node_ids) {
                 if (connected_nodes.find(id) == connected_nodes.end()) {
-                    return common::result::Result<void>::failure("Node '" + id + "' is isolated (has no edges)");
+                    return common::result::Result<void>::failure(
+                        "Node '" + id + "' is isolated (has no edges connecting it to other nodes)");
                 }
             }
         }

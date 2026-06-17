@@ -115,6 +115,32 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
     if (WIFEXITED(status)) {
         result.exit_code = WEXITSTATUS(status);
         result.status = (result.exit_code == 0) ? "SUCCESS" : "FAILED";
+        if (result.exit_code != 0) {
+            // Read last few lines of log for error message
+            std::ifstream log_file(log_path);
+            if (log_file.is_open()) {
+                std::string line;
+                std::string last_lines;
+                int line_count = 0;
+                while (std::getline(log_file, line)) {
+                    if (!last_lines.empty()) last_lines += "\n";
+                    last_lines += line;
+                    line_count++;
+                    if (line_count > 10) {
+                        size_t pos = last_lines.find('\n');
+                        if (pos != std::string::npos) {
+                            last_lines = last_lines.substr(pos + 1);
+                        }
+                        line_count--;
+                    }
+                }
+                result.error_message = last_lines.empty()
+                    ? "Script exited with code " + std::to_string(result.exit_code)
+                    : last_lines;
+            } else {
+                result.error_message = "Script exited with code " + std::to_string(result.exit_code);
+            }
+        }
     } else if (WIFSIGNALED(status)) {
         result.exit_code = -WTERMSIG(status);
         result.status = "FAILED";

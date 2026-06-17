@@ -36,8 +36,13 @@ common::result::Result<nlohmann::json> TaskService::createTask(
         name, type, encrypted_config, description,
         timeout, max_retries, retry_interval, resource_tags, creator_id);
     if (!createResult.ok()) {
+        std::string error = createResult.error();
+        if (error.find("duplicate key") != std::string::npos) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Task name '" + name + "' already exists");
+        }
         return common::result::Result<nlohmann::json>::failure(
-            "Failed to create task: " + createResult.error());
+            "Failed to create task: " + error);
     }
 
     // Fetch the created task

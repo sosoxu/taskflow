@@ -318,6 +318,28 @@ common::result::Result<nlohmann::json> InstanceService::listInstances(
     return response;
 }
 
+common::result::Result<nlohmann::json> InstanceService::listAllInstances(int page, int page_size) {
+    if (page < 1) page = 1;
+    if (page_size < 1) page_size = 10;
+
+    int offset = (page - 1) * page_size;
+    auto result = workflow_instance_dao_.listAll(offset, page_size);
+    if (!result.ok()) {
+        return common::result::Result<nlohmann::json>::failure(result.error());
+    }
+
+    nlohmann::json instances = nlohmann::json::array();
+    for (const auto& inst : result.value()) {
+        instances.push_back(inst.toJson());
+    }
+
+    return nlohmann::json{
+        {"instances", instances},
+        {"page", page},
+        {"page_size", page_size}
+    };
+}
+
 common::result::Result<std::string> InstanceService::getTaskLog(
     const std::string& instance_id, const std::string& task_instance_id) {
 

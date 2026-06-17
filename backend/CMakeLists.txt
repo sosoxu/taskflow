@@ -14,8 +14,8 @@ if(CCACHE_PROGRAM)
     message(STATUS "ccache enabled: ${CCACHE_PROGRAM}")
 endif()
 
-# 编译选项
-add_compile_options(-Wall -Wextra -Werror)
+# 编译选项（-Werror 仅用于项目源码，通过 target 设置，不影响 FetchContent 第三方库）
+add_compile_options(-Wall -Wextra)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-g -O0)
 else()
@@ -134,6 +134,11 @@ target_link_libraries(taskflow_proto PUBLIC
 add_subdirectory(src/common)
 add_subdirectory(src/scheduler)
 add_subdirectory(src/worker)
+
+# 为项目目标添加 -Werror（不影响第三方库）
+target_compile_options(taskflow_common PRIVATE -Werror)
+target_compile_options(scheduler PRIVATE -Werror)
+target_compile_options(worker PRIVATE -Werror)
 
 # Testing
 option(BUILD_TESTS "Build tests" ON)

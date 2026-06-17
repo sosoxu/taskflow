@@ -27,6 +27,8 @@ public:
     common::result::Result<std::vector<common::models::WorkflowInstance>> listByWorkflow(
         const std::string& workflow_id, int offset, int limit);
 
+    common::result::Result<std::vector<common::models::WorkflowInstance>> listAll(int offset, int limit);
+
     common::result::Result<std::vector<common::models::WorkflowInstance>> listActive();
 };
 

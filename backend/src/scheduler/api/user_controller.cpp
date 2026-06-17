@@ -37,6 +37,21 @@ void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
 
 }  // namespace
 
+void UserController::getCurrentUser(
+    const drogon::HttpRequestPtr& req,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
+
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+
+    auto result = user_service_->getUser(user_id);
+    if (!result.ok()) {
+        sendError(std::move(callback), 404, 40405, result.error());
+        return;
+    }
+
+    sendSuccess(std::move(callback), result.value());
+}
+
 UserController::UserController(std::shared_ptr<service::UserService> user_service)
     : user_service_(std::move(user_service)) {}
 

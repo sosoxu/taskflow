@@ -18,6 +18,7 @@ public:
     ADD_METHOD_TO(InstanceController::killTask, "/api/v1/instances/{id}/tasks/{taskInstanceId}/kill", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::getInstance, "/api/v1/instances/{id}", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::listInstances, "/api/v1/workflows/{id}/instances", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(InstanceController::listAllInstances, "/api/v1/instances", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::getTaskLog, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::streamTaskLog, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs/stream", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     METHOD_LIST_END
@@ -51,6 +52,9 @@ public:
     void listInstances(const drogon::HttpRequestPtr& req,
                        std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                        const std::string& id);
+
+    void listAllInstances(const drogon::HttpRequestPtr& req,
+                          std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 
     void getTaskLog(const drogon::HttpRequestPtr& req,
                     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
