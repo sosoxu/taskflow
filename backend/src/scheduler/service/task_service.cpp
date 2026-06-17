@@ -107,19 +107,7 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     const nlohmann::json& resource_tags,
     const std::string& user_id, const std::string& role) {
 
-    // Validate type
-    if (type != "command" && type != "script" && type != "sql") {
-        return common::result::Result<nlohmann::json>::failure(
-            "Invalid task type: must be one of command, script, sql");
-    }
-
-    // Validate config
-    auto validateResult = validateConfig(type, config_json);
-    if (!validateResult.ok()) {
-        return common::result::Result<nlohmann::json>::failure(validateResult.error());
-    }
-
-    // Find existing task to check ownership
+    // Find existing task to check ownership and get defaults
     auto existingTaskResult = task_dao_.findById(id);
     if (!existingTaskResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -131,8 +119,25 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
         return common::result::Result<nlohmann::json>::failure("权限不足，只能编辑自己创建的任务");
     }
 
+    // Use existing values for fields not provided
+    std::string effective_type = type.empty() ? existing_task.type : type;
+    std::string effective_name = name.empty() ? existing_task.name : name;
+    nlohmann::json effective_config = config_json.is_null() ? existing_task.config_json : config_json;
+
+    // Validate type
+    if (effective_type != "command" && effective_type != "script" && effective_type != "sql") {
+        return common::result::Result<nlohmann::json>::failure(
+            "Invalid task type: must be one of command, script, sql");
+    }
+
+    // Validate config
+    auto validateResult = validateConfig(effective_type, effective_config);
+    if (!validateResult.ok()) {
+        return common::result::Result<nlohmann::json>::failure(validateResult.error());
+    }
+
     // Encrypt sensitive fields
-    auto encryptResult = encryptSensitiveFields(config_json, type);
+    auto encryptResult = encryptSensitiveFields(effective_config, effective_type);
     if (!encryptResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(encryptResult.error());
     }
@@ -141,7 +146,7 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
 
     // Update task via DAO (version auto-increment is handled in DAO)
     auto updateResult = task_dao_.update(
-        id, name, type, encrypted_config, description,
+        id, effective_name, effective_type, encrypted_config, description,
         timeout, max_retries, retry_interval, resource_tags);
     if (!updateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -156,7 +161,7 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     }
 
     auto taskJson = taskResult.value().toJson();
-    taskJson["config_json"] = maskSensitiveFields(taskJson["config_json"], type);
+    taskJson["config_json"] = maskSensitiveFields(taskJson["config_json"], effective_type);
 
     return taskJson;
 }
@@ -198,14 +203,18 @@ common::result::Result<void> TaskService::validateConfig(
                 "Config for script type must have 'script_content' field");
         }
     } else if (type == "sql") {
-        static const std::array<std::string, 6> required_fields = {
-            "db_host", "db_port", "db_name", "db_user", "db_password", "sql_statement"
+        static const std::array<std::string, 5> required_string_fields = {
+            "db_host", "db_name", "db_user", "db_password", "sql_statement"
         };
-        for (const auto& field : required_fields) {
+        for (const auto& field : required_string_fields) {
             if (!config.contains(field) || !config[field].is_string()) {
                 return common::result::Result<void>::failure(
                     "Config for sql type must have '" + field + "' field");
             }
+        }
+        if (!config.contains("db_port") || !(config["db_port"].is_string() || config["db_port"].is_number())) {
+            return common::result::Result<void>::failure(
+                "Config for sql type must have 'db_port' field");
         }
     }
 

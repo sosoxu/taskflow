@@ -3,13 +3,25 @@
 #include <memory>
 #include <thread>
 #include <fstream>
+#include <csignal>
+#include <atomic>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/daily_file_sink.h>
 #include <spdlog/async.h>
 #include <drogon/drogon.h>
+#include <drogon/HttpRequest.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/server_credentials.h>
+
+// Specialize fromRequest for std::string to prevent Drogon LOG_ERROR
+// when path parameters are missing (e.g., after filter rejects request)
+namespace drogon {
+template <>
+inline std::string fromRequest<std::string>(const HttpRequest&) {
+    return std::string();
+}
+}  // namespace drogon
 
 #include "common/config/scheduler_config.h"
 #include "common/database/database_manager.h"
@@ -217,14 +229,37 @@ int main(int argc, char* argv[]) {
     drogon::app().registerController(workerCtrl);
 
     spdlog::info("TaskFlow Scheduler 启动完成");
+
+    // Install signal handlers for graceful shutdown
+    std::atomic<bool> shutdown_requested{false};
+    std::signal(SIGTERM, [](int) {
+        spdlog::info("Received SIGTERM, initiating graceful shutdown...");
+        drogon::app().quit();
+    });
+    std::signal(SIGINT, [](int) {
+        spdlog::info("Received SIGINT, initiating graceful shutdown...");
+        drogon::app().quit();
+    });
+
     drogon::app().run();
 
-    // 清理
+    spdlog::info("Drogon 已退出，开始清理资源...");
+
+    // 清理（按逆序停止后台线程）
     cron_scheduler.stop();
-    leader_election->stop();
+    spdlog::info("CronScheduler 已停止");
     dag_driver.stop();
+    spdlog::info("DagDriver 已停止");
     heartbeat_checker.stop();
+    spdlog::info("HeartbeatChecker 已停止");
+    leader_election->stop();
+    spdlog::info("LeaderElection 已停止");
     grpc_server->Shutdown();
+    spdlog::info("gRPC 服务已停止");
+
+    // 显式关闭数据库连接池（在静态析构之前）
+    taskflow::common::database::DatabaseManager::instance().shutdown();
+    spdlog::info("TaskFlow Scheduler 已关闭");
 
     return 0;
 }

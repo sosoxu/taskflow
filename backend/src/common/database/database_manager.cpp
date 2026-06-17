@@ -9,7 +9,18 @@ DatabaseManager& DatabaseManager::instance() {
 }
 
 DatabaseManager::~DatabaseManager() {
-    shutdown();
+    // Do NOT call shutdown() here - it can deadlock during static destruction.
+    // Call shutdown() explicitly before main() returns instead.
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shutdown_ = true;
+        while (!pool_.empty()) {
+            pool_.pop();
+        }
+        cv_.notify_all();
+    } catch (...) {
+        // Best effort during destruction
+    }
 }
 
 void DatabaseManager::init(const std::string& connection_string, int min_conn, int max_conn) {
@@ -83,6 +94,7 @@ void DatabaseManager::returnConnection(std::unique_ptr<pqxx::connection> conn) {
 
 void DatabaseManager::shutdown() {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (shutdown_) return;  // Already shut down
     shutdown_ = true;
 
     while (!pool_.empty()) {

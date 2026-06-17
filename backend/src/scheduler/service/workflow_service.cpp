@@ -15,10 +15,28 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
     bool cron_enabled,
     const std::string& creator_id) {
 
-    // 1. Validate DAG
+    // 1. Validate DAG structure
     auto dagResult = DagValidator::validate(dag_json);
     if (!dagResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(dagResult.error());
+    }
+
+    // 1b. Validate that all task_ids exist and are not deleted
+    if (dag_json.contains("nodes") && dag_json["nodes"].is_array()) {
+        for (const auto& node : dag_json["nodes"]) {
+            if (node.contains("task_id") && node["task_id"].is_string()) {
+                std::string tid = node["task_id"].get<std::string>();
+                auto taskResult = task_dao_.findById(tid);
+                if (!taskResult.ok()) {
+                    return common::result::Result<nlohmann::json>::failure(
+                        "Task not found for node '" + node.value("id", "") + "': " + taskResult.error());
+                }
+                if (taskResult.value().deleted) {
+                    return common::result::Result<nlohmann::json>::failure(
+                        "Task '" + taskResult.value().name + "' has been deleted and cannot be used in workflow");
+                }
+            }
+        }
     }
 
     // 2. Validate schedule_strategy
@@ -116,7 +134,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     bool cron_enabled,
     const std::string& user_id, const std::string& role) {
 
-    // Find existing workflow to check ownership
+    // Find existing workflow to check ownership and get defaults
     auto existingWfResult = workflow_dao_.findById(id);
     if (!existingWfResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -128,20 +146,43 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
         return common::result::Result<nlohmann::json>::failure("权限不足，只能编辑自己创建的工作流");
     }
 
-    // Validate DAG
-    auto dagResult = DagValidator::validate(dag_json);
+    // Use existing values for fields not provided
+    std::string effective_name = name.empty() ? existing_workflow.name : name;
+    std::string effective_strategy = schedule_strategy.empty() ? existing_workflow.schedule_strategy : schedule_strategy;
+    nlohmann::json effective_dag = dag_json.is_null() ? existing_workflow.dag_json : dag_json;
+
+    // Validate DAG structure
+    auto dagResult = DagValidator::validate(effective_dag);
     if (!dagResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(dagResult.error());
     }
 
+    // Validate that all task_ids exist and are not deleted
+    if (effective_dag.contains("nodes") && effective_dag["nodes"].is_array()) {
+        for (const auto& node : effective_dag["nodes"]) {
+            if (node.contains("task_id") && node["task_id"].is_string()) {
+                std::string tid = node["task_id"].get<std::string>();
+                auto taskResult = task_dao_.findById(tid);
+                if (!taskResult.ok()) {
+                    return common::result::Result<nlohmann::json>::failure(
+                        "Task not found for node '" + node.value("id", "") + "': " + taskResult.error());
+                }
+                if (taskResult.value().deleted) {
+                    return common::result::Result<nlohmann::json>::failure(
+                        "Task '" + taskResult.value().name + "' has been deleted and cannot be used in workflow");
+                }
+            }
+        }
+    }
+
     // Validate schedule_strategy
-    if (schedule_strategy != "random" && schedule_strategy != "load_balance" && schedule_strategy != "specified") {
+    if (effective_strategy != "random" && effective_strategy != "load_balance" && effective_strategy != "specified") {
         return common::result::Result<nlohmann::json>::failure(
             "Invalid schedule_strategy: must be one of random, load_balance, specified");
     }
 
     // If schedule_strategy == "specified", check target_worker_id exists
-    if (schedule_strategy == "specified") {
+    if (effective_strategy == "specified") {
         if (target_worker_id.empty()) {
             return common::result::Result<nlohmann::json>::failure(
                 "target_worker_id is required when schedule_strategy is 'specified'");
@@ -155,7 +196,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
 
     // Update workflow via DAO (version auto-increment is handled in DAO)
     auto updateResult = workflow_dao_.update(
-        id, name, description, dag_json, schedule_strategy,
+        id, effective_name, description, effective_dag, effective_strategy,
         target_worker_id, cron_expression, cron_enabled);
     if (!updateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(

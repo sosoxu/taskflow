@@ -25,20 +25,24 @@ void LeaderElection::stop() {
     }
 
     // Release the lock if we are the leader
-    if (leader_) {
+    if (leader_ && lock_conn_ && lock_conn_->is_open()) {
         try {
-            auto conn = common::database::DatabaseManager::instance().getConnection();
-            if (conn) {
-                pqxx::nontransaction txn(*conn);
-                txn.exec_params("SELECT pg_advisory_unlock($1)", lock_id_);
-                common::database::DatabaseManager::instance().returnConnection(
-                    std::move(conn));
-            }
+            pqxx::nontransaction txn(*lock_conn_);
+            txn.exec_params("SELECT pg_advisory_unlock($1)", lock_id_);
         } catch (const std::exception& e) {
             spdlog::warn("LeaderElection: failed to release lock on stop: {}",
                          e.what());
         }
         leader_ = false;
+    }
+
+    // Close the dedicated connection
+    if (lock_conn_) {
+        try {
+            lock_conn_->close();
+        } catch (...) {
+        }
+        lock_conn_.reset();
     }
 
     spdlog::info("LeaderElection stopped");
@@ -48,38 +52,70 @@ bool LeaderElection::isLeader() const {
     return leader_.load();
 }
 
+void LeaderElection::ensureConnection() {
+    if (!lock_conn_ || !lock_conn_->is_open()) {
+        auto conn = common::database::DatabaseManager::instance().getConnection();
+        // Keep this connection dedicated for advisory lock - do NOT return to pool
+        lock_conn_ = std::move(conn);
+    }
+}
+
+bool LeaderElection::tryAcquireLock() {
+    try {
+        ensureConnection();
+        if (!lock_conn_ || !lock_conn_->is_open()) {
+            return false;
+        }
+
+        pqxx::nontransaction txn(*lock_conn_);
+        auto res =
+            txn.exec_params("SELECT pg_try_advisory_lock($1)", lock_id_);
+        bool acquired = res[0][0].as<bool>();
+        return acquired;
+    } catch (const std::exception& e) {
+        spdlog::error("LeaderElection: exception trying to acquire lock: {}",
+                      e.what());
+        // Reset connection on error
+        if (lock_conn_) {
+            try { lock_conn_->close(); } catch (...) {}
+            lock_conn_.reset();
+        }
+        return false;
+    }
+}
+
+bool LeaderElection::renewLock() {
+    // Advisory locks are session-level: as long as the connection stays open,
+    // the lock is held. We just verify the connection is still alive.
+    try {
+        ensureConnection();
+        if (!lock_conn_ || !lock_conn_->is_open()) {
+            return false;
+        }
+        // Verify connection is still alive with a lightweight query
+        pqxx::nontransaction txn(*lock_conn_);
+        auto res = txn.exec("SELECT 1");
+        return true;
+    } catch (const std::exception& e) {
+        spdlog::error("LeaderElection: connection lost during renewal: {}",
+                      e.what());
+        // Connection lost means lock is also lost
+        if (lock_conn_) {
+            try { lock_conn_->close(); } catch (...) {}
+            lock_conn_.reset();
+        }
+        return false;
+    }
+}
+
 void LeaderElection::electionLoop() {
     while (running_) {
         if (leader_) {
-            // Renew: unlock then re-lock
-            try {
-                auto conn =
-                    common::database::DatabaseManager::instance().getConnection();
-                if (conn) {
-                    pqxx::nontransaction txn(*conn);
-                    txn.exec_params("SELECT pg_advisory_unlock($1)", lock_id_);
-                    auto res = txn.exec_params(
-                        "SELECT pg_try_advisory_lock($1)", lock_id_);
-                    bool acquired = res[0][0].as<bool>();
-                    common::database::DatabaseManager::instance().returnConnection(
-                        std::move(conn));
-
-                    if (!acquired) {
-                        leader_ = false;
-                        spdlog::warn(
-                            "LeaderElection: failed to renew advisory lock, "
-                            "lost leadership");
-                    }
-                } else {
-                    leader_ = false;
-                    spdlog::warn(
-                        "LeaderElection: no DB connection, lost leadership");
-                }
-            } catch (const std::exception& e) {
+            // Renew: just check the dedicated connection is still alive
+            if (!renewLock()) {
                 leader_ = false;
-                spdlog::error(
-                    "LeaderElection: exception during lock renewal: {}",
-                    e.what());
+                spdlog::warn(
+                    "LeaderElection: lost advisory lock (connection lost)");
             }
         } else {
             // Try to acquire
@@ -91,29 +127,6 @@ void LeaderElection::electionLoop() {
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(lease_interval_));
-    }
-}
-
-bool LeaderElection::tryAcquireLock() {
-    try {
-        auto conn = common::database::DatabaseManager::instance().getConnection();
-        if (!conn) {
-            return false;
-        }
-
-        pqxx::nontransaction txn(*conn);
-        auto res =
-            txn.exec_params("SELECT pg_try_advisory_lock($1)", lock_id_);
-        bool acquired = res[0][0].as<bool>();
-
-        common::database::DatabaseManager::instance().returnConnection(
-            std::move(conn));
-
-        return acquired;
-    } catch (const std::exception& e) {
-        spdlog::error("LeaderElection: exception trying to acquire lock: {}",
-                      e.what());
-        return false;
     }
 }
 

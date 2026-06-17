@@ -11,12 +11,12 @@ public:
     explicit WorkflowController(std::shared_ptr<service::WorkflowService> workflow_service);
 
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(WorkflowController::createWorkflow, "/api/v1/workflows", drogon::Post);
-    ADD_METHOD_TO(WorkflowController::listWorkflows, "/api/v1/workflows", drogon::Get);
-    ADD_METHOD_TO(WorkflowController::getWorkflow, "/api/v1/workflows/{id}", drogon::Get);
-    ADD_METHOD_TO(WorkflowController::updateWorkflow, "/api/v1/workflows/{id}", drogon::Put);
-    ADD_METHOD_TO(WorkflowController::deleteWorkflow, "/api/v1/workflows/{id}", drogon::Delete);
-    ADD_METHOD_TO(WorkflowController::triggerWorkflow, "/api/v1/workflows/{id}/trigger", drogon::Post);
+    ADD_METHOD_TO(WorkflowController::createWorkflow, "/api/v1/workflows", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(WorkflowController::listWorkflows, "/api/v1/workflows", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(WorkflowController::getWorkflow, "/api/v1/workflows/{id}", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(WorkflowController::updateWorkflow, "/api/v1/workflows/{id}", drogon::Put, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(WorkflowController::deleteWorkflow, "/api/v1/workflows/{id}", drogon::Delete, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(WorkflowController::triggerWorkflow, "/api/v1/workflows/{id}/trigger", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     METHOD_LIST_END
 
     void createWorkflow(const drogon::HttpRequestPtr& req,

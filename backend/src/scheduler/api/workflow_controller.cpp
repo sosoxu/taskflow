@@ -135,9 +135,9 @@ void WorkflowController::updateWorkflow(
         return;
     }
 
-    std::string name = (*json)["name"].asString();
+    std::string name = (*json).isMember("name") ? (*json)["name"].asString() : "";
     std::string description = (*json).get("description", "").asString();
-    std::string schedule_strategy = (*json)["schedule_strategy"].asString();
+    std::string schedule_strategy = (*json).isMember("schedule_strategy") ? (*json)["schedule_strategy"].asString() : "";
     std::string target_worker_id = (*json).get("target_worker_id", "").asString();
     std::string cron_expression = (*json).get("cron_expression", "").asString();
     bool cron_enabled = (*json).get("cron_enabled", false).asBool();

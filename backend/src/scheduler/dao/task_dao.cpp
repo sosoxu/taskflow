@@ -43,7 +43,7 @@ common::result::Result<common::models::Task> TaskDao::findById(const std::string
     return common::database::DatabaseManager::instance().withReadTransaction<common::models::Task>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<common::models::Task> {
             auto res = txn.exec_params(
-                "SELECT * FROM tasks WHERE id = $1 AND deleted = false",
+                "SELECT * FROM tasks WHERE id = $1",
                 id);
 
             if (res.empty()) {

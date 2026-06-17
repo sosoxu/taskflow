@@ -163,4 +163,23 @@ common::result::Result<std::vector<std::string>> TaskInstanceDao::batchCreate(
         });
 }
 
+common::result::Result<void> TaskInstanceDao::resetForRetry(const std::string& id) {
+    return common::database::DatabaseManager::instance().withTransaction<void>(
+        [&](pqxx::work& txn) -> common::result::Result<void> {
+            auto res = txn.exec_params(
+                "UPDATE task_instances SET status = 'PENDING', "
+                "retry_count = retry_count + 1, "
+                "worker_id = NULL, started_at = NULL, finished_at = NULL, "
+                "exit_code = NULL, error_message = NULL "
+                "WHERE id = $1",
+                id);
+
+            if (res.affected_rows() == 0) {
+                return common::result::Result<void>::failure("任务实例不存在，重置重试失败");
+            }
+
+            return common::result::Result<void>();
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

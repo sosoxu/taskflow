@@ -81,8 +81,7 @@ void TaskController::createTask(
 
 void TaskController::listTasks(
     const drogon::HttpRequestPtr& req,
-    std::function<void(const drogon::HttpResponsePtr&)>&& callback,
-    const std::string& /*id*/) {
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
 
     int page = 1;
     int page_size = 10;
@@ -97,7 +96,7 @@ void TaskController::listTasks(
         try { page_size = std::stoi(page_size_str); } catch (...) {}
     }
 
-    std::string type_filter = std::string(req->getParameter("type_filter"));
+    std::string type_filter = std::string(req->getParameter("type"));
     std::string keyword = std::string(req->getParameter("keyword"));
     std::string creator_id = std::string(req->getParameter("creator_id"));
 
@@ -144,8 +143,8 @@ void TaskController::updateTask(
         return;
     }
 
-    std::string name = (*json)["name"].asString();
-    std::string type = (*json)["type"].asString();
+    std::string name = (*json).isMember("name") ? (*json)["name"].asString() : "";
+    std::string type = (*json).isMember("type") ? (*json)["type"].asString() : "";
     std::string description = (*json).get("description", "").asString();
     int timeout = (*json).get("timeout", 3600).asInt();
     int max_retries = (*json).get("max_retries", 0).asInt();

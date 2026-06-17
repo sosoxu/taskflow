@@ -30,6 +30,8 @@ public:
                                                int exit_code,
                                                const std::string& error_message);
 
+    common::result::Result<void> resetForRetry(const std::string& id);
+
     common::result::Result<std::vector<common::models::TaskInstance>> listByWorkflowInstance(
         const std::string& workflow_instance_id);
 

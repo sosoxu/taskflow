@@ -43,7 +43,7 @@ common::result::Result<common::models::Workflow> WorkflowDao::findById(const std
     return common::database::DatabaseManager::instance().withReadTransaction<common::models::Workflow>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<common::models::Workflow> {
             auto res = txn.exec_params(
-                "SELECT * FROM workflows WHERE id = $1 AND deleted = false",
+                "SELECT * FROM workflows WHERE id = $1",
                 id);
 
             if (res.empty()) {

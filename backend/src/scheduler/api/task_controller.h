@@ -11,19 +11,18 @@ public:
     explicit TaskController(std::shared_ptr<service::TaskService> task_service);
 
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(TaskController::createTask, "/api/v1/tasks", drogon::Post);
-    ADD_METHOD_TO(TaskController::listTasks, "/api/v1/tasks", drogon::Get);
-    ADD_METHOD_TO(TaskController::getTask, "/api/v1/tasks/{id}", drogon::Get);
-    ADD_METHOD_TO(TaskController::updateTask, "/api/v1/tasks/{id}", drogon::Put);
-    ADD_METHOD_TO(TaskController::deleteTask, "/api/v1/tasks/{id}", drogon::Delete);
+    ADD_METHOD_TO(TaskController::createTask, "/api/v1/tasks", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(TaskController::listTasks, "/api/v1/tasks", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(TaskController::getTask, "/api/v1/tasks/{id}", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(TaskController::updateTask, "/api/v1/tasks/{id}", drogon::Put, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(TaskController::deleteTask, "/api/v1/tasks/{id}", drogon::Delete, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     METHOD_LIST_END
 
     void createTask(const drogon::HttpRequestPtr& req,
                     std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 
     void listTasks(const drogon::HttpRequestPtr& req,
-                   std::function<void(const drogon::HttpResponsePtr&)>&& callback,
-                   const std::string& id);
+                   std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 
     void getTask(const drogon::HttpRequestPtr& req,
                  std::function<void(const drogon::HttpResponsePtr&)>&& callback,

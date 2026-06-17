@@ -11,7 +11,7 @@ public:
     explicit WorkerController(std::shared_ptr<service::WorkerService> worker_service);
 
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(WorkerController::listWorkers, "/api/v1/workers", drogon::Get);
+    ADD_METHOD_TO(WorkerController::listWorkers, "/api/v1/workers", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     METHOD_LIST_END
 
     void listWorkers(const drogon::HttpRequestPtr& req,

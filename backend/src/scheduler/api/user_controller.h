@@ -11,10 +11,10 @@ public:
     explicit UserController(std::shared_ptr<service::UserService> user_service);
 
     METHOD_LIST_BEGIN
-    ADD_METHOD_TO(UserController::listUsers, "/api/v1/users", drogon::Get);
-    ADD_METHOD_TO(UserController::createUser, "/api/v1/users", drogon::Post);
-    ADD_METHOD_TO(UserController::updateUserRole, "/api/v1/users/{id}/role", drogon::Put);
-    ADD_METHOD_TO(UserController::deleteUser, "/api/v1/users/{id}", drogon::Delete);
+    ADD_METHOD_TO(UserController::listUsers, "/api/v1/users", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(UserController::createUser, "/api/v1/users", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(UserController::updateUserRole, "/api/v1/users/{id}/role", drogon::Put, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    ADD_METHOD_TO(UserController::deleteUser, "/api/v1/users/{id}", drogon::Delete, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     METHOD_LIST_END
 
     void listUsers(const drogon::HttpRequestPtr& req,

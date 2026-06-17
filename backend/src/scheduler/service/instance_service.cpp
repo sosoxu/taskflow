@@ -128,8 +128,8 @@ common::result::Result<void> InstanceService::retryTask(
             "Task instance does not belong to the specified workflow instance");
     }
 
-    // Reset the task instance to PENDING (retry_count increment is handled by DAO)
-    auto reset_result = task_instance_dao_.updateStatus(task_instance_id, "PENDING");
+    // Reset the task instance to PENDING and increment retry_count
+    auto reset_result = task_instance_dao_.resetForRetry(task_instance_id);
     if (!reset_result.ok()) {
         return common::result::Result<void>::failure(
             "Failed to reset task instance: " + reset_result.error());
@@ -176,7 +176,7 @@ common::result::Result<void> InstanceService::retryTask(
     // Reset downstream tasks: any task in UPSTREAM_FAILED state should be reset to PENDING
     for (const auto& ti : all_tasks_result.value()) {
         if (ti.status == "UPSTREAM_FAILED" || ti.status == "CANCELLED") {
-            auto downstream_reset = task_instance_dao_.updateStatus(ti.id, "PENDING");
+            auto downstream_reset = task_instance_dao_.resetForRetry(ti.id);
             if (!downstream_reset.ok()) {
                 spdlog::warn("InstanceService: failed to reset downstream task instance {}: {}",
                              ti.id, downstream_reset.error());

@@ -6,6 +6,7 @@
 #include <string>
 #include <thread>
 
+#include <pqxx/pqxx>
 #include <spdlog/spdlog.h>
 
 #include "common/database/database_manager.h"
@@ -24,12 +25,15 @@ public:
 private:
     void electionLoop();
     bool tryAcquireLock();
+    bool renewLock();
+    void ensureConnection();
 
     int lease_interval_;  // seconds between lease renewals
     int lock_id_;         // advisory lock ID
     std::atomic<bool> leader_{false};
     std::atomic<bool> running_{false};
     std::thread thread_;
+    std::unique_ptr<pqxx::connection> lock_conn_;  // Dedicated connection for advisory lock
 };
 
 }  // namespace taskflow::scheduler::grpc
