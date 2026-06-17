@@ -90,8 +90,8 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     // Also build node_id -> TaskInstance mapping for dispatch
     std::map<std::string, common::models::TaskInstance> node_to_instance;
     for (const auto& ti : task_instances) {
-        task_statuses[ti.task_id] = ti.status;
-        node_to_instance[ti.task_id] = ti;
+        task_statuses[ti.node_id] = ti.status;
+        node_to_instance[ti.node_id] = ti;
     }
 
     // 3. Get the Workflow by workflow_id to get dag_json and schedule_strategy

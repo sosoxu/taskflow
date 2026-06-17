@@ -24,6 +24,17 @@ void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     callback(httpResp);
 }
 
+void sendSuccess(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                 const nlohmann::json& data, int statusCode = 200) {
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = nlohmannToJsoncpp(data);
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
+    callback(httpResp);
+}
+
 nlohmann::json jsoncppToNlohmann(const Json::Value& v) {
     Json::StreamWriterBuilder builder;
     std::string s = Json::writeString(builder, v);
@@ -73,10 +84,7 @@ void TaskController::createTask(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k201Created);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value(), 201);
 }
 
 void TaskController::listTasks(
@@ -108,10 +116,7 @@ void TaskController::listTasks(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void TaskController::getTask(
@@ -126,10 +131,7 @@ void TaskController::getTask(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void TaskController::updateTask(
@@ -168,14 +170,17 @@ void TaskController::updateTask(
         resource_tags, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40003, result.error());
+        int status = 400;
+        int code = 40003;
+        if (result.error().find("权限不足") != std::string::npos) {
+            status = 403;
+            code = 40301;
+        }
+        sendError(std::move(callback), status, code, result.error());
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void TaskController::deleteTask(
@@ -189,7 +194,13 @@ void TaskController::deleteTask(
     auto result = task_service_->deleteTask(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40401, result.error());
+        int status = 404;
+        int code = 40401;
+        if (result.error().find("权限不足") != std::string::npos) {
+            status = 403;
+            code = 40301;
+        }
+        sendError(std::move(callback), status, code, result.error());
         return;
     }
 

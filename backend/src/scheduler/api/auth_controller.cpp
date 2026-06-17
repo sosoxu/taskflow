@@ -24,6 +24,17 @@ void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     callback(httpResp);
 }
 
+void sendSuccess(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                 const nlohmann::json& data, int statusCode = 200) {
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = nlohmannToJsoncpp(data);
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
+    callback(httpResp);
+}
+
 }  // namespace
 
 AuthController::AuthController(std::shared_ptr<service::AuthService> auth_service)
@@ -53,10 +64,7 @@ void AuthController::registerUser(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k201Created);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value(), 201);
 }
 
 void AuthController::login(
@@ -83,10 +91,7 @@ void AuthController::login(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void AuthController::refreshToken(
@@ -112,10 +117,7 @@ void AuthController::refreshToken(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void AuthController::logout(

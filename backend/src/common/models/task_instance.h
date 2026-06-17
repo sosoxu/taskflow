@@ -9,6 +9,7 @@ struct TaskInstance {
     std::string id;
     std::string workflow_instance_id;
     std::string task_id;
+    std::string node_id;
     int task_version = 0;
     std::string task_name;
     std::string status;  // PENDING, DISPATCHED, RUNNING, SUCCESS, FAILED, UPSTREAM_FAILED, TIMEOUT, CANCELLED, NODE_OFFLINE
@@ -25,6 +26,8 @@ struct TaskInstance {
         instance.id = row["id"].as<std::string>();
         instance.workflow_instance_id = row["workflow_instance_id"].as<std::string>();
         instance.task_id = row["task_id"].as<std::string>();
+        instance.node_id = row["node_id"].is_null()
+            ? "" : row["node_id"].as<std::string>();
         instance.task_version = row["task_version"].as<int>();
         instance.task_name = row["task_name"].as<std::string>();
         instance.status = row["status"].as<std::string>();
@@ -48,6 +51,7 @@ struct TaskInstance {
             {"id", id},
             {"workflow_instance_id", workflow_instance_id},
             {"task_id", task_id},
+            {"node_id", node_id},
             {"task_version", task_version},
             {"task_name", task_name},
             {"status", status},

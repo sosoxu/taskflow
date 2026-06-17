@@ -13,7 +13,8 @@ public:
         const std::string& workflow_instance_id,
         const std::string& task_id,
         int task_version,
-        const std::string& task_name);
+        const std::string& task_name,
+        const std::string& node_id = "");
 
     common::result::Result<common::models::TaskInstance> findById(const std::string& id);
 
@@ -37,7 +38,7 @@ public:
 
     common::result::Result<std::vector<std::string>> batchCreate(
         const std::string& workflow_instance_id,
-        const std::vector<std::tuple<std::string, std::string, int>>& tasks);
+        const std::vector<std::tuple<std::string, std::string, int, std::string>>& tasks);
 };
 
 }  // namespace taskflow::scheduler::dao

@@ -13,6 +13,17 @@ Json::Value nlohmannToJsoncpp(const nlohmann::json& j) {
     return output;
 }
 
+void sendSuccess(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                 const nlohmann::json& data, int statusCode = 200) {
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = nlohmannToJsoncpp(data);
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
+    callback(httpResp);
+}
+
 void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                int statusCode, int code, const std::string& message) {
     Json::Value resp;
@@ -67,10 +78,7 @@ void WorkflowController::createWorkflow(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k201Created);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value(), 201);
 }
 
 void WorkflowController::listWorkflows(
@@ -100,10 +108,7 @@ void WorkflowController::listWorkflows(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void WorkflowController::getWorkflow(
@@ -118,10 +123,7 @@ void WorkflowController::getWorkflow(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void WorkflowController::updateWorkflow(
@@ -154,14 +156,17 @@ void WorkflowController::updateWorkflow(
         target_worker_id, cron_expression, cron_enabled, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40004, result.error());
+        int status = 400;
+        int code = 40004;
+        if (result.error().find("权限不足") != std::string::npos) {
+            status = 403;
+            code = 40301;
+        }
+        sendError(std::move(callback), status, code, result.error());
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void WorkflowController::deleteWorkflow(
@@ -202,10 +207,7 @@ void WorkflowController::triggerWorkflow(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 }  // namespace taskflow::scheduler::api

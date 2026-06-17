@@ -100,7 +100,8 @@ CREATE TABLE task_instances (
                                 CHECK (status IN ('PENDING', 'DISPATCHED', 'RUNNING', 'SUCCESS',
                                                   'FAILED', 'UPSTREAM_FAILED', 'TIMEOUT',
                                                   'CANCELLED', 'NODE_OFFLINE')),
-    worker_id               UUID,
+    worker_id               UUID REFERENCES workers(id) ON DELETE SET NULL,
+    node_id                 VARCHAR(64) NOT NULL DEFAULT '',
     retry_count             INTEGER NOT NULL DEFAULT 0,
     started_at              TIMESTAMPTZ,
     finished_at             TIMESTAMPTZ,
@@ -119,7 +120,7 @@ CREATE INDEX idx_task_instances_worker ON task_instances(worker_id);
 CREATE TABLE workers (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(64) NOT NULL,
-    address         VARCHAR(256) NOT NULL,
+    address         VARCHAR(256) NOT NULL UNIQUE,
     status          VARCHAR(8) NOT NULL DEFAULT 'online'
                         CHECK (status IN ('online', 'offline')),
     cpu_usage       DOUBLE PRECISION NOT NULL DEFAULT 0.0,

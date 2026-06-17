@@ -310,8 +310,9 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
         const auto& task = taskResult.value();
 
         // 5. Create TaskInstance for each node
+        std::string node_id = node.value("id", "");
         auto taskInstanceResult = task_instance_dao_.create(
-            instance_id, task_id, task.version, task.name);
+            instance_id, task_id, task.version, task.name, node_id);
         if (!taskInstanceResult.ok()) {
             return common::result::Result<nlohmann::json>::failure(
                 "Failed to create task instance: " + taskInstanceResult.error());

@@ -9,7 +9,8 @@ common::result::Result<std::string> TaskInstanceDao::create(
     const std::string& workflow_instance_id,
     const std::string& task_id,
     int task_version,
-    const std::string& task_name) {
+    const std::string& task_name,
+    const std::string& node_id) {
 
     auto id = common::util::generateUuid();
 
@@ -17,10 +18,10 @@ common::result::Result<std::string> TaskInstanceDao::create(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
             auto res = txn.exec_params(
                 "INSERT INTO task_instances "
-                "(id, workflow_instance_id, task_id, task_version, task_name, status) "
-                "VALUES ($1, $2, $3, $4, $5, 'PENDING') "
+                "(id, workflow_instance_id, task_id, task_version, task_name, node_id, status) "
+                "VALUES ($1, $2, $3, $4, $5, $6, 'PENDING') "
                 "RETURNING id",
-                id, workflow_instance_id, task_id, task_version, task_name);
+                id, workflow_instance_id, task_id, task_version, task_name, node_id);
 
             if (res.empty()) {
                 return common::result::Result<std::string>::failure("创建任务实例失败");
@@ -136,21 +137,21 @@ common::result::Result<std::vector<common::models::TaskInstance>> TaskInstanceDa
 
 common::result::Result<std::vector<std::string>> TaskInstanceDao::batchCreate(
     const std::string& workflow_instance_id,
-    const std::vector<std::tuple<std::string, std::string, int>>& tasks) {
+    const std::vector<std::tuple<std::string, std::string, int, std::string>>& tasks) {
 
     return common::database::DatabaseManager::instance().withTransaction<std::vector<std::string>>(
         [&](pqxx::work& txn) -> common::result::Result<std::vector<std::string>> {
             std::vector<std::string> ids;
 
-            for (const auto& [task_id, task_name, task_version] : tasks) {
+            for (const auto& [task_id, task_name, task_version, node_id] : tasks) {
                 auto id = common::util::generateUuid();
 
                 auto res = txn.exec_params(
                     "INSERT INTO task_instances "
-                    "(id, workflow_instance_id, task_id, task_version, task_name, status) "
-                    "VALUES ($1, $2, $3, $4, $5, 'PENDING') "
+                    "(id, workflow_instance_id, task_id, task_version, task_name, node_id, status) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, 'PENDING') "
                     "RETURNING id",
-                    id, workflow_instance_id, task_id, task_version, task_name);
+                    id, workflow_instance_id, task_id, task_version, task_name, node_id);
 
                 if (res.empty()) {
                     return common::result::Result<std::vector<std::string>>::failure("批量创建任务实例失败");

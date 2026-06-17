@@ -123,10 +123,11 @@ void CronScheduler::triggerCronJob(const common::models::CronJob& cron_job) {
     // Parse dag_json and create TaskInstances for each node
     const auto& dag = workflow.dag_json;
     if (dag.contains("nodes") && dag["nodes"].is_array()) {
-        std::vector<std::tuple<std::string, std::string, int>> tasks;
+        std::vector<std::tuple<std::string, std::string, int, std::string>> tasks;
 
         for (const auto& node : dag["nodes"]) {
-            std::string task_id = node["id"].get<std::string>();
+            std::string task_id = node.value("task_id", node.value("id", ""));
+            std::string node_id = node.value("id", "");
 
             // Look up the task to get its current version and name
             auto task_result = task_dao_.findById(task_id);
@@ -139,7 +140,7 @@ void CronScheduler::triggerCronJob(const common::models::CronJob& cron_job) {
             }
 
             const auto& task = task_result.value();
-            tasks.emplace_back(task.id, task.name, task.version);
+            tasks.emplace_back(task.id, task.name, task.version, node_id);
         }
 
         if (!tasks.empty()) {

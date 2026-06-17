@@ -13,6 +13,17 @@ Json::Value nlohmannToJsoncpp(const nlohmann::json& j) {
     return output;
 }
 
+void sendSuccess(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                 const nlohmann::json& data, int statusCode = 200) {
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = nlohmannToJsoncpp(data);
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
+    callback(httpResp);
+}
+
 void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                int statusCode, int code, const std::string& message) {
     Json::Value resp;
@@ -52,10 +63,7 @@ void UserController::listUsers(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void UserController::createUser(
@@ -83,10 +91,7 @@ void UserController::createUser(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k201Created);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value(), 201);
 }
 
 void UserController::updateUserRole(

@@ -14,6 +14,17 @@ Json::Value nlohmannToJsoncpp(const nlohmann::json& j) {
     return output;
 }
 
+void sendSuccess(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                 const nlohmann::json& data, int statusCode = 200) {
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = nlohmannToJsoncpp(data);
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
+    callback(httpResp);
+}
+
 void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                int statusCode, int code, const std::string& message) {
     Json::Value resp;
@@ -149,10 +160,7 @@ void InstanceController::getInstance(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void InstanceController::listInstances(
@@ -180,10 +188,7 @@ void InstanceController::listInstances(
         return;
     }
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(result.value()));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void InstanceController::getTaskLog(
@@ -203,10 +208,7 @@ void InstanceController::getTaskLog(
         {"log", result.value()}
     };
 
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(
-        nlohmannToJsoncpp(response));
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), response);
 }
 
 void InstanceController::streamTaskLog(
