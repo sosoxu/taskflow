@@ -115,8 +115,9 @@ const task = ref<TaskItem | null>(null)
 async function fetchTask() {
   loading.value = true
   try {
-    const { data } = await getTask(taskId)
-    task.value = data?.data || data
+    const { data: resp } = await getTask(taskId)
+    const data = resp.data
+    task.value = data
   } catch {
     ElMessage.error('获取任务详情失败')
   } finally {

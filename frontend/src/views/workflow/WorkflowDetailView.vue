@@ -219,7 +219,8 @@ function getNodeCenter(nodeId: string): { x: number; y: number } {
 async function fetchWorkflow() {
   loading.value = true
   try {
-    const { data } = await getWorkflow(workflowId.value)
+    const { data: resp } = await getWorkflow(workflowId.value)
+    const data = resp.data
     workflow.value = data
 
     if (data.dag) {
@@ -247,10 +248,11 @@ async function fetchWorkflow() {
 async function fetchInstances() {
   instancesLoading.value = true
   try {
-    const { data } = await getWorkflowInstances(workflowId.value, {
+    const { data: resp } = await getWorkflowInstances(workflowId.value, {
       page: instancePage.value,
       page_size: instancePageSize.value,
     })
+    const data = resp.data
     instances.value = data.items || []
     instanceTotal.value = data.total || 0
   } catch {

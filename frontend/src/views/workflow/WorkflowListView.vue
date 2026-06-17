@@ -133,11 +133,12 @@ function strategyLabel(strategy: string) {
 async function fetchList() {
   loading.value = true
   try {
-    const { data } = await getWorkflows({
+    const { data: resp } = await getWorkflows({
       page: page.value,
       page_size: pageSize.value,
       keyword: keyword.value || undefined,
     })
+    const data = resp.data
     workflows.value = data.items || []
     total.value = data.total || 0
   } catch {

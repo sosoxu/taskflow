@@ -345,12 +345,12 @@ async function fetchInstance() {
   loading.value = true
   try {
     const res = await getInstance(id)
-    instance.value = res.data
+    instance.value = res.data.data
     // Fetch workflow for name and DAG
     if (instance.value?.workflow_id) {
       const wfRes = await getWorkflow(instance.value.workflow_id)
-      workflowName.value = wfRes.data?.name || ''
-      dag.value = wfRes.data?.dag || null
+      workflowName.value = wfRes.data?.data?.name || ''
+      dag.value = wfRes.data?.data?.dag_json || null
     }
   } catch (err) {
     ElMessage.error('获取实例详情失败')
@@ -429,7 +429,8 @@ async function fetchLog() {
   if (!instance.value || !currentLogTask.value) return
   try {
     const res = await getTaskLogs(instance.value.id, currentLogTask.value.id)
-    logContent.value = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2)
+    const logData = res.data?.data?.log || res.data?.data || ''
+    logContent.value = typeof logData === 'string' ? logData : JSON.stringify(logData, null, 2)
     if (autoScroll.value) {
       await nextTick()
       scrollToBottom()

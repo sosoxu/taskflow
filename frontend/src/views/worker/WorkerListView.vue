@@ -82,7 +82,7 @@ async function fetchWorkers() {
   loading.value = true
   try {
     const res = await getWorkers()
-    workers.value = res.data || []
+    workers.value = res.data?.data?.items || res.data?.data || []
   } catch {
     ElMessage.error('获取 Worker 列表失败')
   } finally {

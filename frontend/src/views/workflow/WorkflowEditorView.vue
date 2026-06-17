@@ -216,8 +216,9 @@ const workersLoading = ref(false)
 async function fetchWorkers() {
   workersLoading.value = true
   try {
-    const { data } = await getWorkers()
-    workers.value = data.items || data || []
+    const { data: resp } = await getWorkers()
+    const data = resp.data
+    workers.value = data.items || []
   } catch {
     // silently fail
   } finally {
@@ -232,7 +233,8 @@ const tasksLoading = ref(false)
 async function fetchTasks() {
   tasksLoading.value = true
   try {
-    const { data } = await getTasks({ page: 1, page_size: 200 })
+    const { data: resp } = await getTasks({ page: 1, page_size: 200 })
+    const data = resp.data
     availableTasks.value = data.items || []
   } catch {
     // silently fail
@@ -393,7 +395,8 @@ function onDrop(event: DragEvent) {
 async function loadWorkflow() {
   if (!workflowId.value) return
   try {
-    const { data } = await getWorkflow(workflowId.value)
+    const { data: resp } = await getWorkflow(workflowId.value)
+    const data = resp.data
     form.name = data.name || ''
     form.description = data.description || ''
     form.schedule_strategy = data.schedule_strategy || 'random'

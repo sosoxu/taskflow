@@ -104,7 +104,10 @@ common::result::Result<nlohmann::json> AuthService::login(
     nlohmann::json response = {
         {"access_token", tokenResult.value().access_token},
         {"refresh_token", tokenResult.value().refresh_token},
-        {"expires_in", 86400}
+        {"expires_in", 86400},
+        {"user_id", user.id},
+        {"username", user.username},
+        {"role", user.role}
     };
 
     return response;

@@ -138,8 +138,8 @@ async function fetchUsers() {
   loading.value = true
   try {
     const res = await getUsers({ page: page.value, page_size: pageSize.value })
-    users.value = res.data?.items || res.data || []
-    total.value = res.data?.total || users.value.length
+    users.value = res.data?.data?.items || res.data?.data || []
+    total.value = res.data?.data?.total || users.value.length
   } catch {
     ElMessage.error('获取用户列表失败')
   } finally {

@@ -189,9 +189,10 @@ async function fetchList() {
     }
     if (keyword.value) params.keyword = keyword.value
     if (typeFilter.value) params.type = typeFilter.value
-    const { data } = await getTasks(params as Parameters<typeof getTasks>[0])
-    taskList.value = data?.data?.items || data?.items || []
-    total.value = data?.data?.total || data?.total || 0
+    const { data: resp } = await getTasks(params as Parameters<typeof getTasks>[0])
+    const data = resp.data
+    taskList.value = data?.items || []
+    total.value = data?.total || 0
   } catch {
     ElMessage.error('获取任务列表失败')
   } finally {
@@ -334,8 +335,9 @@ async function handleEdit(row: TaskItem) {
   isEdit.value = true
   editingId.value = row.id
   try {
-    const { data } = await getTask(row.id)
-    const task = data?.data || data
+    const { data: resp } = await getTask(row.id)
+    const data = resp.data
+    const task = data
     form.name = task.name
     form.type = task.type
     form.description = task.description || ''

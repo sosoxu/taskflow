@@ -167,7 +167,8 @@ async function handleLogin() {
 
   loginLoading.value = true
   try {
-    const { data } = await login(loginForm.username, loginForm.password)
+    const { data: resp } = await login(loginForm.username, loginForm.password)
+    const data = resp.data
     userStore.setUser({
       userId: data.user_id,
       username: data.username,
