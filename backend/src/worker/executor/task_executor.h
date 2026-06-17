@@ -45,11 +45,16 @@ public:
 
     int runningCount() const;
 
+    // Register a custom task type executor
+    void registerExecutor(const std::string& task_type,
+                          std::function<std::unique_ptr<TaskExecutorBase>()> factory);
+
 private:
     int max_tasks_;
     std::atomic<int> running_count_{0};
     std::map<std::string, pid_t> running_processes_;
     std::mutex mutex_;
+    std::map<std::string, std::function<std::unique_ptr<TaskExecutorBase>()>> executor_factories_;
 
     std::unique_ptr<TaskExecutorBase> createExecutor(const std::string& task_type);
 };

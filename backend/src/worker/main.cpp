@@ -11,6 +11,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/async.h>
 #include <grpcpp/grpcpp.h>
+#include <grpcpp/security/server_credentials.h>
 
 #include "common/config/worker_config.h"
 #include "worker/grpc/worker_client.h"
@@ -226,8 +227,27 @@ int main(int argc, char* argv[]) {
     taskflow::worker::executor::TaskExecutor executor(config.worker.max_tasks);
 
     // 创建 gRPC 客户端连接 Scheduler
-    auto channel = ::grpc::CreateChannel(
-        config.scheduler.address, ::grpc::InsecureChannelCredentials());
+    std::shared_ptr<grpc::Channel> channel;
+    if (config.scheduler.tls.enabled) {
+        grpc::SslCredentialsOptions ssl_opts;
+        std::ifstream cert_file(config.scheduler.tls.cert_path);
+        std::ifstream key_file(config.scheduler.tls.key_path);
+        std::string cert_str((std::istreambuf_iterator<char>(cert_file)),
+                              std::istreambuf_iterator<char>());
+        std::string key_str((std::istreambuf_iterator<char>(key_file)),
+                             std::istreambuf_iterator<char>());
+        ssl_opts.pem_private_key = key_str;
+        ssl_opts.pem_cert_chain = cert_str;
+        if (!config.scheduler.tls.ca_path.empty()) {
+            std::ifstream ca_file(config.scheduler.tls.ca_path);
+            std::string ca_str((std::istreambuf_iterator<char>(ca_file)),
+                                std::istreambuf_iterator<char>());
+            ssl_opts.pem_root_certs = ca_str;
+        }
+        channel = ::grpc::CreateChannel(config.scheduler.address, grpc::SslCredentials(ssl_opts));
+    } else {
+        channel = ::grpc::CreateChannel(config.scheduler.address, ::grpc::InsecureChannelCredentials());
+    }
     taskflow::worker::grpc::WorkerClient scheduler_client(channel);
 
     // 向 Scheduler 注册
@@ -304,7 +324,28 @@ int main(int argc, char* argv[]) {
     WorkerServiceImpl service(executor, scheduler_client, config.task_log.dir);
 
     ::grpc::ServerBuilder builder;
-    builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
+    if (config.server.tls.enabled) {
+        grpc::SslServerCredentialsOptions ssl_opts;
+        std::ifstream cert_file(config.server.tls.cert_path);
+        std::ifstream key_file(config.server.tls.key_path);
+        std::string cert_str((std::istreambuf_iterator<char>(cert_file)),
+                              std::istreambuf_iterator<char>());
+        std::string key_str((std::istreambuf_iterator<char>(key_file)),
+                             std::istreambuf_iterator<char>());
+        grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert;
+        key_cert.private_key = key_str;
+        key_cert.cert_chain = cert_str;
+        ssl_opts.pem_key_cert_pairs.push_back(key_cert);
+        if (!config.server.tls.ca_path.empty()) {
+            std::ifstream ca_file(config.server.tls.ca_path);
+            std::string ca_str((std::istreambuf_iterator<char>(ca_file)),
+                                std::istreambuf_iterator<char>());
+            ssl_opts.pem_root_certs = ca_str;
+        }
+        builder.AddListeningPort(server_address, grpc::SslServerCredentials(ssl_opts));
+    } else {
+        builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
+    }
     builder.RegisterService(&service);
 
     std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());

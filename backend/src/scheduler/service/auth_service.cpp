@@ -164,4 +164,20 @@ common::result::Result<common::util::TokenPayload> AuthService::verifyAccessToke
     return payload;
 }
 
+common::result::Result<void> AuthService::logout(const std::string& access_token) {
+    auto verifyResult = common::util::JwtUtil::verifyToken(access_token, jwt_secret_);
+    if (!verifyResult.ok()) {
+        return common::result::Result<void>::failure("Invalid token");
+    }
+    const auto& payload = verifyResult.value();
+    if (payload.type != "access") {
+        return common::result::Result<void>::failure("Token is not an access token");
+    }
+    // Add jti to blacklist
+    if (!payload.jti.empty()) {
+        common::util::TokenBlacklist::instance().add(payload.jti);
+    }
+    return common::result::Result<void>();
+}
+
 }  // namespace taskflow::scheduler::service

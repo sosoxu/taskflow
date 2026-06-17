@@ -103,6 +103,12 @@ int TaskExecutor::runningCount() const {
 
 std::unique_ptr<TaskExecutorBase> TaskExecutor::createExecutor(
     const std::string& task_type) {
+    // Check registered factories first
+    auto it = executor_factories_.find(task_type);
+    if (it != executor_factories_.end()) {
+        return it->second();
+    }
+    // Built-in types
     if (task_type == "command") {
         return std::make_unique<CommandExecutor>();
     } else if (task_type == "script") {
@@ -111,6 +117,13 @@ std::unique_ptr<TaskExecutorBase> TaskExecutor::createExecutor(
         return std::make_unique<SqlExecutor>();
     }
     return nullptr;
+}
+
+void TaskExecutor::registerExecutor(
+    const std::string& task_type,
+    std::function<std::unique_ptr<TaskExecutorBase>()> factory) {
+    executor_factories_[task_type] = std::move(factory);
+    spdlog::info("TaskExecutor: registered custom executor for task type: {}", task_type);
 }
 
 }  // namespace taskflow::worker::executor

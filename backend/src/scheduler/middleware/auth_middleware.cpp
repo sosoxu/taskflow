@@ -68,6 +68,18 @@ void AuthFilter::doFilter(
         return;
     }
 
+    // 检查 token 是否已被加入黑名单（已登出）
+    if (!payload.jti.empty() && common::util::TokenBlacklist::instance().isBlacklisted(payload.jti)) {
+        Json::Value resp;
+        resp["code"] = 40100;
+        resp["message"] = "Token 已被撤销";
+        resp["data"] = Json::nullValue;
+        auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+        httpResp->setStatusCode(drogon::k401Unauthorized);
+        fcb(httpResp);
+        return;
+    }
+
     // 将用户信息注入请求属性
     req->getAttributes()->insert("user_id", payload.user_id);
     req->getAttributes()->insert("username", payload.username);

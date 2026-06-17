@@ -6,12 +6,21 @@
 
 namespace taskflow::common::config {
 
+struct WorkerTlsConfig {
+    bool enabled = false;
+    std::string cert_path;
+    std::string key_path;
+    std::string ca_path;
+};
+
 struct WorkerServerConfig {
     int grpc_port = 50052;
+    WorkerTlsConfig tls;
 };
 
 struct SchedulerAddressConfig {
     std::string address = "localhost:50051";
+    WorkerTlsConfig tls;
 };
 
 struct WorkerNodeConfig {
@@ -28,6 +37,9 @@ struct WorkerLogConfig {
 struct TaskLogConfig {
     std::string dir = "logs/tasks";  // 任务日志目录
     int retention_days = 30;
+    std::string sink_type = "file";  // 日志存储后端类型: file, elasticsearch
+    std::string es_url;           // Elasticsearch URL (for elasticsearch sink)
+    std::string es_index = "taskflow-logs";  // Elasticsearch index
 };
 
 class WorkerConfig {

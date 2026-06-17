@@ -44,9 +44,17 @@ struct ScheduleConfig {
     int leader_lease_interval = 5;       // 选主续约间隔（秒）
 };
 
+struct TlsConfig {
+    bool enabled = false;
+    std::string cert_path;
+    std::string key_path;
+    std::string ca_path;
+};
+
 struct ServerConfig {
     int http_port = 8080;
     int grpc_port = 50051;
+    TlsConfig tls;
 };
 
 class SchedulerConfig {

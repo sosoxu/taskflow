@@ -44,7 +44,7 @@
     </el-card>
 
     <el-card class="section-card">
-      <template #header>DAG 编辑器</template>
+      <template #header>DAG 编辑器（Vue Flow）</template>
       <div class="dag-editor">
         <div class="dag-tasks-panel">
           <h4>可用任务</h4>
@@ -53,6 +53,8 @@
               v-for="task in availableTasks"
               :key="task.id"
               class="task-item"
+              draggable="true"
+              @dragstart="onDragStart($event, task)"
               @click="addNode(task)"
             >
               <span class="task-name">{{ task.name }}</span>
@@ -62,68 +64,73 @@
           </div>
         </div>
 
-        <div
-          ref="canvasRef"
-          class="dag-canvas"
-          @click="handleCanvasClick"
-          @contextmenu.prevent
-        >
-          <svg class="dag-edges">
-            <defs>
-              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-                <polygon points="0 0, 10 3.5, 0 7" fill="#409EFF" />
-              </marker>
-            </defs>
-            <line
-              v-for="(edge, idx) in dagEdges"
-              :key="'e-' + idx"
-              :x1="getNodeCenter(edge.source).x"
-              :y1="getNodeCenter(edge.source).y"
-              :x2="getNodeCenter(edge.target).x"
-              :y2="getNodeCenter(edge.target).y"
-              :class="{ 'edge-selected': selectedEdgeIndex === idx }"
-              class="dag-edge"
-              marker-end="url(#arrowhead)"
-              @click.stop="selectEdge(idx)"
-            />
-          </svg>
-
-          <div
-            v-for="node in dagNodes"
-            :key="node.id"
-            :class="['dag-node', { 'node-selected': selectedNodeId === node.id, 'node-connecting': connectingFromId === node.id }]"
-            :style="{ left: node.x + 'px', top: node.y + 'px' }"
-            @mousedown.stop="startDrag(node, $event)"
-            @click.stop="handleNodeClick(node)"
+        <div class="dag-canvas" @drop="onDrop" @dragover="onDragOver">
+          <VueFlow
+            v-model:nodes="vfNodes"
+            v-model:edges="vfEdges"
+            :default-viewport="{ zoom: 1, x: 0, y: 0 }"
+            :min-zoom="0.3"
+            :max-zoom="2"
+            fit-view-on-init
+            @node-click="onNodeClick"
+            @edge-click="onEdgeClick"
+            @connect="onConnect"
           >
-            <div class="node-content">
-              <span class="node-name">{{ node.task_name }}</span>
-              <el-tag size="small" :type="taskTypeTag(node.task_type)">{{ node.task_type }}</el-tag>
-            </div>
-            <el-button
-              class="node-delete"
-              type="danger"
-              :icon="Delete"
-              circle
-              size="small"
-              @click.stop="removeNode(node.id)"
-            />
-          </div>
-
-          <div v-if="dagNodes.length === 0" class="canvas-empty">
-            点击左侧任务添加节点到画布
-          </div>
+            <Background :gap="20" />
+            <Controls />
+            <template #node-custom="customNodeProps">
+              <div :class="['custom-node', { 'node-selected': selectedNodeId === customNodeProps.id }]">
+                <div class="node-header">
+                  <span class="node-name">{{ customNodeProps.data.label }}</span>
+                  <el-tag size="small" :type="taskTypeTag(customNodeProps.data.taskType)">
+                    {{ customNodeProps.data.taskType }}
+                  </el-tag>
+                </div>
+                <Handle type="target" :position="Position.Left" />
+                <Handle type="source" :position="Position.Right" />
+                <el-button
+                  class="node-delete"
+                  type="danger"
+                  :icon="Delete"
+                  circle
+                  size="small"
+                  @click.stop="removeNode(customNodeProps.id)"
+                />
+              </div>
+            </template>
+          </VueFlow>
         </div>
       </div>
 
       <div class="dag-toolbar">
-        <el-button size="small" :disabled="selectedEdgeIndex < 0" @click="removeSelectedEdge">
+        <el-button size="small" :disabled="!selectedEdgeId" @click="removeSelectedEdge">
           删除选中连线
         </el-button>
-        <span v-if="connectingFromId" class="connecting-hint">
-          正在连线 — 点击目标节点完成连线，点击空白处取消
-        </span>
+        <span class="toolbar-hint">拖拽任务到画布或点击添加 | 拖拽连接点创建依赖</span>
       </div>
+
+      <!-- Node Parameter Overrides Panel -->
+      <el-card v-if="selectedNodeId" class="section-card">
+        <template #header>
+          <span>节点参数覆盖 - {{ selectedNodeName }}</span>
+          <el-button style="float: right" size="small" @click="selectedNodeId = null">关闭</el-button>
+        </template>
+        <el-form label-width="120px">
+          <el-form-item label="超时覆盖">
+            <el-input-number v-model="nodeOverrides.timeout" :min="0" :max="86400" placeholder="留空使用默认" clearable />
+          </el-form-item>
+          <el-form-item label="最大重试覆盖">
+            <el-input-number v-model="nodeOverrides.max_retries" :min="0" :max="10" placeholder="留空使用默认" clearable />
+          </el-form-item>
+          <el-form-item label="重试间隔覆盖">
+            <el-input-number v-model="nodeOverrides.retry_interval" :min="0" :max="3600" placeholder="留空使用默认" clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-button size="small" type="primary" @click="applyOverrides">应用</el-button>
+            <el-button size="small" @click="clearOverrides">清除覆盖</el-button>
+          </el-form-item>
+        </el-form>
+      </el-card>
     </el-card>
   </div>
 </template>
@@ -133,6 +140,12 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
+import { VueFlow, Handle, Position, type Node, type Edge } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import '@vue-flow/core/dist/style.css'
+import '@vue-flow/core/dist/theme-default.css'
+import '@vue-flow/controls/dist/style.css'
 import { getWorkflow, createWorkflow, updateWorkflow } from '../../api/workflow'
 import { getTasks } from '../../api/task'
 import { getWorkers } from '../../api/worker'
@@ -146,6 +159,7 @@ interface DagNodeData {
   task_type: string
   x: number
   y: number
+  param_overrides?: Record<string, any>
 }
 
 interface DagEdgeData {
@@ -202,18 +216,27 @@ async function fetchTasks() {
   }
 }
 
-// DAG state
-const dagNodes = ref<DagNodeData[]>([])
-const dagEdges = ref<DagEdgeData[]>([])
-const selectedNodeId = ref<string | null>(null)
-const selectedEdgeIndex = ref(-1)
-const connectingFromId = ref<string | null>(null)
-const canvasRef = ref<HTMLElement | null>(null)
+// Vue Flow nodes and edges
+const vfNodes = ref<Node[]>([])
+const vfEdges = ref<Edge[]>([])
 
-// Drag state
-let dragNode: DagNodeData | null = null
-let dragOffsetX = 0
-let dragOffsetY = 0
+const selectedNodeId = ref<string | null>(null)
+const selectedEdgeId = ref<string | null>(null)
+
+const nodeOverrides = reactive({
+  timeout: undefined as number | undefined,
+  max_retries: undefined as number | undefined,
+  retry_interval: undefined as number | undefined,
+})
+
+// Internal data store for DAG nodes (to track task_id, param_overrides etc.)
+const dagNodeDataMap = ref<Map<string, DagNodeData>>(new Map())
+
+const selectedNodeName = computed(() => {
+  if (!selectedNodeId.value) return ''
+  const data = dagNodeDataMap.value.get(selectedNodeId.value)
+  return data?.task_name || ''
+})
 
 function taskTypeTag(type: string) {
   const map: Record<string, string> = {
@@ -225,97 +248,120 @@ function taskTypeTag(type: string) {
 }
 
 let nodeCounter = 0
+
 function addNode(task: TaskItem) {
   nodeCounter++
   const id = `node_${nodeCounter}_${Date.now()}`
-  // Place new nodes with some offset based on existing count
-  const offset = dagNodes.value.length * 30
-  dagNodes.value.push({
+  const offset = vfNodes.value.length * 50
+
+  dagNodeDataMap.value.set(id, {
     id,
     task_id: task.id,
     task_name: task.name,
     task_type: task.type,
-    x: 60 + offset,
-    y: 60 + offset,
+    x: 100 + offset,
+    y: 100 + offset,
+    param_overrides: undefined,
+  })
+
+  vfNodes.value.push({
+    id,
+    type: 'custom',
+    position: { x: 100 + offset, y: 100 + offset },
+    data: { label: task.name, taskType: task.type },
   })
 }
 
 function removeNode(nodeId: string) {
-  dagNodes.value = dagNodes.value.filter((n) => n.id !== nodeId)
-  dagEdges.value = dagEdges.value.filter((e) => e.source !== nodeId && e.target !== nodeId)
+  vfNodes.value = vfNodes.value.filter((n) => n.id !== nodeId)
+  vfEdges.value = vfEdges.value.filter((e) => e.source !== nodeId && e.target !== nodeId)
+  dagNodeDataMap.value.delete(nodeId)
   if (selectedNodeId.value === nodeId) selectedNodeId.value = null
-  if (connectingFromId.value === nodeId) connectingFromId.value = null
 }
 
-function handleNodeClick(node: DagNodeData) {
-  if (connectingFromId.value) {
-    // Complete the connection
-    if (connectingFromId.value !== node.id) {
-      const exists = dagEdges.value.some(
-        (e) => e.source === connectingFromId.value && e.target === node.id,
-      )
-      if (!exists) {
-        dagEdges.value.push({ source: connectingFromId.value!, target: node.id })
-      }
-    }
-    connectingFromId.value = null
+function onNodeClick({ node }: { node: Node }) {
+  selectedNodeId.value = node.id
+  selectedEdgeId.value = null
+  // Load existing overrides
+  const data = dagNodeDataMap.value.get(node.id)
+  if (data && data.param_overrides) {
+    nodeOverrides.timeout = data.param_overrides.timeout
+    nodeOverrides.max_retries = data.param_overrides.max_retries
+    nodeOverrides.retry_interval = data.param_overrides.retry_interval
   } else {
-    // Start connecting
-    selectedNodeId.value = node.id
-    selectedEdgeIndex.value = -1
-    connectingFromId.value = node.id
+    clearOverrides()
   }
 }
 
-function handleCanvasClick() {
-  // Cancel connecting mode
-  connectingFromId.value = null
+function onEdgeClick({ edge }: { edge: Edge }) {
+  selectedEdgeId.value = edge.id
   selectedNodeId.value = null
-  selectedEdgeIndex.value = -1
 }
 
-function selectEdge(idx: number) {
-  selectedEdgeIndex.value = idx
-  selectedNodeId.value = null
-  connectingFromId.value = null
+function onConnect(params: { source: string; target: string }) {
+  // Check for duplicate
+  const exists = vfEdges.value.some(
+    (e) => e.source === params.source && e.target === params.target,
+  )
+  if (!exists && params.source !== params.target) {
+    vfEdges.value.push({
+      id: `e-${params.source}-${params.target}`,
+      source: params.source,
+      target: params.target,
+      type: 'smoothstep',
+      animated: true,
+    })
+  }
 }
 
 function removeSelectedEdge() {
-  if (selectedEdgeIndex.value >= 0) {
-    dagEdges.value.splice(selectedEdgeIndex.value, 1)
-    selectedEdgeIndex.value = -1
+  if (selectedEdgeId.value) {
+    vfEdges.value = vfEdges.value.filter((e) => e.id !== selectedEdgeId.value)
+    selectedEdgeId.value = null
   }
 }
 
-function getNodeCenter(nodeId: string): { x: number; y: number } {
-  const node = dagNodes.value.find((n) => n.id === nodeId)
-  if (!node) return { x: 0, y: 0 }
-  // Node width ~180, height ~50
-  return { x: node.x + 90, y: node.y + 25 }
+function applyOverrides() {
+  if (!selectedNodeId.value) return
+  const data = dagNodeDataMap.value.get(selectedNodeId.value)
+  if (!data) return
+  const overrides: Record<string, number> = {}
+  if (nodeOverrides.timeout !== undefined) overrides.timeout = nodeOverrides.timeout
+  if (nodeOverrides.max_retries !== undefined) overrides.max_retries = nodeOverrides.max_retries
+  if (nodeOverrides.retry_interval !== undefined) overrides.retry_interval = nodeOverrides.retry_interval
+  data.param_overrides = Object.keys(overrides).length > 0 ? overrides : undefined
+  ElMessage.success('参数覆盖已应用')
 }
 
-// Drag
-function startDrag(node: DagNodeData, event: MouseEvent) {
-  // Only drag with left button and not in connecting mode
-  if (connectingFromId.value) return
-  dragNode = node
-  dragOffsetX = event.clientX - node.x
-  dragOffsetY = event.clientY - node.y
-
-  const onMouseMove = (e: MouseEvent) => {
-    if (!dragNode) return
-    dragNode.x = e.clientX - dragOffsetX
-    dragNode.y = e.clientY - dragOffsetY
+function clearOverrides() {
+  nodeOverrides.timeout = undefined
+  nodeOverrides.max_retries = undefined
+  nodeOverrides.retry_interval = undefined
+  if (selectedNodeId.value) {
+    const data = dagNodeDataMap.value.get(selectedNodeId.value)
+    if (data) data.param_overrides = undefined
   }
+}
 
-  const onMouseUp = () => {
-    dragNode = null
-    document.removeEventListener('mousemove', onMouseMove)
-    document.removeEventListener('mouseup', onMouseUp)
-  }
+// Drag and drop from task panel
+function onDragStart(event: DragEvent, task: TaskItem) {
+  event.dataTransfer?.setData('application/taskflow-task', JSON.stringify(task))
+  event.dataTransfer!.effectAllowed = 'move'
+}
 
-  document.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('mouseup', onMouseUp)
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  event.dataTransfer!.dropEffect = 'move'
+}
+
+function onDrop(event: DragEvent) {
+  event.preventDefault()
+  const data = event.dataTransfer?.getData('application/taskflow-task')
+  if (!data) return
+  try {
+    const task = JSON.parse(data) as TaskItem
+    addNode(task)
+  } catch { /* ignore */ }
 }
 
 // Load workflow for editing
@@ -331,22 +377,40 @@ async function loadWorkflow() {
     form.cron_expression = data.cron_expression || ''
 
     if (data.dag) {
-      // Map DAG nodes from API format to editor format
       const apiNodes = data.dag.nodes || []
-      dagNodes.value = apiNodes.map((n: any, i: number) => ({
-        id: n.id,
-        task_id: n.task_id,
-        task_name: n.task_name || n.task_id,
-        task_type: n.task_type || 'command',
-        x: n.x ?? 60 + i * 200,
-        y: n.y ?? 60,
-      }))
-      dagEdges.value = (data.dag.edges || []).map((e: any) => ({
+      const apiEdges = data.dag.edges || []
+
+      // Build Vue Flow nodes
+      vfNodes.value = apiNodes.map((n: any, i: number) => {
+        const nodeData: DagNodeData = {
+          id: n.id,
+          task_id: n.task_id,
+          task_name: n.task_name || n.task_id,
+          task_type: n.task_type || 'command',
+          x: n.x ?? 100 + i * 200,
+          y: n.y ?? 100,
+          param_overrides: n.param_overrides || undefined,
+        }
+        dagNodeDataMap.value.set(n.id, nodeData)
+
+        return {
+          id: n.id,
+          type: 'custom',
+          position: { x: nodeData.x, y: nodeData.y },
+          data: { label: nodeData.task_name, taskType: nodeData.task_type },
+        }
+      })
+
+      // Build Vue Flow edges
+      vfEdges.value = apiEdges.map((e: any) => ({
+        id: `e-${e.source}-${e.target}`,
         source: e.source,
         target: e.target,
+        type: 'smoothstep',
+        animated: true,
       }))
-      // Update counter to avoid id collisions
-      nodeCounter = dagNodes.value.length + 1
+
+      nodeCounter = apiNodes.length + 1
     }
   } catch {
     ElMessage.error('加载工作流失败')
@@ -361,20 +425,26 @@ async function handleSave() {
 
   saving.value = true
   try {
-    const dag = {
-      nodes: dagNodes.value.map((n) => ({
+    // Convert Vue Flow nodes/edges back to API format
+    const nodes = vfNodes.value.map((n) => {
+      const data = dagNodeDataMap.value.get(n.id)
+      return {
         id: n.id,
-        task_id: n.task_id,
-        task_name: n.task_name,
-        task_type: n.task_type,
-        x: n.x,
-        y: n.y,
-      })),
-      edges: dagEdges.value.map((e) => ({
-        source: e.source,
-        target: e.target,
-      })),
-    }
+        task_id: data?.task_id || '',
+        task_name: data?.task_name || '',
+        task_type: data?.task_type || 'command',
+        x: n.position.x,
+        y: n.position.y,
+        ...(data?.param_overrides ? { param_overrides: data.param_overrides } : {}),
+      }
+    })
+
+    const edges = vfEdges.value.map((e) => ({
+      source: e.source,
+      target: e.target,
+    }))
+
+    const dag = { nodes, edges }
 
     const payload: any = {
       name: form.name,
@@ -495,76 +565,27 @@ onMounted(() => {
 
 .dag-canvas {
   flex: 1;
-  position: relative;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
-  background: #fafafa;
-  background-image:
-    radial-gradient(circle, #dcdfe6 1px, transparent 1px);
-  background-size: 20px 20px;
   overflow: hidden;
 }
 
-.dag-edges {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.dag-edges line {
-  pointer-events: stroke;
-}
-
-.dag-edge {
-  stroke: #409EFF;
-  stroke-width: 2;
-  cursor: pointer;
-}
-
-.dag-edge:hover {
-  stroke-width: 3;
-}
-
-.edge-selected {
-  stroke: #F56C6C;
-  stroke-width: 3;
-}
-
-.dag-node {
-  position: absolute;
-  width: 180px;
+.custom-node {
+  position: relative;
   background: #fff;
   border: 2px solid #409EFF;
   border-radius: 6px;
-  padding: 10px 12px;
-  cursor: grab;
-  user-select: none;
+  padding: 10px 16px;
+  min-width: 160px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  transition: box-shadow 0.2s;
 }
 
-.dag-node:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.dag-node:active {
-  cursor: grabbing;
-}
-
-.node-selected {
+.custom-node.node-selected {
   border-color: #E6A23C;
   box-shadow: 0 0 0 3px rgba(230, 162, 60, 0.2);
 }
 
-.node-connecting {
-  border-color: #67C23A;
-  box-shadow: 0 0 0 3px rgba(103, 194, 78, 0.2);
-}
-
-.node-content {
+.node-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -578,7 +599,6 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
 }
 
 .node-delete {
@@ -591,17 +611,8 @@ onMounted(() => {
   transition: opacity 0.2s;
 }
 
-.dag-node:hover .node-delete {
+.custom-node:hover .node-delete {
   opacity: 1;
-}
-
-.canvas-empty {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #c0c4cc;
-  font-size: 14px;
 }
 
 .dag-toolbar {
@@ -611,8 +622,8 @@ onMounted(() => {
   gap: 12px;
 }
 
-.connecting-hint {
-  font-size: 13px;
-  color: #67C23A;
+.toolbar-hint {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

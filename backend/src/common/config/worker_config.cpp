@@ -22,10 +22,28 @@ WorkerConfig WorkerConfig::load(const std::string& config_path) {
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
     }
 
+    // server.tls
+    if (root["server"] && root["server"]["tls"]) {
+        auto tls = root["server"]["tls"];
+        if (tls["enabled"]) config.server.tls.enabled = tls["enabled"].as<bool>();
+        if (tls["cert_path"]) config.server.tls.cert_path = tls["cert_path"].as<std::string>();
+        if (tls["key_path"]) config.server.tls.key_path = tls["key_path"].as<std::string>();
+        if (tls["ca_path"]) config.server.tls.ca_path = tls["ca_path"].as<std::string>();
+    }
+
     // scheduler
     if (root["scheduler"]) {
         auto sc = root["scheduler"];
         if (sc["address"]) config.scheduler.address = sc["address"].as<std::string>();
+    }
+
+    // scheduler.tls
+    if (root["scheduler"] && root["scheduler"]["tls"]) {
+        auto tls = root["scheduler"]["tls"];
+        if (tls["enabled"]) config.scheduler.tls.enabled = tls["enabled"].as<bool>();
+        if (tls["cert_path"]) config.scheduler.tls.cert_path = tls["cert_path"].as<std::string>();
+        if (tls["key_path"]) config.scheduler.tls.key_path = tls["key_path"].as<std::string>();
+        if (tls["ca_path"]) config.scheduler.tls.ca_path = tls["ca_path"].as<std::string>();
     }
 
     // worker
@@ -50,6 +68,9 @@ WorkerConfig WorkerConfig::load(const std::string& config_path) {
         auto tl = root["task_log"];
         if (tl["dir"]) config.task_log.dir = tl["dir"].as<std::string>();
         if (tl["retention_days"]) config.task_log.retention_days = tl["retention_days"].as<int>();
+        if (tl["sink_type"]) config.task_log.sink_type = tl["sink_type"].as<std::string>();
+        if (tl["es_url"]) config.task_log.es_url = tl["es_url"].as<std::string>();
+        if (tl["es_index"]) config.task_log.es_index = tl["es_index"].as<std::string>();
     }
 
     config.validate();

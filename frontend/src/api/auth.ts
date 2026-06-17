@@ -11,3 +11,7 @@ export function register(username: string, password: string) {
 export function refreshToken(refreshToken: string) {
   return request.post('/api/v1/auth/refresh', { refresh_token: refreshToken })
 }
+
+export function logout(accessToken: string) {
+  return request.post('/api/v1/auth/logout', { access_token: accessToken })
+}

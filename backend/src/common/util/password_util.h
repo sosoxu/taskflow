@@ -8,6 +8,9 @@
 #include <openssl/rand.h>
 #include <sstream>
 #include <iomanip>
+#include <cstring>
+#include <unistd.h>  // for crypt_r
+#include <crypt.h>   // for crypt_r
 
 #include "common/result/result.h"
 
@@ -18,6 +21,98 @@ public:
     PasswordUtil() = delete;
 
     static common::result::Result<std::string> hashPassword(const std::string& password) {
+        // Generate bcrypt salt using crypt_r with $2b$ cost factor 10
+        constexpr int cost = 10;
+
+        // Generate 16 random bytes for the salt
+        unsigned char salt_bytes[16];
+        if (RAND_bytes(salt_bytes, sizeof(salt_bytes)) != 1) {
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<int> dist(0, 255);
+            for (int i = 0; i < 16; ++i) {
+                salt_bytes[i] = static_cast<unsigned char>(dist(gen));
+            }
+        }
+
+        // Encode salt in bcrypt base64 format (different from standard base64)
+        std::string bcrypt_salt = "$2b$" + std::to_string(cost) + "$" +
+                                  encodeBcryptBase64(salt_bytes, 16);
+
+        struct crypt_data data;
+        memset(&data, 0, sizeof(data));
+
+        char* result = crypt_r(password.c_str(), bcrypt_salt.c_str(), &data);
+        if (!result || result[0] == '*') {
+            // Fallback: if bcrypt not available, use PBKDF2
+            return hashPasswordPBKDF2(password);
+        }
+
+        return std::string(result);
+    }
+
+    static common::result::Result<bool> verifyPassword(const std::string& password,
+                                                        const std::string& stored_hash) {
+        if (stored_hash.empty()) {
+            return common::result::Result<bool>::failure("Invalid hash format");
+        }
+
+        // Check if it's a bcrypt hash ($2a$, $2b$, or $2y$)
+        if (stored_hash.substr(0, 4) == "$2a$" ||
+            stored_hash.substr(0, 4) == "$2b$" ||
+            stored_hash.substr(0, 4) == "$2y$") {
+            struct crypt_data data;
+            memset(&data, 0, sizeof(data));
+
+            char* result = crypt_r(password.c_str(), stored_hash.c_str(), &data);
+            if (!result) {
+                return common::result::Result<bool>::failure("bcrypt verification failed");
+            }
+
+            // Constant-time comparison
+            return constantTimeCompare(result, stored_hash);
+        }
+
+        // Legacy PBKDF2 format: $pbkdf2-sha256$i=...
+        if (stored_hash.substr(0, 15) == "$pbkdf2-sha256$") {
+            return verifyPasswordPBKDF2(password, stored_hash);
+        }
+
+        return common::result::Result<bool>::failure("Unknown hash format");
+    }
+
+private:
+    // bcrypt base64 encoding (uses ./ instead of +/ and no padding)
+    static std::string encodeBcryptBase64(const unsigned char* data, size_t len) {
+        static const char kTable[] =
+            "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+        std::string result;
+        size_t i = 0;
+        while (i < len) {
+            unsigned int c0 = static_cast<unsigned int>(data[i++]);
+            unsigned int c1 = (i < len) ? static_cast<unsigned int>(data[i++]) : 0;
+            unsigned int c2 = (i < len) ? static_cast<unsigned int>(data[i++]) : 0;
+
+            result += kTable[(c0 >> 2) & 0x3F];
+            result += kTable[((c0 & 0x03) << 4) | ((c1 >> 4) & 0x0F)];
+            if (i - 1 < len) result += kTable[((c1 & 0x0F) << 2) | ((c2 >> 6) & 0x03)];
+            if (i < len) result += kTable[c2 & 0x3F];
+        }
+        return result;
+    }
+
+    static bool constantTimeCompare(const std::string& a, const std::string& b) {
+        if (a.size() != b.size()) return false;
+        unsigned char diff = 0;
+        for (size_t i = 0; i < a.size(); ++i) {
+            diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+        }
+        return diff == 0;
+    }
+
+    // PBKDF2 fallback methods (for backward compatibility)
+    static common::result::Result<std::string> hashPasswordPBKDF2(const std::string& password) {
         constexpr int kSaltLen = 16;
         constexpr int kIterations = 10000;
         constexpr int kHashLen = 32;
@@ -52,13 +147,9 @@ public:
         return oss.str();
     }
 
-    static common::result::Result<bool> verifyPassword(const std::string& password,
-                                                        const std::string& stored_hash) {
+    static common::result::Result<bool> verifyPasswordPBKDF2(const std::string& password,
+                                                              const std::string& stored_hash) {
         // Expected format: $pbkdf2-sha256$i=10000$salt_base64$hash_base64
-        if (stored_hash.empty() || stored_hash[0] != '$') {
-            return common::result::Result<bool>::failure("Invalid hash format");
-        }
-
         std::vector<std::string> parts;
         std::istringstream iss(stored_hash);
         std::string part;
@@ -72,7 +163,6 @@ public:
             return common::result::Result<bool>::failure("Invalid hash format");
         }
 
-        // Parse iterations
         const std::string& iter_str = parts[1];
         if (iter_str.substr(0, 2) != "i=") {
             return common::result::Result<bool>::failure("Invalid hash format: missing iterations");
@@ -88,7 +178,6 @@ public:
             return common::result::Result<bool>::failure("Invalid hash format: non-positive iterations");
         }
 
-        // Decode salt and original hash
         auto salt_result = base64Decode(parts[2]);
         if (!salt_result.ok()) {
             return common::result::Result<bool>::failure(salt_result.error());
@@ -106,7 +195,6 @@ public:
             return common::result::Result<bool>::failure("Invalid hash format: empty hash");
         }
 
-        // Recompute hash
         std::vector<unsigned char> computed_hash(hash_len);
         if (PKCS5_PBKDF2_HMAC(password.c_str(), static_cast<int>(password.size()),
                                salt.data(), static_cast<int>(salt.size()),
@@ -115,7 +203,6 @@ public:
             return common::result::Result<bool>::failure("PKCS5_PBKDF2_HMAC failed");
         }
 
-        // Constant-time comparison
         unsigned char diff = 0;
         for (int i = 0; i < hash_len; ++i) {
             diff |= computed_hash[static_cast<size_t>(i)] ^ orig_hash[static_cast<size_t>(i)];
@@ -124,7 +211,6 @@ public:
         return diff == 0;
     }
 
-private:
     static std::string base64Encode(const unsigned char* data, int len) {
         static const char kTable[] =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

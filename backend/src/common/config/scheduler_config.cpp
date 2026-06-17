@@ -24,6 +24,15 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
     }
 
+    // server.tls
+    if (root["server"] && root["server"]["tls"]) {
+        auto tls = root["server"]["tls"];
+        if (tls["enabled"]) config.server.tls.enabled = tls["enabled"].as<bool>();
+        if (tls["cert_path"]) config.server.tls.cert_path = tls["cert_path"].as<std::string>();
+        if (tls["key_path"]) config.server.tls.key_path = tls["key_path"].as<std::string>();
+        if (tls["ca_path"]) config.server.tls.ca_path = tls["ca_path"].as<std::string>();
+    }
+
     // database
     if (root["database"]) {
         auto db = root["database"];

@@ -2,12 +2,14 @@
 #include <string>
 #include <memory>
 #include <thread>
+#include <fstream>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/async.h>
 #include <drogon/drogon.h>
 #include <grpcpp/grpcpp.h>
+#include <grpcpp/security/server_credentials.h>
 
 #include "common/config/scheduler_config.h"
 #include "common/database/database_manager.h"
@@ -99,7 +101,32 @@ int main(int argc, char* argv[]) {
     taskflow::scheduler::grpc::SchedulerServiceImpl scheduler_service;
     std::string grpc_address = "0.0.0.0:" + std::to_string(config.server.grpc_port);
     ::grpc::ServerBuilder grpc_builder;
-    grpc_builder.AddListeningPort(grpc_address, ::grpc::InsecureServerCredentials());
+
+    // Configure TLS if enabled
+    if (config.server.tls.enabled) {
+        grpc::SslServerCredentialsOptions ssl_opts;
+        // Read cert and key files
+        std::ifstream cert_file(config.server.tls.cert_path);
+        std::ifstream key_file(config.server.tls.key_path);
+        std::string cert_str((std::istreambuf_iterator<char>(cert_file)),
+                              std::istreambuf_iterator<char>());
+        std::string key_str((std::istreambuf_iterator<char>(key_file)),
+                             std::istreambuf_iterator<char>());
+        grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert;
+        key_cert.private_key = key_str;
+        key_cert.cert_chain = cert_str;
+        ssl_opts.pem_key_cert_pairs.push_back(key_cert);
+        if (!config.server.tls.ca_path.empty()) {
+            std::ifstream ca_file(config.server.tls.ca_path);
+            std::string ca_str((std::istreambuf_iterator<char>(ca_file)),
+                                std::istreambuf_iterator<char>());
+            ssl_opts.pem_root_certs = ca_str;
+        }
+        grpc_builder.AddListeningPort(grpc_address, grpc::SslServerCredentials(ssl_opts));
+    } else {
+        grpc_builder.AddListeningPort(grpc_address, ::grpc::InsecureServerCredentials());
+    }
+
     grpc_builder.RegisterService(&scheduler_service);
     auto grpc_server = grpc_builder.BuildAndStart();
     if (!grpc_server) {

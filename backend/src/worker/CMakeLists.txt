@@ -5,6 +5,7 @@ add_executable(worker
     executor/command_executor.cpp
     executor/script_executor.cpp
     executor/sql_executor.cpp
+    executor/log_sink.cpp
 )
 
 target_link_libraries(worker PRIVATE

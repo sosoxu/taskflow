@@ -287,6 +287,27 @@ common::result::Result<void> DagDriver::dispatchTask(
                          task_instance.id, decrypt_result.error());
         }
     }
+
+    // Merge param_overrides from DAG node
+    try {
+        const auto& dag = workflow.dag_json;
+        if (dag.contains("nodes") && dag["nodes"].is_array()) {
+            for (const auto& node : dag["nodes"]) {
+                if (node.contains("task_id") && node["task_id"].is_string() &&
+                    node["task_id"].get<std::string>() == task_instance.task_id) {
+                    if (node.contains("param_overrides") && node["param_overrides"].is_object()) {
+                        for (auto& [key, value] : node["param_overrides"].items()) {
+                            config[key] = value;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("DagDriver: failed to merge param_overrides: {}", e.what());
+    }
+
     request.set_workflow_instance_id(task_instance.workflow_instance_id);
     request.set_config_json(config.dump());
 

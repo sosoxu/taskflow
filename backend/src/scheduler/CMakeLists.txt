@@ -35,4 +35,5 @@ target_link_libraries(scheduler PRIVATE
     taskflow_proto
     Drogon::Drogon
     gRPC::grpc++
+    crypt
 )

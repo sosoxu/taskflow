@@ -24,6 +24,8 @@ public:
     common::result::Result<common::util::TokenPayload> verifyAccessToken(
         const std::string& token);
 
+    common::result::Result<void> logout(const std::string& access_token);
+
 private:
     std::string jwt_secret_;
     int access_ttl_;

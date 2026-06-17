@@ -118,4 +118,36 @@ void AuthController::refreshToken(
     callback(httpResp);
 }
 
+void AuthController::logout(
+    const drogon::HttpRequestPtr& req,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
+
+    auto json = req->getJsonObject();
+    if (!json) {
+        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        return;
+    }
+
+    std::string access_token = (*json)["access_token"].asString();
+
+    if (access_token.empty()) {
+        sendError(std::move(callback), 400, 40000, "Access token is required");
+        return;
+    }
+
+    auto result = auth_service_->logout(access_token);
+    if (!result.ok()) {
+        sendError(std::move(callback), 400, 40000, result.error());
+        return;
+    }
+
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = Json::nullValue;
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(drogon::k200OK);
+    callback(httpResp);
+}
+
 }  // namespace taskflow::scheduler::api
