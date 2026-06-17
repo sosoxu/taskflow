@@ -346,8 +346,8 @@ async function fetchInstance() {
   try {
     const res = await getInstance(id)
     instance.value = res.data.data
-    // Fetch workflow for name and DAG
-    if (instance.value?.workflow_id) {
+    // Fetch workflow for name and DAG (only once, or when workflow_id changes)
+    if (instance.value?.workflow_id && !workflowName.value) {
       const wfRes = await getWorkflow(instance.value.workflow_id)
       workflowName.value = wfRes.data?.data?.name || ''
       dag.value = wfRes.data?.data?.dag_json || null
@@ -489,10 +489,21 @@ function goBack() {
 
 // Auto-poll for running instances
 function startPolling() {
-  pollTimer = setInterval(() => {
-    if (instance.value && (instance.value.status === 'RUNNING' || instance.value.status === 'PENDING')) {
-      fetchInstance()
+  pollTimer = setInterval(async () => {
+    if (!instance.value) return
+    const status = instance.value.status
+    // Stop polling if instance reached a terminal state
+    if (status !== 'RUNNING' && status !== 'PENDING' && status !== 'PAUSED') {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      return
     }
+    // Poll without loading spinner
+    const id = route.params.id as string
+    if (!id) return
+    try {
+      const res = await getInstance(id)
+      instance.value = res.data.data
+    } catch { /* ignore poll errors */ }
   }, 5000)
 }
 
