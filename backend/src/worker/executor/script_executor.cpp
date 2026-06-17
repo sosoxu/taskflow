@@ -27,8 +27,25 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
     }
 
     std::string script_content = config["script_content"].get<std::string>();
+    std::string interpreter = "bash";
+    if (config.contains("interpreter") && config["interpreter"].is_string()) {
+        interpreter = config["interpreter"].get<std::string>();
+    }
+
+    // Determine file extension based on interpreter
+    std::string ext = ".sh";
+    if (interpreter.find("python") != std::string::npos) {
+        ext = ".py";
+    } else if (interpreter == "node") {
+        ext = ".js";
+    } else if (interpreter == "perl") {
+        ext = ".pl";
+    } else if (interpreter == "ruby") {
+        ext = ".rb";
+    }
+
     std::string script_path =
-        "/tmp/taskflow_script_" + task_instance_id + ".sh";
+        "/tmp/taskflow_script_" + task_instance_id + ext;
     std::string log_path = log_dir + "/" + task_instance_id + ".log";
 
     // Write script to temp file
@@ -72,7 +89,7 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
         dup2(fd, STDERR_FILENO);
         close(fd);
 
-        execl("/bin/bash", "bash", script_path.c_str(), nullptr);
+        execlp(interpreter.c_str(), interpreter.c_str(), script_path.c_str(), nullptr);
         _exit(127);
     }
 

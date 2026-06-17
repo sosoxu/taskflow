@@ -1,11 +1,24 @@
 #include "scheduler/api/instance_controller.h"
 
+#include <cctype>
 #include <sstream>
 #include <drogon/HttpResponse.h>
 
 namespace taskflow::scheduler::api {
 
 namespace {
+
+static bool isValidUUID(const std::string& id) {
+    if (id.length() != 36) return false;
+    for (size_t i = 0; i < 36; i++) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (id[i] != '-') return false;
+        } else {
+            if (!std::isxdigit(static_cast<unsigned char>(id[i]))) return false;
+        }
+    }
+    return true;
+}
 
 Json::Value nlohmannToJsoncpp(const nlohmann::json& j) {
     Json::Reader reader;
@@ -46,6 +59,11 @@ void InstanceController::pauseInstance(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = instance_service_->pauseInstance(id);
 
     if (!result.ok()) {
@@ -67,6 +85,11 @@ void InstanceController::resumeInstance(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = instance_service_->resumeInstance(id);
 
     if (!result.ok()) {
@@ -87,6 +110,11 @@ void InstanceController::cancelInstance(
     const drogon::HttpRequestPtr&,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
+
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
 
     auto result = instance_service_->cancelInstance(id);
 
@@ -110,6 +138,15 @@ void InstanceController::retryTask(
     const std::string& id,
     const std::string& taskInstanceId) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+    if (!isValidUUID(taskInstanceId)) {
+        sendError(std::move(callback), 400, 40001, "Invalid task instance ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = instance_service_->retryTask(id, taskInstanceId);
 
     if (!result.ok()) {
@@ -132,6 +169,15 @@ void InstanceController::killTask(
     const std::string& id,
     const std::string& taskInstanceId) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+    if (!isValidUUID(taskInstanceId)) {
+        sendError(std::move(callback), 400, 40001, "Invalid task instance ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = instance_service_->killTask(id, taskInstanceId);
 
     if (!result.ok()) {
@@ -153,6 +199,11 @@ void InstanceController::getInstance(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = instance_service_->getInstance(id);
 
     if (!result.ok()) {
@@ -167,6 +218,11 @@ void InstanceController::listInstances(
     const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
+
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
 
     int page = 1;
     int page_size = 10;
@@ -224,6 +280,15 @@ void InstanceController::getTaskLog(
     const std::string& id,
     const std::string& taskInstanceId) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+    if (!isValidUUID(taskInstanceId)) {
+        sendError(std::move(callback), 400, 40001, "Invalid task instance ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = instance_service_->getTaskLog(id, taskInstanceId);
 
     if (!result.ok()) {
@@ -243,6 +308,16 @@ void InstanceController::streamTaskLog(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id,
     const std::string& taskInstanceId) {
+
+    // Validate UUID format
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+    if (!isValidUUID(taskInstanceId)) {
+        sendError(std::move(callback), 400, 40001, "Invalid task instance ID format: must be a valid UUID");
+        return;
+    }
 
     // Validate the task instance exists
     auto validate_result = instance_service_->validateTaskInstance(id, taskInstanceId);

@@ -29,6 +29,8 @@ public:
 
     common::result::Result<std::vector<common::models::WorkflowInstance>> listAll(int offset, int limit);
 
+    common::result::Result<int> countAll();
+
     common::result::Result<std::vector<common::models::WorkflowInstance>> listActive();
 };
 

@@ -143,7 +143,60 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
         }
     }
 
-    // 5. Find ready tasks (all upstream SUCCESS)
+    // 5. Check for FAILED/TIMEOUT tasks that can be retried
+    for (const auto& ti : task_instances) {
+        if (ti.status == "FAILED" || ti.status == "TIMEOUT") {
+            // Get task info for max_retries and retry_interval
+            auto task_info_result = task_dao_.findById(ti.task_id);
+            if (!task_info_result.ok()) {
+                continue;
+            }
+            const auto& task_info = task_info_result.value();
+            int max_retries = task_info.max_retries;
+            int retry_interval = task_info.retry_interval;
+
+            if (ti.retry_count >= max_retries) {
+                continue;  // No more retries
+            }
+
+            // Check if enough time has passed since last failure
+            if (!ti.finished_at.empty()) {
+                try {
+                    std::tm tm_finished{};
+                    std::istringstream iss(ti.finished_at);
+                    iss >> std::get_time(&tm_finished, "%Y-%m-%d %H:%M:%S");
+                    if (!iss.fail()) {
+                        auto finished_tp = std::chrono::system_clock::from_time_t(std::mktime(&tm_finished));
+                        auto now_tp = std::chrono::system_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - finished_tp).count();
+
+                        if (elapsed < retry_interval) {
+                            spdlog::info("DagDriver: task instance {} waiting for retry interval ({}s remaining)",
+                                         ti.id, retry_interval - elapsed);
+                            continue;  // Not yet time to retry
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    spdlog::warn("DagDriver: failed to parse finished_at for task instance {}: {}",
+                                 ti.id, e.what());
+                }
+            }
+
+            // Reset task instance for retry
+            auto retry_result = task_instance_dao_.resetForRetry(ti.id);
+            if (retry_result.ok()) {
+                spdlog::info("DagDriver: task instance {} reset for retry (retry_count={}/max_retries={})",
+                             ti.id, ti.retry_count + 1, max_retries);
+                // Update task_statuses to PENDING so it will be dispatched
+                task_statuses[ti.node_id] = "PENDING";
+            } else {
+                spdlog::error("DagDriver: failed to reset task instance {} for retry: {}",
+                              ti.id, retry_result.error());
+            }
+        }
+    }
+
+    // 5b. Find ready tasks (all upstream SUCCESS)
     auto ready_tasks = DagEngine::findReadyTasks(dag_json, task_statuses);
 
     // 5. For each ready task, dispatch it
@@ -187,8 +240,21 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     }
 
     std::map<std::string, std::string> updated_statuses;
+    bool has_pending_retry = false;
     for (const auto& ti : updated_tasks_result.value()) {
         updated_statuses[ti.task_id] = ti.status;
+        // Check if any failed task still has retries remaining
+        if ((ti.status == "FAILED" || ti.status == "TIMEOUT")) {
+            auto task_info_result = task_dao_.findById(ti.task_id);
+            if (task_info_result.ok() && ti.retry_count < task_info_result.value().max_retries) {
+                has_pending_retry = true;
+            }
+        }
+    }
+
+    // Don't mark workflow as finished if there are tasks pending retry
+    if (has_pending_retry) {
+        return;
     }
 
     if (DagEngine::allTasksFinished(updated_statuses)) {
@@ -324,6 +390,13 @@ common::result::Result<void> DagDriver::dispatchTask(
     if (!response.accepted()) {
         return common::result::Result<void>::failure(
             "Worker rejected task: " + response.error_message());
+    }
+
+    // Mark task instance as RUNNING and set started_at
+    auto running_result = task_instance_dao_.markRunning(task_instance.id);
+    if (!running_result.ok()) {
+        spdlog::warn("DagDriver: failed to mark task instance {} as RUNNING: {}",
+                     task_instance.id, running_result.error());
     }
 
     spdlog::info("DagDriver: dispatched task instance {} to worker {} ({})",

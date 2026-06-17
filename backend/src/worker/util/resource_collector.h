@@ -90,8 +90,8 @@ private:
             if (line.compare(0, 9, "MemTotal:") == 0) {
                 std::istringstream iss(line.substr(9));
                 iss >> mem_total;
-            } else if (line.compare(0, 12, "MemAvailable:") == 0) {
-                std::istringstream iss(line.substr(12));
+            } else if (line.compare(0, 13, "MemAvailable:") == 0) {
+                std::istringstream iss(line.substr(13));
                 iss >> mem_available;
             }
 

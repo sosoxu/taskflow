@@ -1,10 +1,23 @@
 #include "scheduler/api/workflow_controller.h"
 
+#include <cctype>
 #include <drogon/HttpResponse.h>
 
 namespace taskflow::scheduler::api {
 
 namespace {
+
+static bool isValidUUID(const std::string& id) {
+    if (id.length() != 36) return false;
+    for (size_t i = 0; i < 36; i++) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (id[i] != '-') return false;
+        } else {
+            if (!std::isxdigit(static_cast<unsigned char>(id[i]))) return false;
+        }
+    }
+    return true;
+}
 
 Json::Value nlohmannToJsoncpp(const nlohmann::json& j) {
     Json::Reader reader;
@@ -121,6 +134,11 @@ void WorkflowController::getWorkflow(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+
     auto result = workflow_service_->getWorkflow(id);
 
     if (!result.ok()) {
@@ -135,6 +153,11 @@ void WorkflowController::updateWorkflow(
     const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
+
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
 
     auto json = req->getJsonObject();
     if (!json) {
@@ -181,6 +204,11 @@ void WorkflowController::deleteWorkflow(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+
     std::string user_id = req->getAttributes()->get<std::string>("user_id");
     std::string role = req->getAttributes()->get<std::string>("role");
 
@@ -204,6 +232,11 @@ void WorkflowController::triggerWorkflow(
     const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
+
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
 
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
 

@@ -11,6 +11,14 @@ common::result::Result<nlohmann::json> TaskService::createTask(
     int timeout, int max_retries, int retry_interval,
     const nlohmann::json& resource_tags, const std::string& creator_id) {
 
+    // Validate task name
+    if (name.empty()) {
+        return common::result::Result<nlohmann::json>::failure("Task name cannot be empty");
+    }
+    if (name.length() > 64) {
+        return common::result::Result<nlohmann::json>::failure("Task name cannot exceed 64 characters");
+    }
+
     // Validate type
     if (type != "command" && type != "script" && type != "sql") {
         return common::result::Result<nlohmann::json>::failure(

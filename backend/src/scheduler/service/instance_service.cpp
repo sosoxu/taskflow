@@ -99,6 +99,35 @@ common::result::Result<void> InstanceService::cancelInstance(const std::string& 
                 spdlog::warn("InstanceService: failed to cancel task instance {}: {}",
                              task_instance.id, task_update.error());
             }
+        } else if (task_instance.status == "RUNNING") {
+            // Send CancelTask gRPC to the worker to kill the running process
+            if (!task_instance.worker_id.empty()) {
+                auto worker_result = worker_dao_.findById(task_instance.worker_id);
+                if (worker_result.ok()) {
+                    const auto& worker = worker_result.value();
+                    auto channel = grpc::CreateChannel(worker.address, grpc::InsecureChannelCredentials());
+                    auto stub = taskflow::v1::WorkerService::NewStub(channel);
+
+                    taskflow::v1::TaskCancelRequest request;
+                    request.set_task_instance_id(task_instance.id);
+
+                    taskflow::v1::TaskCancelResponse response;
+                    grpc::ClientContext context;
+                    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+                    auto grpc_status = stub->CancelTask(&context, request, &response);
+
+                    if (!grpc_status.ok()) {
+                        spdlog::warn("InstanceService: gRPC CancelTask failed for task instance {}: {}",
+                                     task_instance.id, grpc_status.error_message());
+                    }
+                }
+            }
+            auto task_update = task_instance_dao_.markFinished(
+                task_instance.id, "CANCELLED", -1, "Cancelled by user");
+            if (!task_update.ok()) {
+                spdlog::warn("InstanceService: failed to cancel running task instance {}: {}",
+                             task_instance.id, task_update.error());
+            }
         }
     }
 
@@ -126,6 +155,14 @@ common::result::Result<void> InstanceService::retryTask(
     if (task_instance.workflow_instance_id != instance_id) {
         return common::result::Result<void>::failure(
             "Task instance does not belong to the specified workflow instance");
+    }
+
+    // Only allow retry for failed/timed-out tasks
+    if (task_instance.status != "FAILED" && task_instance.status != "TIMEOUT"
+        && task_instance.status != "UPSTREAM_FAILED") {
+        return common::result::Result<void>::failure(
+            "Cannot retry task instance with status: " + task_instance.status
+            + ". Only FAILED, TIMEOUT, or UPSTREAM_FAILED tasks can be retried");
     }
 
     // Reset the task instance to PENDING and increment retry_count
@@ -328,6 +365,9 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(int pag
         return common::result::Result<nlohmann::json>::failure(result.error());
     }
 
+    auto countResult = workflow_instance_dao_.countAll();
+    int total = countResult.ok() ? countResult.value() : 0;
+
     nlohmann::json instances = nlohmann::json::array();
     for (const auto& inst : result.value()) {
         instances.push_back(inst.toJson());
@@ -336,7 +376,8 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(int pag
     return nlohmann::json{
         {"instances", instances},
         {"page", page},
-        {"page_size", page_size}
+        {"page_size", page_size},
+        {"total", total}
     };
 }
 

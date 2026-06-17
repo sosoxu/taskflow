@@ -1,6 +1,12 @@
 #include "scheduler/service/workflow_service.h"
 
 #include "scheduler/service/dag_validator.h"
+#include "scheduler/engine/cron_parser.h"
+
+#include <chrono>
+#include <ctime>
+#include <sstream>
+#include <iomanip>
 
 namespace taskflow::scheduler::service {
 
@@ -14,6 +20,14 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
     const std::string& cron_expression,
     bool cron_enabled,
     const std::string& creator_id) {
+
+    // Validate workflow name
+    if (name.empty()) {
+        return common::result::Result<nlohmann::json>::failure("Workflow name cannot be empty");
+    }
+    if (name.length() > 64) {
+        return common::result::Result<nlohmann::json>::failure("Workflow name cannot exceed 64 characters");
+    }
 
     // 1. Validate DAG structure
     auto dagResult = DagValidator::validate(dag_json);
@@ -72,8 +86,21 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
             "Failed to create workflow: " + error);
     }
 
-    // 5. If cron_enabled && !cron_expression.empty(), create CronJob
+    // 5. If cron_enabled && !cron_expression.empty(), validate and create CronJob
     if (cron_enabled && !cron_expression.empty()) {
+        // Validate cron expression by computing next trigger time
+        auto now = std::chrono::system_clock::now();
+        auto now_time_t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_now{};
+        gmtime_r(&now_time_t, &tm_now);
+        std::ostringstream oss;
+        oss << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S");
+        auto cronValidateResult = engine::CronParser::getNextTrigger(cron_expression, oss.str());
+        if (!cronValidateResult.ok()) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Invalid cron expression: " + cronValidateResult.error());
+        }
+
         auto cronResult = cron_job_dao_.create(createResult.value(), cron_expression);
         if (!cronResult.ok()) {
             return common::result::Result<nlohmann::json>::failure(
@@ -211,6 +238,19 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     // Update or create CronJob
     auto cronJobResult = cron_job_dao_.findByWorkflowId(id);
     if (cron_enabled && !cron_expression.empty()) {
+        // Validate cron expression
+        auto now = std::chrono::system_clock::now();
+        auto now_time_t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_now{};
+        gmtime_r(&now_time_t, &tm_now);
+        std::ostringstream oss;
+        oss << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S");
+        auto cronValidateResult = engine::CronParser::getNextTrigger(cron_expression, oss.str());
+        if (!cronValidateResult.ok()) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Invalid cron expression: " + cronValidateResult.error());
+        }
+
         if (cronJobResult.ok()) {
             auto cronUpdateResult = cron_job_dao_.update(cronJobResult.value().id, cron_expression, true);
             if (!cronUpdateResult.ok()) {

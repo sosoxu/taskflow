@@ -28,26 +28,22 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
     std::string command = config["command"].get<std::string>();
     std::string log_path = log_dir + "/" + task_instance_id + ".log";
 
-    // Split command into argv array for execvp (avoid shell injection)
-    std::vector<std::string> args;
-    std::istringstream iss(command);
-    std::string token;
-    while (iss >> token) {
-        args.push_back(token);
-    }
+    // Use /bin/sh -c to support shell operators (&&, ||, |, ;, etc.)
+    std::string full_cmd = config["command"].get<std::string>();
 
-    if (args.empty()) {
+    char* args[] = {
+        const_cast<char*>("/bin/sh"),
+        const_cast<char*>("-c"),
+        const_cast<char*>(full_cmd.c_str()),
+        nullptr
+    };
+
+    if (full_cmd.empty()) {
         result.status = "FAILED";
         result.exit_code = 1;
         result.error_message = "Empty command";
         return result;
     }
-
-    std::vector<char*> argv;
-    for (auto& arg : args) {
-        argv.push_back(arg.data());
-    }
-    argv.push_back(nullptr);
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -67,7 +63,7 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
         dup2(fd, STDERR_FILENO);
         close(fd);
 
-        execvp(argv[0], argv.data());
+        execvp("/bin/sh", args);
         _exit(127);
     }
 

@@ -145,4 +145,13 @@ common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowIn
         });
 }
 
+common::result::Result<int> WorkflowInstanceDao::countAll() {
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            auto row = txn.exec1("SELECT COUNT(*) FROM workflow_instances");
+            int total = row[0].as<int>();
+            return total;
+        });
+}
+
 }  // namespace taskflow::scheduler::dao
