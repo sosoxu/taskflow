@@ -31,6 +31,10 @@ private:
         const common::models::TaskInstance& task_instance,
         const common::models::Workflow& workflow);
 
+    // Resolve ${var} placeholders in JSON config using parameter values
+    static void resolvePlaceholders(nlohmann::json& config, const nlohmann::json& params);
+    static std::string resolveString(const std::string& input, const nlohmann::json& params);
+
     int drive_interval_;
     std::string aes_key_;
     std::shared_ptr<grpc::LeaderElection> leader_election_;

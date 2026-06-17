@@ -26,6 +26,9 @@ public:
 
     common::result::Result<void> logout(const std::string& access_token);
 
+    // Add jti to token blacklist directly
+    void blacklistJti(const std::string& jti);
+
 private:
     std::string jwt_secret_;
     int access_ttl_;

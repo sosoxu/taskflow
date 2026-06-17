@@ -17,6 +17,7 @@ public:
                                                 int max_retries,
                                                 int retry_interval,
                                                 const nlohmann::json& resource_tags,
+                                                const nlohmann::json& parameters_json,
                                                 const std::string& creator_id);
 
     common::result::Result<common::models::Task> findById(const std::string& id);

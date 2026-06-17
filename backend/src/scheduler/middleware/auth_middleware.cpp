@@ -84,6 +84,7 @@ void AuthFilter::doFilter(
     req->getAttributes()->insert("user_id", payload.user_id);
     req->getAttributes()->insert("username", payload.username);
     req->getAttributes()->insert("role", payload.role);
+    req->getAttributes()->insert("jti", payload.jti);
 
     fccb();
 }

@@ -183,4 +183,10 @@ common::result::Result<void> AuthService::logout(const std::string& access_token
     return common::result::Result<void>();
 }
 
+void AuthService::blacklistJti(const std::string& jti) {
+    if (!jti.empty()) {
+        common::util::TokenBlacklist::instance().add(jti);
+    }
+}
+
 }  // namespace taskflow::scheduler::service

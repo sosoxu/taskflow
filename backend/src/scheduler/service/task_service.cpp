@@ -9,7 +9,8 @@ common::result::Result<nlohmann::json> TaskService::createTask(
     const std::string& name, const std::string& type,
     const nlohmann::json& config_json, const std::string& description,
     int timeout, int max_retries, int retry_interval,
-    const nlohmann::json& resource_tags, const std::string& creator_id) {
+    const nlohmann::json& resource_tags, const nlohmann::json& parameters_json,
+    const std::string& creator_id) {
 
     // Validate task name
     if (name.empty()) {
@@ -42,7 +43,7 @@ common::result::Result<nlohmann::json> TaskService::createTask(
     // Create task via DAO
     auto createResult = task_dao_.create(
         name, type, encrypted_config, description,
-        timeout, max_retries, retry_interval, resource_tags, creator_id);
+        timeout, max_retries, retry_interval, resource_tags, parameters_json, creator_id);
     if (!createResult.ok()) {
         std::string error = createResult.error();
         if (error.find("duplicate key") != std::string::npos) {

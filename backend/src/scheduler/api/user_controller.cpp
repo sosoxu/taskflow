@@ -133,13 +133,7 @@ void UserController::updateUserRole(
         return;
     }
 
-    Json::Value resp;
-    resp["code"] = 0;
-    resp["message"] = "success";
-    resp["data"] = Json::nullValue;
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
-    httpResp->setStatusCode(drogon::k200OK);
-    callback(httpResp);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void UserController::deleteUser(

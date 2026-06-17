@@ -13,6 +13,7 @@ CREATE TABLE users (
     password_hash   VARCHAR(128) NOT NULL,
     role            VARCHAR(16) NOT NULL DEFAULT 'operator'
                         CHECK (role IN ('admin', 'operator', 'viewer')),
+    deleted_at      TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -32,6 +33,7 @@ CREATE TABLE tasks (
     max_retries     INTEGER NOT NULL DEFAULT 0,
     retry_interval  INTEGER NOT NULL DEFAULT 60,
     resource_tags   JSONB NOT NULL DEFAULT '[]',
+    parameters_json JSONB NOT NULL DEFAULT '{}',
     creator_id      UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     version         INTEGER NOT NULL DEFAULT 1,
     deleted         BOOLEAN NOT NULL DEFAULT FALSE,
@@ -79,6 +81,7 @@ CREATE TABLE workflow_instances (
                             CHECK (trigger_type IN ('manual', 'cron')),
     started_at          TIMESTAMPTZ,
     finished_at         TIMESTAMPTZ,
+    param_overrides   JSONB NOT NULL DEFAULT '{}',
     creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

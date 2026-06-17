@@ -15,6 +15,7 @@ struct Task {
     int max_retries = 0;
     int retry_interval = 60;
     nlohmann::json resource_tags;
+    nlohmann::json parameters_json;
     std::string creator_id;
     int version = 1;
     bool deleted = false;
@@ -32,6 +33,7 @@ struct Task {
         task.max_retries = row["max_retries"].as<int>();
         task.retry_interval = row["retry_interval"].as<int>();
         task.resource_tags = nlohmann::json::parse(row["resource_tags"].as<std::string>());
+        task.parameters_json = nlohmann::json::parse(row["parameters_json"].as<std::string>());
         task.creator_id = row["creator_id"].as<std::string>();
         task.version = row["version"].as<int>();
         task.deleted = row["deleted"].as<bool>();
@@ -51,6 +53,7 @@ struct Task {
             {"max_retries", max_retries},
             {"retry_interval", retry_interval},
             {"resource_tags", resource_tags},
+            {"parameters_json", parameters_json},
             {"creator_id", creator_id},
             {"version", version},
             {"deleted", deleted},

@@ -49,7 +49,8 @@ public:
 
     // Trigger workflow execution: create WorkflowInstance + TaskInstances
     common::result::Result<nlohmann::json> triggerWorkflow(
-        const std::string& workflow_id, const std::string& creator_id);
+        const std::string& workflow_id, const std::string& creator_id,
+        const nlohmann::json& param_overrides = nlohmann::json::object());
 
 private:
     dao::WorkflowDao workflow_dao_;

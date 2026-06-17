@@ -124,16 +124,23 @@ void AuthController::logout(
     const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
 
-    auto json = req->getJsonObject();
-    if (!json) {
-        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
-        return;
+    // Try to get access_token from Authorization header first
+    std::string access_token;
+    auto auth_header = req->getHeader("authorization");
+    if (!auth_header.empty() && auth_header.find("Bearer ") == 0) {
+        access_token = auth_header.substr(7);
     }
 
-    std::string access_token = (*json)["access_token"].asString();
+    // Fallback: try to get access_token from request body
+    if (access_token.empty()) {
+        auto json = req->getJsonObject();
+        if (json && (*json).isMember("access_token")) {
+            access_token = (*json)["access_token"].asString();
+        }
+    }
 
     if (access_token.empty()) {
-        sendError(std::move(callback), 400, 40002, "Access token is required");
+        sendError(std::move(callback), 400, 40002, "Access token is required (via Authorization header or request body)");
         return;
     }
 

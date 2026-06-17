@@ -27,6 +27,9 @@ public:
 
     // 删除
     common::result::Result<void> remove(const std::string& id);
+
+    // 软删除
+    common::result::Result<void> softDelete(const std::string& id);
 };
 
 }  // namespace taskflow::scheduler::dao

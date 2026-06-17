@@ -22,7 +22,7 @@ public:
         const std::string& username, const std::string& password, const std::string& role);
 
     // Update user role
-    common::result::Result<void> updateUserRole(const std::string& id, const std::string& role);
+    common::result::Result<nlohmann::json> updateUserRole(const std::string& id, const std::string& role);
 
     // Delete user
     common::result::Result<void> deleteUser(const std::string& id, const std::string& current_user_id);

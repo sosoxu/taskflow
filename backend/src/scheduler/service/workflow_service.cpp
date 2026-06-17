@@ -318,7 +318,8 @@ common::result::Result<void> WorkflowService::deleteWorkflow(
 }
 
 common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
-    const std::string& workflow_id, const std::string& creator_id) {
+    const std::string& workflow_id, const std::string& creator_id,
+    const nlohmann::json& param_overrides) {
 
     // 1. Find workflow by id
     auto wfResult = workflow_dao_.findById(workflow_id);
@@ -330,7 +331,7 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
 
     // 2. Create WorkflowInstance (status=PENDING, trigger_type="manual")
     auto instanceResult = workflow_instance_dao_.create(
-        workflow_id, workflow.version, "manual", creator_id);
+        workflow_id, workflow.version, "manual", creator_id, param_overrides);
     if (!instanceResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
             "Failed to create workflow instance: " + instanceResult.error());

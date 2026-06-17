@@ -374,6 +374,28 @@ common::result::Result<void> DagDriver::dispatchTask(
         spdlog::warn("DagDriver: failed to merge param_overrides: {}", e.what());
     }
 
+    // Merge param_overrides from WorkflowInstance (runtime overrides)
+    try {
+        auto instance_result = workflow_instance_dao_.findById(task_instance.workflow_instance_id);
+        if (instance_result.ok() && instance_result.value().param_overrides.is_object()) {
+            for (auto& [key, value] : instance_result.value().param_overrides.items()) {
+                config[key] = value;
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("DagDriver: failed to merge workflow instance param_overrides: {}", e.what());
+    }
+
+    // Resolve ${var} placeholders in config using task.parameters_json
+    try {
+        nlohmann::json params = task.parameters_json;
+        if (params.is_object()) {
+            resolvePlaceholders(config, params);
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("DagDriver: failed to resolve placeholders: {}", e.what());
+    }
+
     request.set_workflow_instance_id(task_instance.workflow_instance_id);
     request.set_config_json(config.dump());
 
@@ -403,6 +425,53 @@ common::result::Result<void> DagDriver::dispatchTask(
                  task_instance.id, worker.id, worker.name);
 
     return common::result::Result<void>();
+}
+
+std::string DagDriver::resolveString(const std::string& input, const nlohmann::json& params) {
+    std::string result;
+    size_t i = 0;
+    while (i < input.size()) {
+        if (i + 1 < input.size() && input[i] == '$' && input[i + 1] == '{') {
+            // Find closing brace
+            size_t end = input.find('}', i + 2);
+            if (end != std::string::npos) {
+                std::string var_name = input.substr(i + 2, end - i - 2);
+                if (params.contains(var_name)) {
+                    if (params[var_name].is_string()) {
+                        result += params[var_name].get<std::string>();
+                    } else {
+                        result += params[var_name].dump();
+                    }
+                } else {
+                    // Variable not found, keep placeholder as-is
+                    result += input.substr(i, end - i + 1);
+                }
+                i = end + 1;
+            } else {
+                result += input[i];
+                i++;
+            }
+        } else {
+            result += input[i];
+            i++;
+        }
+    }
+    return result;
+}
+
+void DagDriver::resolvePlaceholders(nlohmann::json& config, const nlohmann::json& params) {
+    if (config.is_string()) {
+        std::string str_val = config.get<std::string>();
+        config = resolveString(str_val, params);
+    } else if (config.is_object()) {
+        for (auto& [key, value] : config.items()) {
+            resolvePlaceholders(value, params);
+        }
+    } else if (config.is_array()) {
+        for (auto& item : config) {
+            resolvePlaceholders(item, params);
+        }
+    }
 }
 
 }  // namespace taskflow::scheduler::engine

@@ -97,20 +97,27 @@ common::result::Result<nlohmann::json> UserService::createUser(
     return userResult.value().toSafeJson();
 }
 
-common::result::Result<void> UserService::updateUserRole(const std::string& id, const std::string& role) {
+common::result::Result<nlohmann::json> UserService::updateUserRole(const std::string& id, const std::string& role) {
     // Validate role
     if (role != "admin" && role != "operator" && role != "viewer") {
-        return common::result::Result<void>::failure(
+        return common::result::Result<nlohmann::json>::failure(
             "Invalid role: must be one of admin, operator, viewer");
     }
 
     auto result = user_dao_.updateRole(id, role);
     if (!result.ok()) {
-        return common::result::Result<void>::failure(
+        return common::result::Result<nlohmann::json>::failure(
             "Failed to update user role: " + result.error());
     }
 
-    return common::result::Result<void>();
+    // Fetch updated user
+    auto userResult = user_dao_.findById(id);
+    if (!userResult.ok()) {
+        return common::result::Result<nlohmann::json>::failure(
+            "Failed to fetch updated user: " + userResult.error());
+    }
+
+    return userResult.value().toSafeJson();
 }
 
 common::result::Result<void> UserService::deleteUser(const std::string& id, const std::string& current_user_id) {
@@ -120,7 +127,15 @@ common::result::Result<void> UserService::deleteUser(const std::string& id, cons
             "Cannot delete your own account");
     }
 
-    auto result = user_dao_.remove(id);
+    // Check user exists
+    auto userResult = user_dao_.findById(id);
+    if (!userResult.ok()) {
+        return common::result::Result<void>::failure(
+            "User not found: " + userResult.error());
+    }
+
+    // Soft delete: set deleted_at timestamp
+    auto result = user_dao_.softDelete(id);
     if (!result.ok()) {
         return common::result::Result<void>::failure(
             "Failed to delete user: " + result.error());

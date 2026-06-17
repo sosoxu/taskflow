@@ -14,6 +14,7 @@ common::result::Result<std::string> TaskDao::create(
     int max_retries,
     int retry_interval,
     const nlohmann::json& resource_tags,
+    const nlohmann::json& parameters_json,
     const std::string& creator_id) {
 
     auto id = common::util::generateUuid();
@@ -22,12 +23,12 @@ common::result::Result<std::string> TaskDao::create(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
             auto res = txn.exec_params(
                 "INSERT INTO tasks (id, name, type, config_json, description, "
-                "timeout, max_retries, retry_interval, resource_tags, creator_id) "
-                "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9::jsonb, $10) "
+                "timeout, max_retries, retry_interval, resource_tags, parameters_json, creator_id) "
+                "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11) "
                 "RETURNING id",
                 id, name, type, config_json.dump(), description,
                 timeout, max_retries, retry_interval,
-                resource_tags.dump(), creator_id);
+                resource_tags.dump(), parameters_json.dump(), creator_id);
 
             if (res.empty()) {
                 return common::result::Result<std::string>::failure("创建任务失败");

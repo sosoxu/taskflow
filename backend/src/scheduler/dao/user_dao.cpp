@@ -33,7 +33,7 @@ common::result::Result<common::models::User> UserDao::findById(const std::string
     return common::database::DatabaseManager::instance().withReadTransaction<common::models::User>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<common::models::User> {
             auto res = txn.exec_params(
-                "SELECT * FROM users WHERE id = $1",
+                "SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL",
                 id);
 
             if (res.empty()) {
@@ -48,7 +48,7 @@ common::result::Result<common::models::User> UserDao::findByUsername(const std::
     return common::database::DatabaseManager::instance().withReadTransaction<common::models::User>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<common::models::User> {
             auto res = txn.exec_params(
-                "SELECT * FROM users WHERE username = $1",
+                "SELECT * FROM users WHERE username = $1 AND deleted_at IS NULL",
                 username);
 
             if (res.empty()) {
@@ -78,7 +78,7 @@ common::result::Result<std::vector<common::models::User>> UserDao::list(int offs
     return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::User>>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::User>> {
             auto res = txn.exec_params(
-                "SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+                "SELECT * FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT $1 OFFSET $2",
                 limit, offset);
 
             std::vector<common::models::User> users;
@@ -99,6 +99,21 @@ common::result::Result<void> UserDao::remove(const std::string& id) {
 
             if (res.affected_rows() == 0) {
                 return common::result::Result<void>::failure("用户不存在，删除失败");
+            }
+
+            return common::result::Result<void>();
+        });
+}
+
+common::result::Result<void> UserDao::softDelete(const std::string& id) {
+    return common::database::DatabaseManager::instance().withTransaction<void>(
+        [&](pqxx::work& txn) -> common::result::Result<void> {
+            auto res = txn.exec_params(
+                "UPDATE users SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+                id);
+
+            if (res.affected_rows() == 0) {
+                return common::result::Result<void>::failure("用户不存在或已删除");
             }
 
             return common::result::Result<void>();

@@ -13,6 +13,7 @@ struct WorkflowInstance {
     std::string trigger_type;  // manual, cron
     std::string started_at;
     std::string finished_at;
+    nlohmann::json param_overrides;
     std::string creator_id;
     std::string created_at;
 
@@ -27,6 +28,9 @@ struct WorkflowInstance {
             ? "" : row["started_at"].as<std::string>();
         instance.finished_at = row["finished_at"].is_null()
             ? "" : row["finished_at"].as<std::string>();
+        instance.param_overrides = row["param_overrides"].is_null()
+            ? nlohmann::json::object()
+            : nlohmann::json::parse(row["param_overrides"].as<std::string>());
         instance.creator_id = row["creator_id"].as<std::string>();
         instance.created_at = row["created_at"].as<std::string>();
         return instance;
@@ -41,6 +45,7 @@ struct WorkflowInstance {
             {"trigger_type", trigger_type},
             {"started_at", started_at},
             {"finished_at", finished_at},
+            {"param_overrides", param_overrides},
             {"creator_id", creator_id},
             {"created_at", created_at}
         };

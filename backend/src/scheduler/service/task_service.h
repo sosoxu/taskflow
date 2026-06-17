@@ -18,7 +18,8 @@ public:
         const std::string& name, const std::string& type,
         const nlohmann::json& config_json, const std::string& description,
         int timeout, int max_retries, int retry_interval,
-        const nlohmann::json& resource_tags, const std::string& creator_id);
+        const nlohmann::json& resource_tags, const nlohmann::json& parameters_json,
+        const std::string& creator_id);
 
     // Get task by ID (SQL password masked as "***")
     common::result::Result<nlohmann::json> getTask(const std::string& id);

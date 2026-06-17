@@ -89,10 +89,15 @@ void TaskController::createTask(
         resource_tags = jsoncppToNlohmann((*json)["resource_tags"]);
     }
 
+    nlohmann::json parameters_json;
+    if ((*json).isMember("parameters")) {
+        parameters_json = jsoncppToNlohmann((*json)["parameters"]);
+    }
+
     auto result = task_service_->createTask(
         name, type, config_json, description,
         timeout, max_retries, retry_interval,
-        resource_tags, creator_id);
+        resource_tags, parameters_json, creator_id);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40003, result.error());

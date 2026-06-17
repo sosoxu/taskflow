@@ -9,7 +9,8 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
     const std::string& workflow_id,
     int workflow_version,
     const std::string& trigger_type,
-    const std::string& creator_id) {
+    const std::string& creator_id,
+    const nlohmann::json& param_overrides) {
 
     auto id = common::util::generateUuid();
 
@@ -17,10 +18,11 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
             auto res = txn.exec_params(
                 "INSERT INTO workflow_instances "
-                "(id, workflow_id, workflow_version, status, trigger_type, creator_id) "
-                "VALUES ($1, $2, $3, 'PENDING', $4, $5) "
+                "(id, workflow_id, workflow_version, status, trigger_type, param_overrides, creator_id) "
+                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6) "
                 "RETURNING id",
-                id, workflow_id, workflow_version, trigger_type, creator_id);
+                id, workflow_id, workflow_version, trigger_type,
+                param_overrides.dump(), creator_id);
 
             if (res.empty()) {
                 return common::result::Result<std::string>::failure("创建工作流实例失败");

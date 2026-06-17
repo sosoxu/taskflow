@@ -240,7 +240,14 @@ void WorkflowController::triggerWorkflow(
 
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
 
-    auto result = workflow_service_->triggerWorkflow(id, creator_id);
+    // Read param_overrides from request body
+    nlohmann::json param_overrides = nlohmann::json::object();
+    auto json = req->getJsonObject();
+    if (json && (*json).isMember("param_overrides")) {
+        param_overrides = jsoncppToNlohmann((*json)["param_overrides"]);
+    }
+
+    auto result = workflow_service_->triggerWorkflow(id, creator_id, param_overrides);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40402, result.error());
