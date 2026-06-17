@@ -23,6 +23,7 @@ add_executable(scheduler
     api/worker_controller.cpp
     middleware/auth_middleware.cpp
     middleware/role_middleware.cpp
+    middleware/cors_middleware.cpp
     grpc/scheduler_service.cpp
     grpc/heartbeat_checker.cpp
     engine/dag_engine.cpp

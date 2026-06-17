@@ -187,12 +187,38 @@ int main(int argc, char* argv[]) {
         .addListener("0.0.0.0", config.server.http_port)
         .setThreadNum(4);
 
-    // 注册全局 Filter（认证 + 权限）
+    // CORS: 在路由之前拦截 OPTIONS 预检请求，返回 204
+    drogon::app().registerPreRoutingAdvice(
+        [](const drogon::HttpRequestPtr& req,
+           drogon::AdviceCallback&& acb,
+           drogon::AdviceChainCallback&& accb) {
+            if (req->method() == drogon::Options) {
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k204NoContent);
+                resp->addHeader("Access-Control-Allow-Origin", "*");
+                resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                resp->addHeader("Access-Control-Max-Age", "86400");
+                acb(resp);
+                return;
+            }
+            accb();
+        });
+
+    // 注册全局 Filter（认证 → 权限）
     auto auth_filter = std::make_shared<taskflow::scheduler::middleware::AuthFilter>(
         config.auth.jwt_secret);
     auto role_filter = std::make_shared<taskflow::scheduler::middleware::RoleFilter>();
     drogon::app().registerFilter(auth_filter);
     drogon::app().registerFilter(role_filter);
+
+    // 为所有响应添加 CORS 头
+    drogon::app().registerPostHandlingAdvice(
+        [](const drogon::HttpRequestPtr&, const drogon::HttpResponsePtr& resp) {
+            resp->addHeader("Access-Control-Allow-Origin", "*");
+            resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        });
 
     // 注册 Controller
     auto healthCtrl = std::make_shared<taskflow::scheduler::api::HealthController>();

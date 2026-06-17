@@ -144,7 +144,7 @@ const registerRules: FormRules = {
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, max: 64, message: '密码长度为 6-64 个字符', trigger: 'blur' },
+    { min: 8, max: 64, message: '密码长度为 8-64 个字符', trigger: 'blur' },
   ],
   confirmPassword: [
     { required: true, message: '请确认密码', trigger: 'blur' },
@@ -181,9 +181,15 @@ async function handleLogin() {
     const redirect = route.query.redirect as string
     router.push(redirect || '/')
   } catch (err: unknown) {
-    const message =
-      (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-      '登录失败，请检查用户名和密码'
+    const errData = (err as { response?: { data?: { message?: string } } })?.response?.data
+    let message = '登录失败，请检查用户名和密码'
+    if (errData?.message) {
+      if (errData.message.includes('Invalid') || errData.message.includes('invalid')) {
+        message = '用户名或密码错误'
+      } else {
+        message = errData.message
+      }
+    }
     ElMessage.error(message)
   } finally {
     loginLoading.value = false
@@ -200,14 +206,31 @@ async function handleRegister() {
     ElMessage.success('注册成功，正在自动登录...')
     showRegisterDialog.value = false
 
-    // Auto-login after registration
-    loginForm.username = registerForm.username
-    loginForm.password = registerForm.password
-    await handleLogin()
+    // Auto-login after registration (direct API call, skip form validation)
+    const { data: resp } = await login(registerForm.username, registerForm.password)
+    const data = resp.data
+    userStore.setUser({
+      userId: data.user_id,
+      username: data.username,
+      role: data.role,
+      token: data.access_token,
+      refreshToken: data.refresh_token,
+    })
+    setToken(data.access_token)
+    ElMessage.success('登录成功')
+    router.push('/')
   } catch (err: unknown) {
-    const message =
-      (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-      '注册失败，请稍后重试'
+    const errData = (err as { response?: { data?: { message?: string; code?: number } } })?.response?.data
+    let message = '注册失败，请稍后重试'
+    if (errData?.message) {
+      if (errData.message.includes('already exists') || errData.message.includes('已存在')) {
+        message = '用户名已存在'
+      } else if (errData.message.includes('short') || errData.message.includes('长度')) {
+        message = '密码长度至少8个字符'
+      } else {
+        message = errData.message
+      }
+    }
     ElMessage.error(message)
   } finally {
     registerLoading.value = false

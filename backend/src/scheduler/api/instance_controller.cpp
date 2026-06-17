@@ -230,7 +230,6 @@ void InstanceController::streamTaskLog(
     httpResp->setContentTypeString("text/event-stream");
     httpResp->addHeader("Cache-Control", "no-cache");
     httpResp->addHeader("Connection", "keep-alive");
-    httpResp->addHeader("Access-Control-Allow-Origin", "*");
 
     // Fetch log content via gRPC and send as SSE events
     auto log_result = instance_service_->getTaskLog(id, taskInstanceId);
