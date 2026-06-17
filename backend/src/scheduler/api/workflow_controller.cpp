@@ -41,7 +41,7 @@ void WorkflowController::createWorkflow(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -63,7 +63,7 @@ void WorkflowController::createWorkflow(
         target_worker_id, cron_expression, cron_enabled, creator_id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40004, result.error());
         return;
     }
 
@@ -96,7 +96,7 @@ void WorkflowController::listWorkflows(
     auto result = workflow_service_->listWorkflows(page, page_size, keyword, creator_id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 50001, result.error());
         return;
     }
 
@@ -114,7 +114,7 @@ void WorkflowController::getWorkflow(
     auto result = workflow_service_->getWorkflow(id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40400, result.error());
+        sendError(std::move(callback), 404, 40402, result.error());
         return;
     }
 
@@ -131,7 +131,7 @@ void WorkflowController::updateWorkflow(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -154,7 +154,7 @@ void WorkflowController::updateWorkflow(
         target_worker_id, cron_expression, cron_enabled, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40004, result.error());
         return;
     }
 
@@ -175,7 +175,7 @@ void WorkflowController::deleteWorkflow(
     auto result = workflow_service_->deleteWorkflow(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40400, result.error());
+        sendError(std::move(callback), 404, 40402, result.error());
         return;
     }
 
@@ -198,7 +198,7 @@ void WorkflowController::triggerWorkflow(
     auto result = workflow_service_->triggerWorkflow(id, creator_id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40402, result.error());
         return;
     }
 

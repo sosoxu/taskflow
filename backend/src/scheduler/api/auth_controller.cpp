@@ -35,7 +35,7 @@ void AuthController::registerUser(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -43,13 +43,13 @@ void AuthController::registerUser(
     std::string password = (*json)["password"].asString();
 
     if (username.empty() || password.empty()) {
-        sendError(std::move(callback), 400, 40000, "Username and password are required");
+        sendError(std::move(callback), 400, 40002, "Username and password are required");
         return;
     }
 
     auto result = auth_service_->registerUser(username, password);
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40003, result.error());
         return;
     }
 
@@ -65,7 +65,7 @@ void AuthController::login(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -73,13 +73,13 @@ void AuthController::login(
     std::string password = (*json)["password"].asString();
 
     if (username.empty() || password.empty()) {
-        sendError(std::move(callback), 400, 40000, "Username and password are required");
+        sendError(std::move(callback), 400, 40002, "Username and password are required");
         return;
     }
 
     auto result = auth_service_->login(username, password);
     if (!result.ok()) {
-        sendError(std::move(callback), 401, 40100, result.error());
+        sendError(std::move(callback), 401, 40103, result.error());
         return;
     }
 
@@ -95,20 +95,20 @@ void AuthController::refreshToken(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
     std::string refresh_token = (*json)["refresh_token"].asString();
 
     if (refresh_token.empty()) {
-        sendError(std::move(callback), 400, 40000, "Refresh token is required");
+        sendError(std::move(callback), 400, 40002, "Refresh token is required");
         return;
     }
 
     auto result = auth_service_->refreshToken(refresh_token);
     if (!result.ok()) {
-        sendError(std::move(callback), 401, 40100, result.error());
+        sendError(std::move(callback), 401, 40104, result.error());
         return;
     }
 
@@ -124,20 +124,20 @@ void AuthController::logout(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
     std::string access_token = (*json)["access_token"].asString();
 
     if (access_token.empty()) {
-        sendError(std::move(callback), 400, 40000, "Access token is required");
+        sendError(std::move(callback), 400, 40002, "Access token is required");
         return;
     }
 
     auto result = auth_service_->logout(access_token);
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40101, result.error());
         return;
     }
 

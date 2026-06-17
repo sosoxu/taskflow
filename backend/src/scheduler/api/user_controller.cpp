@@ -48,7 +48,7 @@ void UserController::listUsers(
 
     auto result = user_service_->listUsers(page, page_size);
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 50001, result.error());
         return;
     }
 
@@ -64,7 +64,7 @@ void UserController::createUser(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -73,13 +73,13 @@ void UserController::createUser(
     std::string role = (*json)["role"].asString();
 
     if (username.empty() || password.empty() || role.empty()) {
-        sendError(std::move(callback), 400, 40000, "Username, password and role are required");
+        sendError(std::move(callback), 400, 40002, "Username, password and role are required");
         return;
     }
 
     auto result = user_service_->createUser(username, password, role);
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40003, result.error());
         return;
     }
 
@@ -96,20 +96,20 @@ void UserController::updateUserRole(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
     std::string role = (*json)["role"].asString();
 
     if (role.empty()) {
-        sendError(std::move(callback), 400, 40000, "Role is required");
+        sendError(std::move(callback), 400, 40002, "Role is required");
         return;
     }
 
     auto result = user_service_->updateUserRole(id, role);
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40405, result.error());
         return;
     }
 
@@ -131,7 +131,7 @@ void UserController::deleteUser(
 
     auto result = user_service_->deleteUser(id, current_user_id);
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40405, result.error());
         return;
     }
 

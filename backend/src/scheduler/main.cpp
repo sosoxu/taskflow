@@ -25,6 +25,7 @@
 #include "scheduler/service/task_service.h"
 #include "scheduler/service/workflow_service.h"
 #include "scheduler/service/instance_service.h"
+#include "scheduler/service/worker_service.h"
 #include "scheduler/dao/worker_dao.h"
 #include "scheduler/middleware/auth_middleware.h"
 #include "scheduler/middleware/role_middleware.h"
@@ -211,7 +212,8 @@ int main(int argc, char* argv[]) {
     drogon::app().registerController(instanceCtrl);
 
     auto worker_dao = std::make_shared<taskflow::scheduler::dao::WorkerDao>();
-    auto workerCtrl = std::make_shared<taskflow::scheduler::api::WorkerController>(worker_dao);
+    auto worker_service = std::make_shared<taskflow::scheduler::service::WorkerService>(worker_dao);
+    auto workerCtrl = std::make_shared<taskflow::scheduler::api::WorkerController>(worker_service);
     drogon::app().registerController(workerCtrl);
 
     spdlog::info("TaskFlow Scheduler 启动完成");

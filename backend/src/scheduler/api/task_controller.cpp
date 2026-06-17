@@ -41,7 +41,7 @@ void TaskController::createTask(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -69,7 +69,7 @@ void TaskController::createTask(
         resource_tags, creator_id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40003, result.error());
         return;
     }
 
@@ -105,7 +105,7 @@ void TaskController::listTasks(
         page, page_size, type_filter, keyword, creator_id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 50001, result.error());
         return;
     }
 
@@ -123,7 +123,7 @@ void TaskController::getTask(
     auto result = task_service_->getTask(id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40400, result.error());
+        sendError(std::move(callback), 404, 40401, result.error());
         return;
     }
 
@@ -140,7 +140,7 @@ void TaskController::updateTask(
 
     auto json = req->getJsonObject();
     if (!json) {
-        sendError(std::move(callback), 400, 40000, "Request body must be JSON");
+        sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
 
@@ -169,7 +169,7 @@ void TaskController::updateTask(
         resource_tags, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40003, result.error());
         return;
     }
 
@@ -190,7 +190,7 @@ void TaskController::deleteTask(
     auto result = task_service_->deleteTask(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40400, result.error());
+        sendError(std::move(callback), 404, 40401, result.error());
         return;
     }
 

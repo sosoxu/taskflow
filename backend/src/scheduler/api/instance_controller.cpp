@@ -38,7 +38,7 @@ void InstanceController::pauseInstance(
     auto result = instance_service_->pauseInstance(id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40008, result.error());
         return;
     }
 
@@ -59,7 +59,7 @@ void InstanceController::resumeInstance(
     auto result = instance_service_->resumeInstance(id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40008, result.error());
         return;
     }
 
@@ -80,7 +80,7 @@ void InstanceController::cancelInstance(
     auto result = instance_service_->cancelInstance(id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40008, result.error());
         return;
     }
 
@@ -102,7 +102,7 @@ void InstanceController::retryTask(
     auto result = instance_service_->retryTask(id, taskInstanceId);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40009, result.error());
         return;
     }
 
@@ -124,7 +124,7 @@ void InstanceController::killTask(
     auto result = instance_service_->killTask(id, taskInstanceId);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40009, result.error());
         return;
     }
 
@@ -145,7 +145,7 @@ void InstanceController::getInstance(
     auto result = instance_service_->getInstance(id);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40400, result.error());
+        sendError(std::move(callback), 404, 40403, result.error());
         return;
     }
 
@@ -176,7 +176,7 @@ void InstanceController::listInstances(
     auto result = instance_service_->listInstances(id, page, page_size);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 50001, result.error());
         return;
     }
 
@@ -195,7 +195,7 @@ void InstanceController::getTaskLog(
     auto result = instance_service_->getTaskLog(id, taskInstanceId);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 40404, result.error());
         return;
     }
 
@@ -218,7 +218,7 @@ void InstanceController::streamTaskLog(
     // Validate the task instance exists
     auto validate_result = instance_service_->validateTaskInstance(id, taskInstanceId);
     if (!validate_result.ok()) {
-        sendError(std::move(callback), 400, 40000, validate_result.error());
+        sendError(std::move(callback), 400, 40404, validate_result.error());
         return;
     }
 

@@ -123,3 +123,17 @@ target_link_libraries(taskflow_proto PUBLIC
 add_subdirectory(src/common)
 add_subdirectory(src/scheduler)
 add_subdirectory(src/worker)
+
+# Testing
+option(BUILD_TESTS "Build tests" ON)
+if(BUILD_TESTS)
+    enable_testing()
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v3.5.2
+    )
+    FetchContent_MakeAvailable(Catch2)
+
+    add_subdirectory(tests)
+endif()

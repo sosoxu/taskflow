@@ -250,7 +250,7 @@ int main(int argc, char* argv[]) {
     }
     taskflow::worker::grpc::WorkerClient scheduler_client(channel);
 
-    // 向 Scheduler 注册
+    // 向 Scheduler 注册（带重试）
     std::string worker_name = config.worker.name;
     if (worker_name.empty()) {
         worker_name = "worker-" + std::to_string(config.server.grpc_port);
@@ -258,16 +258,27 @@ int main(int argc, char* argv[]) {
 
     std::string worker_address = "localhost:" + std::to_string(config.server.grpc_port);
 
-    auto register_result = scheduler_client.registerWorker(
-        worker_name, worker_address,
-        config.worker.max_tasks, config.worker.resource_tags);
-
     std::string worker_id;
-    if (register_result.ok()) {
-        worker_id = register_result.value();
-        spdlog::info("Worker 注册成功, worker_id: {}", worker_id);
-    } else {
-        spdlog::error("Worker 注册失败: {}", register_result.error());
+    int register_retries = 0;
+    const int max_register_retries = 10;
+    while (register_retries < max_register_retries) {
+        auto register_result = scheduler_client.registerWorker(
+            worker_name, worker_address,
+            config.worker.max_tasks, config.worker.resource_tags);
+
+        if (register_result.ok()) {
+            worker_id = register_result.value();
+            spdlog::info("Worker 注册成功, worker_id: {}", worker_id);
+            break;
+        }
+        register_retries++;
+        int delay = 5 * register_retries;  // 线性退避: 5s, 10s, 15s...
+        spdlog::warn("Register failed (attempt {}/{}), retrying in {}s: {}",
+                     register_retries, max_register_retries, delay, register_result.error());
+        std::this_thread::sleep_for(std::chrono::seconds(delay));
+    }
+    if (register_retries >= max_register_retries) {
+        spdlog::error("Failed to register after {} attempts, exiting", max_register_retries);
         return 1;
     }
 

@@ -113,7 +113,7 @@
         <template v-if="form.type === 'script'">
           <el-divider content-position="left">Script 配置</el-divider>
           <el-form-item label="脚本内容">
-            <el-input v-model="form.config.script_content" type="textarea" :rows="6" placeholder="请输入脚本内容" />
+            <div ref="scriptEditorRef" class="code-editor"></div>
           </el-form-item>
         </template>
 
@@ -136,7 +136,7 @@
             <el-input v-model="form.config.db_password" type="password" show-password placeholder="请输入密码" />
           </el-form-item>
           <el-form-item label="SQL 语句">
-            <el-input v-model="form.config.sql_statement" type="textarea" :rows="4" placeholder="请输入 SQL 语句" />
+            <div ref="sqlEditorRef" class="code-editor"></div>
           </el-form-item>
         </template>
       </el-form>
@@ -149,13 +149,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { getTasks, getTask, createTask, updateTask, deleteTask } from '../../api/task'
 import type { TaskItem, TaskConfig } from '../../types/task'
 import { formatTime } from '../../utils/format'
+import { basicSetup } from 'codemirror'
+import { EditorView } from '@codemirror/view'
+import { EditorState } from '@codemirror/state'
+import { sql, PostgreSQL } from '@codemirror/lang-sql'
+import { javascript } from '@codemirror/lang-javascript'
+import { oneDark } from '@codemirror/theme-one-dark'
 
 const router = useRouter()
 
@@ -240,13 +246,88 @@ function resetForm() {
 
 function handleTypeChange() {
   form.config = defaultConfig()
+  destroyEditors()
+  nextTick(() => {
+    initEditorForType()
+  })
+}
+
+// CodeMirror editors
+const sqlEditorRef = ref<HTMLElement | null>(null)
+const scriptEditorRef = ref<HTMLElement | null>(null)
+let sqlEditorView: EditorView | null = null
+let scriptEditorView: EditorView | null = null
+
+function destroyEditors() {
+  if (sqlEditorView) {
+    sqlEditorView.destroy()
+    sqlEditorView = null
+  }
+  if (scriptEditorView) {
+    scriptEditorView.destroy()
+    scriptEditorView = null
+  }
+}
+
+function initSqlEditor() {
+  if (sqlEditorRef.value && !sqlEditorView) {
+    sqlEditorView = new EditorView({
+      state: EditorState.create({
+        doc: form.config.sql_statement || '',
+        extensions: [
+          basicSetup,
+          sql({ dialect: PostgreSQL }),
+          oneDark,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              form.config.sql_statement = update.state.doc.toString()
+            }
+          }),
+        ],
+      }),
+      parent: sqlEditorRef.value,
+    })
+  }
+}
+
+function initScriptEditor() {
+  if (scriptEditorRef.value && !scriptEditorView) {
+    scriptEditorView = new EditorView({
+      state: EditorState.create({
+        doc: form.config.script_content || '',
+        extensions: [
+          basicSetup,
+          javascript(),
+          oneDark,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              form.config.script_content = update.state.doc.toString()
+            }
+          }),
+        ],
+      }),
+      parent: scriptEditorRef.value,
+    })
+  }
+}
+
+function initEditorForType() {
+  if (form.type === 'sql') {
+    initSqlEditor()
+  } else if (form.type === 'script') {
+    initScriptEditor()
+  }
 }
 
 function handleCreate() {
   isEdit.value = false
   editingId.value = ''
   resetForm()
+  destroyEditors()
   dialogVisible.value = true
+  nextTick(() => {
+    initEditorForType()
+  })
 }
 
 async function handleEdit(row: TaskItem) {
@@ -263,7 +344,11 @@ async function handleEdit(row: TaskItem) {
     form.retry_interval = task.retry_interval ?? 60
     form.resource_tags = task.resource_tags || []
     form.config = { ...defaultConfig(), ...(task.config || {}) }
+    destroyEditors()
     dialogVisible.value = true
+    nextTick(() => {
+      initEditorForType()
+    })
   } catch {
     ElMessage.error('获取任务详情失败')
   }
@@ -316,6 +401,10 @@ async function handleDelete(row: TaskItem) {
 onMounted(() => {
   fetchList()
 })
+
+onBeforeUnmount(() => {
+  destroyEditors()
+})
 </script>
 
 <style scoped>
@@ -349,5 +438,21 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.code-editor {
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.code-editor :deep(.cm-editor) {
+  height: 200px;
+  font-size: 13px;
+}
+
+.code-editor :deep(.cm-scroller) {
+  overflow: auto;
 }
 </style>

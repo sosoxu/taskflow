@@ -16,6 +16,7 @@ add_executable(scheduler
     service/task_service.cpp
     service/workflow_service.cpp
     service/instance_service.cpp
+    service/worker_service.cpp
     api/task_controller.cpp
     api/workflow_controller.cpp
     api/instance_controller.cpp

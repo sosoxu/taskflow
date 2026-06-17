@@ -27,17 +27,17 @@ void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
 
 }  // namespace
 
-WorkerController::WorkerController(std::shared_ptr<dao::WorkerDao> worker_dao)
-    : worker_dao_(std::move(worker_dao)) {}
+WorkerController::WorkerController(std::shared_ptr<service::WorkerService> worker_service)
+    : worker_service_(std::move(worker_service)) {}
 
 void WorkerController::listWorkers(
     const drogon::HttpRequestPtr&,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback) {
 
-    auto result = worker_dao_->listAll();
+    auto result = worker_service_->listWorkers();
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40000, result.error());
+        sendError(std::move(callback), 400, 50001, result.error());
         return;
     }
 

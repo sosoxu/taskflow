@@ -31,7 +31,7 @@ void AuthFilter::doFilter(
     auto auth_header = req->getHeader("authorization");
     if (auth_header.empty() || auth_header.find("Bearer ") != 0) {
         Json::Value resp;
-        resp["code"] = 40100;
+        resp["code"] = 40101;
         resp["message"] = "未认证";
         resp["data"] = Json::nullValue;
         auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
@@ -45,7 +45,7 @@ void AuthFilter::doFilter(
     auto result = common::util::JwtUtil::verifyToken(token, jwt_secret_);
     if (!result.ok()) {
         Json::Value resp;
-        resp["code"] = 40100;
+        resp["code"] = 40101;
         resp["message"] = "Token 无效或已过期";
         resp["data"] = Json::nullValue;
         auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
@@ -59,7 +59,7 @@ void AuthFilter::doFilter(
     // 检查是否为 access token
     if (payload.type != "access") {
         Json::Value resp;
-        resp["code"] = 40100;
+        resp["code"] = 40007;
         resp["message"] = "需要 access token";
         resp["data"] = Json::nullValue;
         auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
@@ -71,7 +71,7 @@ void AuthFilter::doFilter(
     // 检查 token 是否已被加入黑名单（已登出）
     if (!payload.jti.empty() && common::util::TokenBlacklist::instance().isBlacklisted(payload.jti)) {
         Json::Value resp;
-        resp["code"] = 40100;
+        resp["code"] = 40102;
         resp["message"] = "Token 已被撤销";
         resp["data"] = Json::nullValue;
         auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);

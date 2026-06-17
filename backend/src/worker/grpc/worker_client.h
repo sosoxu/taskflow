@@ -1,10 +1,13 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <grpcpp/grpcpp.h>
+#include <spdlog/spdlog.h>
 #include "taskflow.grpc.pb.h"
 #include "common/result/result.h"
 
@@ -28,6 +31,9 @@ public:
 
 private:
     std::unique_ptr<taskflow::v1::SchedulerService::Stub> stub_;
+
+    template<typename Func>
+    ::grpc::Status retryRpc(Func rpc_call, int max_retries = 3);
 };
 
 }  // namespace taskflow::worker::grpc

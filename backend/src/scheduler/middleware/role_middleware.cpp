@@ -30,7 +30,7 @@ void RoleFilter::doFilter(
     // 用户管理接口仅 admin 可访问
     if (path.find("/api/v1/users") != std::string::npos) {
         Json::Value resp;
-        resp["code"] = 40300;
+        resp["code"] = 40301;
         resp["message"] = "权限不足";
         resp["data"] = Json::nullValue;
         auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
@@ -42,7 +42,7 @@ void RoleFilter::doFilter(
     // viewer 仅允许 GET 请求
     if (role == "viewer" && method != drogon::Get) {
         Json::Value resp;
-        resp["code"] = 40300;
+        resp["code"] = 40301;
         resp["message"] = "权限不足，viewer 仅可查看";
         resp["data"] = Json::nullValue;
         auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
