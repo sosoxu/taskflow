@@ -35,3 +35,33 @@ target_link_libraries(taskflow_tests PRIVATE
 include(CTest)
 include(Catch)
 catch_discover_tests(taskflow_tests)
+
+# Performance benchmarks (microbenchmarks for core components)
+add_executable(perf_tests
+    test_perf.cpp
+    ${CMAKE_SOURCE_DIR}/src/scheduler/engine/dag_engine.cpp
+    ${CMAKE_SOURCE_DIR}/src/common/util/crypto_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/task_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/command_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/script_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/sql_executor.cpp
+    ${CMAKE_SOURCE_DIR}/src/worker/executor/log_sink.cpp
+)
+
+target_include_directories(perf_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(perf_tests PRIVATE
+    taskflow_common
+    Catch2::Catch2WithMain
+    crypt
+    PkgConfig::PQXX
+    OpenSSL::Crypto
+    OpenSSL::SSL
+)
+
+catch_discover_tests(perf_tests
+    TEST_PREFIX "perf:"
+    REPORTER compact
+)
