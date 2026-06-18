@@ -89,6 +89,25 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
         dup2(fd, STDERR_FILENO);
         close(fd);
 
+        // Set working directory
+        if (config.contains("working_dir") && config["working_dir"].is_string()) {
+            std::string working_dir = config["working_dir"].get<std::string>();
+            if (!working_dir.empty()) {
+                if (chdir(working_dir.c_str()) != 0) {
+                    _exit(126);
+                }
+            }
+        }
+
+        // Set environment variables
+        if (config.contains("env_vars") && config["env_vars"].is_object()) {
+            for (auto it = config["env_vars"].begin(); it != config["env_vars"].end(); ++it) {
+                std::string key = it.key();
+                std::string value = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
+                setenv(key.c_str(), value.c_str(), 1);
+            }
+        }
+
         execlp(interpreter.c_str(), interpreter.c_str(), script_path.c_str(), nullptr);
         _exit(127);
     }
