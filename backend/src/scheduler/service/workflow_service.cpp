@@ -125,6 +125,9 @@ common::result::Result<nlohmann::json> WorkflowService::getWorkflow(const std::s
         return common::result::Result<nlohmann::json>::failure(
             "Workflow not found: " + result.error());
     }
+    if (result.value().deleted) {
+        return common::result::Result<nlohmann::json>::failure("工作流不存在或已删除");
+    }
     return result.value().toJson();
 }
 
@@ -168,7 +171,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     const std::string& schedule_strategy,
     const std::string& target_worker_id,
     const std::string& cron_expression,
-    bool cron_enabled,
+    std::optional<bool> cron_enabled,
     const std::string& user_id, const std::string& role) {
 
     // Find existing workflow to check ownership and get defaults
@@ -179,6 +182,9 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     }
 
     const auto& existing_workflow = existingWfResult.value();
+    if (existing_workflow.deleted) {
+        return common::result::Result<nlohmann::json>::failure("工作流不存在或已删除");
+    }
     if (role != "admin" && existing_workflow.creator_id != user_id) {
         return common::result::Result<nlohmann::json>::failure("权限不足，只能编辑自己创建的工作流");
     }
@@ -187,6 +193,8 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     std::string effective_name = name.empty() ? existing_workflow.name : name;
     std::string effective_strategy = schedule_strategy.empty() ? existing_workflow.schedule_strategy : schedule_strategy;
     nlohmann::json effective_dag = dag_json.is_null() ? existing_workflow.dag_json : dag_json;
+    std::string effective_cron_expression = cron_expression.empty() ? existing_workflow.cron_expression : cron_expression;
+    bool effective_cron_enabled = cron_enabled.has_value() ? cron_enabled.value() : existing_workflow.cron_enabled;
 
     // Validate DAG structure
     auto dagResult = DagValidator::validate(effective_dag);
@@ -234,7 +242,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     // Update workflow via DAO (version auto-increment is handled in DAO)
     auto updateResult = workflow_dao_.update(
         id, effective_name, description, effective_dag, effective_strategy,
-        target_worker_id, cron_expression, cron_enabled);
+        target_worker_id, effective_cron_expression, effective_cron_enabled);
     if (!updateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
             "Failed to update workflow: " + updateResult.error());
@@ -242,7 +250,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
 
     // Update or create CronJob
     auto cronJobResult = cron_job_dao_.findByWorkflowId(id);
-    if (cron_enabled && !cron_expression.empty()) {
+    if (effective_cron_enabled && !effective_cron_expression.empty()) {
         // Validate cron expression
         auto now = std::chrono::system_clock::now();
         auto now_time_t = std::chrono::system_clock::to_time_t(now);
@@ -250,14 +258,14 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
         gmtime_r(&now_time_t, &tm_now);
         std::ostringstream oss;
         oss << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S");
-        auto cronValidateResult = engine::CronParser::getNextTrigger(cron_expression, oss.str());
+        auto cronValidateResult = engine::CronParser::getNextTrigger(effective_cron_expression, oss.str());
         if (!cronValidateResult.ok()) {
             return common::result::Result<nlohmann::json>::failure(
                 "Invalid cron expression: " + cronValidateResult.error());
         }
 
         if (cronJobResult.ok()) {
-            auto cronUpdateResult = cron_job_dao_.update(cronJobResult.value().id, cron_expression, true);
+            auto cronUpdateResult = cron_job_dao_.update(cronJobResult.value().id, effective_cron_expression, true);
             if (!cronUpdateResult.ok()) {
                 return common::result::Result<nlohmann::json>::failure(
                     "Failed to update cron job: " + cronUpdateResult.error());
@@ -271,7 +279,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
             }
         } else {
             auto cronCreateResult = cron_job_dao_.create(
-                id, cron_expression, cronValidateResult.value());
+                id, effective_cron_expression, cronValidateResult.value());
             if (!cronCreateResult.ok()) {
                 return common::result::Result<nlohmann::json>::failure(
                     "Failed to create cron job: " + cronCreateResult.error());
@@ -306,6 +314,9 @@ common::result::Result<void> WorkflowService::deleteWorkflow(
     }
 
     const auto& workflow = wfResult.value();
+    if (workflow.deleted) {
+        return common::result::Result<void>::failure("工作流不存在或已删除");
+    }
     if (role != "admin" && workflow.creator_id != user_id) {
         return common::result::Result<void>::failure("权限不足，只能删除自己创建的工作流");
     }

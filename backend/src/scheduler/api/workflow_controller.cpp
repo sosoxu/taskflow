@@ -1,6 +1,7 @@
 #include "scheduler/api/workflow_controller.h"
 
 #include <cctype>
+#include <optional>
 #include <drogon/HttpResponse.h>
 
 namespace taskflow::scheduler::api {
@@ -77,7 +78,7 @@ void WorkflowController::createWorkflow(
     }
     std::string target_worker_id = (*json).get("target_worker_id", "").asString();
     std::string cron_expression = (*json).get("cron_expression", "").asString();
-    bool cron_enabled = (*json).get("cron_enabled", false).asBool();
+    bool cron_enabled = (*json).isMember("cron_enabled") ? (*json)["cron_enabled"].asBool() : !cron_expression.empty();
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
 
     nlohmann::json dag_json;
@@ -180,7 +181,10 @@ void WorkflowController::updateWorkflow(
     std::string schedule_strategy = (*json).isMember("schedule_strategy") ? (*json)["schedule_strategy"].asString() : "";
     std::string target_worker_id = (*json).get("target_worker_id", "").asString();
     std::string cron_expression = (*json).get("cron_expression", "").asString();
-    bool cron_enabled = (*json).get("cron_enabled", false).asBool();
+    std::optional<bool> cron_enabled;
+    if ((*json).isMember("cron_enabled")) {
+        cron_enabled = (*json)["cron_enabled"].asBool();
+    }
     std::string user_id = req->getAttributes()->get<std::string>("user_id");
     std::string role = req->getAttributes()->get<std::string>("role");
 
