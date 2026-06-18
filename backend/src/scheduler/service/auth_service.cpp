@@ -144,6 +144,16 @@ common::result::Result<nlohmann::json> AuthService::refreshToken(
             "Token is not a refresh token");
     }
 
+    // Blacklist the old refresh token's jti to prevent reuse (token rotation)
+    if (!payload.jti.empty()) {
+        // Check if this refresh token has already been used
+        if (common::util::TokenBlacklist::instance().isBlacklisted(payload.jti)) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Refresh token has already been used");
+        }
+        common::util::TokenBlacklist::instance().add(payload.jti);
+    }
+
     // Generate new tokens (only access token is returned in response)
     auto tokenResult = common::util::JwtUtil::generateTokens(
         payload.user_id, payload.username, payload.role,
