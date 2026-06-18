@@ -203,6 +203,49 @@ int TaskExecutor::runningCount() const {
     return running_count_.load();
 }
 
+void TaskExecutor::shutdown(int timeout_seconds) {
+    // Fix #124: Reject new submissions so running tasks can drain.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shutting_down_ = true;
+    }
+    spdlog::info("TaskExecutor shutdown: waiting for {} running task(s) up to {}s",
+                 running_count_.load(), timeout_seconds);
+
+    // Wait for running tasks to finish naturally.
+    auto deadline = std::chrono::steady_clock::now()
+                  + std::chrono::seconds(timeout_seconds);
+    while (running_count_.load() > 0) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            spdlog::warn("TaskExecutor shutdown: {} task(s) still running after {}s, cancelling",
+                         running_count_.load(), timeout_seconds);
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // Force-cancel any tasks that didn't finish in time.
+    if (running_count_.load() > 0) {
+        std::vector<std::string> task_ids;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto& [id, pid] : running_processes_) {
+                task_ids.push_back(id);
+            }
+        }
+        for (const auto& id : task_ids) {
+            cancel(id);
+        }
+    }
+
+    // Wait for all detached threads to finish so they don't access destroyed
+    // member state during the destructor.
+    while (active_threads_.load() > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    spdlog::info("TaskExecutor shutdown complete");
+}
+
 std::unique_ptr<TaskExecutorBase> TaskExecutor::createExecutor(
     const std::string& task_type) {
     // Check registered factories first

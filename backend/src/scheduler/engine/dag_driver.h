@@ -5,6 +5,7 @@
 #include <string>
 #include <thread>
 
+#include "common/config/scheduler_config.h"
 #include "scheduler/dao/task_dao.h"
 #include "scheduler/dao/task_instance_dao.h"
 #include "scheduler/dao/worker_dao.h"
@@ -19,7 +20,8 @@ namespace taskflow::scheduler::engine {
 class DagDriver {
 public:
     DagDriver(int drive_interval, const std::string& aes_key,
-              std::shared_ptr<grpc::LeaderElection> leader_election);
+              std::shared_ptr<grpc::LeaderElection> leader_election,
+              common::config::TlsConfig worker_tls = {});
 
     void start();
     void stop();
@@ -38,6 +40,8 @@ private:
     int drive_interval_;
     std::string aes_key_;
     std::shared_ptr<grpc::LeaderElection> leader_election_;
+    // Fix #126: TLS config for scheduler→worker gRPC channels.
+    common::config::TlsConfig worker_tls_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 

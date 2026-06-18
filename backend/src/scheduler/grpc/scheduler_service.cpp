@@ -1,6 +1,7 @@
 #include "scheduler/grpc/scheduler_service.h"
 
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 
 namespace taskflow::scheduler::grpc {
 
@@ -26,6 +27,26 @@ SchedulerServiceImpl::SchedulerServiceImpl() = default;
 
     response->set_success(true);
     response->set_worker_id(result.value());
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status SchedulerServiceImpl::Deregister(
+    ::grpc::ServerContext* /*context*/,
+    const taskflow::v1::DeregisterRequest* request,
+    taskflow::v1::DeregisterResponse* response) {
+    // Fix #124: Mark the worker offline on graceful shutdown so the dispatcher
+    // stops sending new tasks to it immediately (rather than waiting for the
+    // heartbeat timeout). Running tasks are left to finish; the worker is
+    // expected to wait for them before exiting.
+    auto result = worker_dao_.updateStatus(request->worker_id(), "offline");
+    if (!result.ok()) {
+        spdlog::warn("Deregister failed for worker {}: {}", request->worker_id(), result.error());
+        response->set_success(false);
+        response->set_error_message(result.error());
+        return ::grpc::Status::OK;
+    }
+    spdlog::info("Worker {} deregistered, marked offline", request->worker_id());
+    response->set_success(true);
     return ::grpc::Status::OK;
 }
 

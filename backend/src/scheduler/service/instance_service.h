@@ -2,6 +2,7 @@
 
 #include <string>
 #include <nlohmann/json.hpp>
+#include "common/config/scheduler_config.h"
 #include "common/result/result.h"
 #include "scheduler/dao/workflow_instance_dao.h"
 #include "scheduler/dao/task_instance_dao.h"
@@ -12,7 +13,8 @@ namespace taskflow::scheduler::service {
 
 class InstanceService {
 public:
-    InstanceService();
+    // Fix #126: Accept TLS config for scheduler→worker gRPC calls.
+    explicit InstanceService(common::config::TlsConfig worker_tls = {});
 
     // Pause workflow instance
     common::result::Result<void> pauseInstance(const std::string& id);
@@ -56,6 +58,8 @@ private:
     dao::TaskInstanceDao task_instance_dao_;
     dao::WorkerDao worker_dao_;
     dao::WorkflowDao workflow_dao_;
+    // Fix #126: TLS config for scheduler→worker gRPC channels.
+    common::config::TlsConfig worker_tls_;
 
     // Recursively reset downstream task instances to PENDING based on DAG edges.
     // Fix #113: traverse DAG from the given node_id to find all downstream nodes.

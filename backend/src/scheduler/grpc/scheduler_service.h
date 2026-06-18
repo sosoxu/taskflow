@@ -16,6 +16,10 @@ public:
                             const taskflow::v1::RegisterRequest* request,
                             taskflow::v1::RegisterResponse* response) override;
 
+    ::grpc::Status Deregister(::grpc::ServerContext* context,
+                              const taskflow::v1::DeregisterRequest* request,
+                              taskflow::v1::DeregisterResponse* response) override;
+
     ::grpc::Status Heartbeat(::grpc::ServerContext* context,
                              const taskflow::v1::HeartbeatRequest* request,
                              taskflow::v1::HeartbeatResponse* response) override;

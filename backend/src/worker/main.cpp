@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <csignal>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/daily_file_sink.h>
@@ -26,6 +27,11 @@ using taskflow::v1::TaskCancelRequest;
 using taskflow::v1::TaskCancelResponse;
 using taskflow::v1::TaskLogRequest;
 using taskflow::v1::LogChunk;
+
+// Fix #124: Global shutdown flag for signal handler → main loop communication.
+// std::signal handlers cannot capture state, so we use a global atomic.
+// This is file-scoped (anonymous namespace would also work).
+std::atomic<bool> g_shutdown_flag{false};
 
 static void initLogger(const taskflow::common::config::WorkerLogConfig& log_config) {
     try {
@@ -361,12 +367,46 @@ int main(int argc, char* argv[]) {
     }
 
     spdlog::info("TaskFlow Worker 启动完成, 监听: {}", server_address);
-    server->Wait();
 
-    // 清理
+    // Fix #124: Graceful shutdown on SIGTERM/SIGINT.
+    // Order: stop gRPC server (no new tasks) → wait for running tasks →
+    // deregister from scheduler → stop background threads.
+    auto signal_handler = [](int sig) {
+        spdlog::info("Received signal {}, initiating graceful shutdown...", sig);
+        // std::signal handlers cannot capture state, so we set a global flag
+        // and let the main loop perform the actual shutdown sequence.
+        g_shutdown_flag.store(true);
+    };
+    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT, signal_handler);
+
+    // Wait for shutdown signal (instead of blocking forever in server->Wait())
+    while (!g_shutdown_flag.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    spdlog::info("Stopping gRPC server (no new tasks will be accepted)...");
+    server->Shutdown();
+
+    // Wait for running tasks to finish (up to 30s), then cancel if needed.
+    spdlog::info("Draining {} running task(s)...", executor.runningCount());
+    executor.shutdown(30);
+
+    // Deregister from scheduler so it marks this worker offline immediately.
+    if (!worker_id.empty()) {
+        spdlog::info("Deregistering worker {} from scheduler...", worker_id);
+        auto dereg_result = scheduler_client.deregisterWorker(worker_id);
+        if (!dereg_result.ok()) {
+            spdlog::warn("Deregister failed: {} (scheduler will mark offline via heartbeat timeout)",
+                         dereg_result.error());
+        }
+    }
+
+    // Stop background threads
     running.store(false);
     heartbeat_thread.join();
     log_cleanup_thread.join();
 
+    spdlog::info("TaskFlow Worker shutdown complete");
     return 0;
 }

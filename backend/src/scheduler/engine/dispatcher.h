@@ -3,6 +3,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 #include "common/models/worker_info.h"
 #include "common/result/result.h"
@@ -15,6 +16,50 @@ public:
     virtual common::result::Result<common::models::WorkerInfo> selectWorker(
         const std::vector<common::models::WorkerInfo>& online_workers) = 0;
 };
+
+// Fix #125: Filter online workers by resource tags.
+// A task's resource_tags (JSON array of strings, e.g. ["gpu","highmem"]) lists
+// the tags a worker MUST have to be eligible. A worker is eligible if its
+// resource_tags set is a superset of the task's required tags.
+// If required_tags is empty, all workers are eligible (backward compatible).
+inline std::vector<common::models::WorkerInfo> filterByResourceTags(
+    const std::vector<common::models::WorkerInfo>& workers,
+    const nlohmann::json& required_tags) {
+    if (required_tags.empty() || !required_tags.is_array() || required_tags.size() == 0) {
+        return workers;
+    }
+    std::unordered_set<std::string> required;
+    for (const auto& tag : required_tags) {
+        if (tag.is_string()) {
+            required.insert(tag.get<std::string>());
+        }
+    }
+    if (required.empty()) {
+        return workers;
+    }
+    std::vector<common::models::WorkerInfo> filtered;
+    for (const auto& worker : workers) {
+        std::unordered_set<std::string> worker_tags;
+        if (worker.resource_tags.is_array()) {
+            for (const auto& tag : worker.resource_tags) {
+                if (tag.is_string()) {
+                    worker_tags.insert(tag.get<std::string>());
+                }
+            }
+        }
+        bool eligible = true;
+        for (const auto& req : required) {
+            if (worker_tags.find(req) == worker_tags.end()) {
+                eligible = false;
+                break;
+            }
+        }
+        if (eligible) {
+            filtered.push_back(worker);
+        }
+    }
+    return filtered;
+}
 
 class RandomDispatcher : public Dispatcher {
 public:

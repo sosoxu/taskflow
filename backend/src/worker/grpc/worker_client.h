@@ -21,6 +21,11 @@ public:
         const std::string& name, const std::string& address,
         int max_tasks, const std::vector<std::string>& resource_tags);
 
+    // Fix #124: Notify the scheduler that this worker is shutting down so it
+    // can mark the worker offline immediately and stop dispatching new tasks.
+    taskflow::common::result::Result<void> deregisterWorker(
+        const std::string& worker_id);
+
     taskflow::common::result::Result<void> sendHeartbeat(
         const std::string& worker_id, double cpu_usage,
         double memory_usage, int running_tasks);

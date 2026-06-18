@@ -105,10 +105,7 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
 import { Document, Share, VideoPlay, Monitor, Plus } from '@element-plus/icons-vue'
-import { getTasks } from '../api/task'
-import { getWorkflows } from '../api/workflow'
-import { getWorkers } from '../api/worker'
-import { getAllInstances } from '../api/instance'
+import { getDashboardStats } from '../api/dashboard'
 import { formatTime } from '../utils/format'
 
 const stats = reactive({
@@ -116,6 +113,8 @@ const stats = reactive({
   totalWorkflows: 0,
   runningInstances: 0,
   onlineWorkers: 0,
+  todayExecutions: 0,
+  successRate: 0,
 })
 
 interface InstanceItem {
@@ -142,28 +141,16 @@ function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 
 
 async function loadDashboardData() {
   try {
-    // Load task count
-    const tasksRes = await getTasks({ page: 1, page_size: 1 })
-    stats.totalTasks = tasksRes.data?.data?.total || 0
-
-    // Load workflow count
-    const workflowsRes = await getWorkflows({ page: 1, page_size: 1 })
-    stats.totalWorkflows = workflowsRes.data?.data?.total || 0
-
-    // Load workers
-    const workersRes = await getWorkers()
-    const workers = workersRes.data?.data || []
-    stats.onlineWorkers = Array.isArray(workers)
-      ? workers.filter((w: { status: string }) => w.status === 'online').length
-      : 0
-
-    // Load recent instances
-    const instancesRes = await getAllInstances({ page: 1, page_size: 5 })
-    const instancesData = instancesRes.data?.data
-    recentInstances.value = instancesData?.items || []
-    stats.runningInstances = instancesData?.items?.filter(
-      (i: InstanceItem) => i.status === 'RUNNING'
-    ).length || 0
+    const res = await getDashboardStats()
+    const data = res.data?.data
+    if (!data) return
+    stats.totalTasks = data.total_tasks || 0
+    stats.totalWorkflows = data.total_workflows || 0
+    stats.runningInstances = data.running_instances || 0
+    stats.onlineWorkers = data.online_workers || 0
+    stats.todayExecutions = data.today_executions || 0
+    stats.successRate = Number(data.success_rate?.toFixed(2) || 0)
+    recentInstances.value = data.recent_instances || []
   } catch {
     // Silently fail - dashboard shows zeros
   }

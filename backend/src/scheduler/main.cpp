@@ -32,12 +32,14 @@ inline std::string fromRequest<std::string>(const HttpRequest&) {
 #include "scheduler/api/workflow_controller.h"
 #include "scheduler/api/instance_controller.h"
 #include "scheduler/api/worker_controller.h"
+#include "scheduler/api/dashboard_controller.h"
 #include "scheduler/service/auth_service.h"
 #include "scheduler/service/user_service.h"
 #include "scheduler/service/task_service.h"
 #include "scheduler/service/workflow_service.h"
 #include "scheduler/service/instance_service.h"
 #include "scheduler/service/worker_service.h"
+#include "scheduler/service/dashboard_service.h"
 #include "scheduler/dao/worker_dao.h"
 #include "scheduler/middleware/auth_middleware.h"
 #include "scheduler/middleware/role_middleware.h"
@@ -174,7 +176,8 @@ int main(int argc, char* argv[]) {
     taskflow::scheduler::engine::DagDriver dag_driver(
         config.schedule.dag_drive_interval,
         config.encryption.aes_key,
-        leader_election);
+        leader_election,
+        config.worker_client.tls);
     dag_driver.start();
     spdlog::info("DAG 执行驱动已启动");
 
@@ -247,7 +250,7 @@ int main(int argc, char* argv[]) {
     auto workflowCtrl = std::make_shared<taskflow::scheduler::api::WorkflowController>(workflow_service);
     drogon::app().registerController(workflowCtrl);
 
-    auto instance_service = std::make_shared<taskflow::scheduler::service::InstanceService>();
+    auto instance_service = std::make_shared<taskflow::scheduler::service::InstanceService>(config.worker_client.tls);
     auto instanceCtrl = std::make_shared<taskflow::scheduler::api::InstanceController>(instance_service, config.auth.jwt_secret);
     drogon::app().registerController(instanceCtrl);
 
@@ -255,6 +258,10 @@ int main(int argc, char* argv[]) {
     auto worker_service = std::make_shared<taskflow::scheduler::service::WorkerService>(worker_dao);
     auto workerCtrl = std::make_shared<taskflow::scheduler::api::WorkerController>(worker_service);
     drogon::app().registerController(workerCtrl);
+
+    auto dashboard_service = std::make_shared<taskflow::scheduler::service::DashboardService>();
+    auto dashboardCtrl = std::make_shared<taskflow::scheduler::api::DashboardController>(dashboard_service);
+    drogon::app().registerController(dashboardCtrl);
 
     spdlog::info("TaskFlow Scheduler 启动完成");
 

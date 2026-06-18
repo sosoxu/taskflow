@@ -56,6 +56,34 @@ common::result::Result<std::string> WorkerClient::registerWorker(
     return std::string(response.worker_id());
 }
 
+common::result::Result<void> WorkerClient::deregisterWorker(
+    const std::string& worker_id) {
+    taskflow::v1::DeregisterRequest request;
+    request.set_worker_id(worker_id);
+
+    taskflow::v1::DeregisterResponse response;
+
+    auto call = [&]() -> ::grpc::Status {
+        ::grpc::ClientContext context;
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+        return stub_->Deregister(&context, request, &response);
+    };
+
+    auto status = retryRpc(call);
+
+    if (!status.ok()) {
+        return common::result::Result<void>::failure(
+            "gRPC Deregister failed: " + status.error_message());
+    }
+
+    if (!response.success()) {
+        return common::result::Result<void>::failure(
+            response.error_message());
+    }
+
+    return common::result::Result<void>();
+}
+
 common::result::Result<void> WorkerClient::sendHeartbeat(
     const std::string& worker_id, double cpu_usage,
     double memory_usage, int running_tasks) {

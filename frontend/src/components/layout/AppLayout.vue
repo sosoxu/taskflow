@@ -39,20 +39,33 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '../../stores/userStore'
+import { logout as logoutApi } from '../../api/auth'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const activeMenu = computed(() => {
   return route.path
 })
 
 const username = computed(() => {
-  return 'admin'
+  return userStore.username || 'unknown'
 })
 
-function handleLogout() {
-  router.push('/login')
+async function handleLogout() {
+  try {
+    if (userStore.token) {
+      await logoutApi(userStore.token)
+    }
+  } catch (e) {
+    // 即使后端登出失败，前端仍需清理本地状态
+    console.warn('Logout API failed, clearing local state anyway', e)
+  } finally {
+    userStore.clearUser()
+    router.push('/login')
+  }
 }
 </script>
 

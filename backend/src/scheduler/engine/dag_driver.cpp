@@ -19,14 +19,17 @@
 #include "common/models/workflow_instance.h"
 #include "common/result/result.h"
 #include "common/util/crypto_util.h"
+#include "common/util/grpc_channel_util.h"
 #include "taskflow.grpc.pb.h"
 
 namespace taskflow::scheduler::engine {
 
 DagDriver::DagDriver(int drive_interval, const std::string& aes_key,
-                     std::shared_ptr<grpc::LeaderElection> leader_election)
+                     std::shared_ptr<grpc::LeaderElection> leader_election,
+                     common::config::TlsConfig worker_tls)
     : drive_interval_(drive_interval), aes_key_(aes_key),
-      leader_election_(std::move(leader_election)) {}
+      leader_election_(std::move(leader_election)),
+      worker_tls_(std::move(worker_tls)) {}
 
 void DagDriver::start() {
     running_ = true;
@@ -329,7 +332,24 @@ common::result::Result<void> DagDriver::dispatchTask(
             "Failed to list online workers: " + workers_result.error());
     }
 
-    auto worker_result = dispatcher->selectWorker(workers_result.value());
+    // Fix #125: Filter online workers by the task's required resource_tags.
+    // A task with resource_tags=["gpu"] can only be dispatched to workers
+    // whose resource_tags include "gpu". Tasks with no resource_tags can run
+    // on any worker (backward compatible).
+    auto eligible_workers = filterByResourceTags(workers_result.value(), task.resource_tags);
+    if (eligible_workers.empty()) {
+        auto fail_result = task_instance_dao_.markFinished(
+            task_instance.id, "FAILED", -1,
+            "No online worker with required resource_tags");
+        if (!fail_result.ok()) {
+            spdlog::error("DagDriver: failed to mark task instance {} as FAILED (no tagged worker): {}",
+                         task_instance.id, fail_result.error());
+        }
+        return common::result::Result<void>::failure(
+            "No online worker with required resource_tags for task " + task_instance.id);
+    }
+
+    auto worker_result = dispatcher->selectWorker(eligible_workers);
     if (!worker_result.ok()) {
         // Mark task as FAILED when no worker is available (e.g., specified worker offline).
         // Without this, the task stays PENDING and is retried indefinitely.
@@ -354,7 +374,8 @@ common::result::Result<void> DagDriver::dispatchTask(
     }
 
     // 5. Call Worker's DispatchTask gRPC
-    auto channel = ::grpc::CreateChannel(worker.address, ::grpc::InsecureChannelCredentials());
+    // Fix #126: Use TLS-aware channel creation instead of hardcoded insecure credentials.
+    auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
     auto stub = taskflow::v1::WorkerService::NewStub(channel);
 
     taskflow::v1::TaskDispatchRequest request;
@@ -456,9 +477,14 @@ common::result::Result<void> DagDriver::dispatchTask(
     request.set_config_json(config.dump());
 
     taskflow::v1::TaskDispatchResponse response;
-    ::grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
-    auto grpc_status = stub->DispatchTask(&context, request, &response);
+    // Fix #127: Retry DispatchTask on transient failures (UNAVAILABLE, DEADLINE_EXCEEDED)
+    // with exponential backoff. A fresh ClientContext must be created for each
+    // attempt because gRPC contexts are single-use.
+    auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
+        ::grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+        return stub->DispatchTask(&ctx, request, &response);
+    });
 
     if (!grpc_status.ok()) {
         return common::result::Result<void>::failure(

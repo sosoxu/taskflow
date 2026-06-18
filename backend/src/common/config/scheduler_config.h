@@ -57,6 +57,12 @@ struct ServerConfig {
     TlsConfig tls;
 };
 
+// Fix #126: TLS config for scheduler→worker gRPC calls (DispatchTask, CancelTask, GetTaskLog).
+// Separate from server.tls (which is for incoming connections to the scheduler).
+struct WorkerClientConfig {
+    TlsConfig tls;
+};
+
 class SchedulerConfig {
 public:
     ServerConfig server;
@@ -65,6 +71,7 @@ public:
     EncryptionConfig encryption;
     LogConfig log;
     ScheduleConfig schedule;
+    WorkerClientConfig worker_client;
 
     static SchedulerConfig load(const std::string& config_path);
 

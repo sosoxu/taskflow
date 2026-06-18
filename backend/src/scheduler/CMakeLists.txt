@@ -4,6 +4,7 @@ add_executable(scheduler
     api/auth_controller.cpp
     api/user_controller.cpp
     api/task_controller.cpp
+    api/dashboard_controller.cpp
     dao/user_dao.cpp
     dao/task_dao.cpp
     dao/workflow_dao.cpp
@@ -17,6 +18,7 @@ add_executable(scheduler
     service/workflow_service.cpp
     service/instance_service.cpp
     service/worker_service.cpp
+    service/dashboard_service.cpp
     api/task_controller.cpp
     api/workflow_controller.cpp
     api/instance_controller.cpp

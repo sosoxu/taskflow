@@ -76,6 +76,15 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         if (sc["leader_lease_interval"]) config.schedule.leader_lease_interval = sc["leader_lease_interval"].as<int>();
     }
 
+    // worker_client.tls (Fix #126: TLS for scheduler→worker gRPC)
+    if (root["worker_client"] && root["worker_client"]["tls"]) {
+        auto tls = root["worker_client"]["tls"];
+        if (tls["enabled"]) config.worker_client.tls.enabled = tls["enabled"].as<bool>();
+        if (tls["cert_path"]) config.worker_client.tls.cert_path = tls["cert_path"].as<std::string>();
+        if (tls["key_path"]) config.worker_client.tls.key_path = tls["key_path"].as<std::string>();
+        if (tls["ca_path"]) config.worker_client.tls.ca_path = tls["ca_path"].as<std::string>();
+    }
+
     config.validate();
     return config;
 }

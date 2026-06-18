@@ -55,6 +55,12 @@ public:
 
     int runningCount() const;
 
+    // Fix #124: Graceful shutdown — reject new submissions and wait for
+    // running tasks to finish (up to timeout_seconds). If tasks are still
+    // running after the timeout, they are cancelled. This is distinct from
+    // the destructor, which always cancels immediately.
+    void shutdown(int timeout_seconds = 30);
+
     // Register a custom task type executor
     void registerExecutor(const std::string& task_type,
                           std::function<std::unique_ptr<TaskExecutorBase>()> factory);

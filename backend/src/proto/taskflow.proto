@@ -18,6 +18,8 @@ service WorkerService {
 service SchedulerService {
     // Worker 注册
     rpc Register(RegisterRequest) returns (RegisterResponse);
+    // Worker 注销（优雅退出时调用）
+    rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
     // Worker 心跳上报
     rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
     // Worker 上报任务执行结果
@@ -81,6 +83,17 @@ message RegisterResponse {
     bool success = 1;             // 是否注册成功
     string worker_id = 2;         // 分配的 Worker ID
     string error_message = 3;     // 失败原因
+}
+
+// Worker 注销请求
+message DeregisterRequest {
+    string worker_id = 1;         // Worker ID
+}
+
+// Worker 注销响应
+message DeregisterResponse {
+    bool success = 1;             // 是否注销成功
+    string error_message = 2;     // 失败原因
 }
 
 // 心跳请求

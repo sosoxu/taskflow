@@ -15,12 +15,14 @@
 #include "common/models/worker_info.h"
 #include "common/models/workflow_instance.h"
 #include "common/result/result.h"
+#include "common/util/grpc_channel_util.h"
 #include "scheduler/engine/dag_engine.h"
 #include "taskflow.grpc.pb.h"
 
 namespace taskflow::scheduler::service {
 
-InstanceService::InstanceService() = default;
+InstanceService::InstanceService(common::config::TlsConfig worker_tls)
+    : worker_tls_(std::move(worker_tls)) {}
 
 common::result::Result<void> InstanceService::pauseInstance(const std::string& id) {
     auto instance_result = workflow_instance_dao_.findById(id);
@@ -106,16 +108,19 @@ common::result::Result<void> InstanceService::cancelInstance(const std::string& 
                 auto worker_result = worker_dao_.findById(task_instance.worker_id);
                 if (worker_result.ok()) {
                     const auto& worker = worker_result.value();
-                    auto channel = grpc::CreateChannel(worker.address, grpc::InsecureChannelCredentials());
+                    auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
                     auto stub = taskflow::v1::WorkerService::NewStub(channel);
 
                     taskflow::v1::TaskCancelRequest request;
                     request.set_task_instance_id(task_instance.id);
 
                     taskflow::v1::TaskCancelResponse response;
-                    grpc::ClientContext context;
-                    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
-                    auto grpc_status = stub->CancelTask(&context, request, &response);
+                    // Fix #127: Retry CancelTask on transient failures.
+                    auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
+                        grpc::ClientContext ctx;
+                        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+                        return stub->CancelTask(&ctx, request, &response);
+                    });
 
                     if (!grpc_status.ok()) {
                         spdlog::warn("InstanceService: gRPC CancelTask failed for task instance {}: {}",
@@ -291,16 +296,19 @@ common::result::Result<void> InstanceService::killTask(
         auto worker_result = worker_dao_.findById(task_instance.worker_id);
         if (worker_result.ok()) {
             const auto& worker = worker_result.value();
-            auto channel = grpc::CreateChannel(worker.address, grpc::InsecureChannelCredentials());
+            auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
             auto stub = taskflow::v1::WorkerService::NewStub(channel);
 
             taskflow::v1::TaskCancelRequest request;
             request.set_task_instance_id(task_instance_id);
 
             taskflow::v1::TaskCancelResponse response;
-            grpc::ClientContext context;
-            context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
-            auto grpc_status = stub->CancelTask(&context, request, &response);
+            // Fix #127: Retry CancelTask on transient failures.
+            auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
+                grpc::ClientContext ctx;
+                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+                return stub->CancelTask(&ctx, request, &response);
+            });
 
             if (!grpc_status.ok()) {
                 spdlog::warn("InstanceService: gRPC CancelTask failed for task instance {}: {}",
@@ -448,7 +456,7 @@ common::result::Result<std::string> InstanceService::getTaskLog(
     const auto& worker = worker_result.value();
 
     // Connect to worker via gRPC and call GetTaskLog
-    auto channel = grpc::CreateChannel(worker.address, grpc::InsecureChannelCredentials());
+    auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
     auto stub = taskflow::v1::WorkerService::NewStub(channel);
 
     taskflow::v1::TaskLogRequest request;

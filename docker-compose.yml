@@ -11,7 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ../backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taskflow"]
       interval: 5s
@@ -20,7 +20,7 @@ services:
 
   scheduler:
     build:
-      context: ../backend
+      context: ./backend
       dockerfile: Dockerfile.scheduler
     image: taskflow-scheduler:latest
     ports:
@@ -42,7 +42,7 @@ services:
 
   worker:
     build:
-      context: ../backend
+      context: ./backend
       dockerfile: Dockerfile.worker
     image: taskflow-worker:latest
     depends_on:
@@ -61,7 +61,7 @@ services:
 
   frontend:
     build:
-      context: ../frontend
+      context: ./frontend
       dockerfile: Dockerfile
     ports:
       - "80:80"
