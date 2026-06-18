@@ -90,6 +90,8 @@ private:
 
 // Factory function to create log sink based on configuration
 std::unique_ptr<LogSink> createLogSink(const std::string& sink_type,
-                                        const std::string& base_dir);
+                                        const std::string& base_dir,
+                                        const std::string& es_url = "",
+                                        const std::string& es_index = "taskflow-logs");
 
 }  // namespace taskflow::worker::executor

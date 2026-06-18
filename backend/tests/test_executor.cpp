@@ -152,7 +152,9 @@ public:
     TaskResult execute(const std::string& /*task_instance_id*/,
                        const nlohmann::json& /*config*/,
                        int /*timeout*/,
-                       const std::string& /*log_dir*/) override {
+                       const std::string& /*log_dir*/,
+                       std::function<void(pid_t)> /*pid_callback*/ = nullptr,
+                       LogSink* /*log_sink*/ = nullptr) override {
         TaskResult result;
         result.status = "SUCCESS";
         result.exit_code = 0;
@@ -171,7 +173,7 @@ TEST_CASE("TaskExecutor: built-in command type", "[task_executor]") {
     TaskResult callback_result;
 
     auto submit_result = executor.submit("test-1", "command", config, 10,
-        TEST_LOG_DIR,
+        TEST_LOG_DIR, "",
         [&](const TaskResult& r) {
             callback_result = r;
             callback_called = true;
@@ -199,7 +201,7 @@ TEST_CASE("TaskExecutor: register custom executor", "[task_executor]") {
     TaskResult callback_result;
 
     auto submit_result = executor.submit("test-2", "custom_type", config, 10,
-TEST_LOG_DIR,
+TEST_LOG_DIR, "",
         [&](const TaskResult& r) {
             callback_result = r;
             callback_called = true;
@@ -220,7 +222,7 @@ TEST_CASE("TaskExecutor: unknown task type returns error", "[task_executor]") {
     nlohmann::json config;
 
     auto result = executor.submit("test-3", "unknown_type", config, 10,
-TEST_LOG_DIR, nullptr);
+TEST_LOG_DIR, "", nullptr);
     REQUIRE_FALSE(result.ok());
 }
 
@@ -234,12 +236,12 @@ TEST_CASE("TaskExecutor: max tasks limit", "[task_executor]") {
 
     // Submit first task (should succeed)
     auto r1 = executor.submit("max-1", "script", config, 10,
-TEST_LOG_DIR, callback);
+TEST_LOG_DIR, "", callback);
     REQUIRE(r1.ok());
 
     // Submit second task (should fail due to limit)
     auto r2 = executor.submit("max-2", "script", config, 10,
-TEST_LOG_DIR, callback);
+TEST_LOG_DIR, "", callback);
     REQUIRE_FALSE(r2.ok());
 
     // Wait for first task to complete
@@ -319,6 +321,6 @@ TEST_CASE("createLogSink: creates FileLogSink for file type", "[log_sink]") {
 }
 
 TEST_CASE("createLogSink: creates ElasticLogSink for elasticsearch type", "[log_sink]") {
-    auto sink = createLogSink("elasticsearch", "/tmp/taskflow_test_logs_factory");
+    auto sink = createLogSink("elasticsearch", "/tmp/taskflow_test_logs_factory", "http://localhost:9200", "taskflow-logs");
     REQUIRE(sink != nullptr);
 }

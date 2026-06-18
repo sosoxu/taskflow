@@ -65,14 +65,6 @@ public:
         spdlog::info("收到任务下发请求: task_instance_id={}, type={}",
                      request->task_instance_id(), request->task_type());
 
-        try {
-            auto config = nlohmann::json::parse(request->config_json());
-        } catch (const std::exception& e) {
-            response->set_accepted(false);
-            response->set_error_message(std::string("配置 JSON 解析失败: ") + e.what());
-            return grpc::Status::OK;
-        }
-
         nlohmann::json config;
         try {
             config = nlohmann::json::parse(request->config_json());
@@ -95,6 +87,7 @@ public:
 
         auto result = executor_.submit(
             task_instance_id, task_type, config, timeout, log_dir,
+            workflow_instance_id,
             [this, task_instance_id](const taskflow::worker::executor::TaskResult& task_result) {
                 spdlog::info("任务完成: task_instance_id={}, status={}, exit_code={}",
                              task_instance_id, task_result.status, task_result.exit_code);
@@ -227,6 +220,13 @@ int main(int argc, char* argv[]) {
 
     // 创建 TaskExecutor
     taskflow::worker::executor::TaskExecutor executor(config.worker.max_tasks);
+
+    // 创建 LogSink 并配置到 TaskExecutor
+    auto log_sink = taskflow::worker::executor::createLogSink(
+        config.task_log.sink_type, config.task_log.dir,
+        config.task_log.es_url, config.task_log.es_index);
+    executor.setLogSink(std::shared_ptr<taskflow::worker::executor::LogSink>(std::move(log_sink)));
+    spdlog::info("LogSink 配置完成, sink_type={}", config.task_log.sink_type);
 
     // 创建 gRPC 客户端连接 Scheduler
     std::shared_ptr<grpc::Channel> channel;

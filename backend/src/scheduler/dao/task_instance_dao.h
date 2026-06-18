@@ -36,6 +36,9 @@ public:
     common::result::Result<std::vector<common::models::TaskInstance>> listByWorkflowInstance(
         const std::string& workflow_instance_id);
 
+    common::result::Result<std::vector<common::models::TaskInstance>> listByWorkerId(
+        const std::string& worker_id);
+
     common::result::Result<std::vector<std::string>> batchCreate(
         const std::string& workflow_instance_id,
         const std::vector<std::tuple<std::string, std::string, int, std::string>>& tasks);

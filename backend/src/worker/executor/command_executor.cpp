@@ -15,7 +15,9 @@ namespace taskflow::worker::executor {
 TaskResult CommandExecutor::execute(const std::string& task_instance_id,
                                     const nlohmann::json& config,
                                     int timeout,
-                                    const std::string& log_dir) {
+                                    const std::string& log_dir,
+                                    std::function<void(pid_t)> pid_callback,
+                                    LogSink* /*log_sink*/) {
     TaskResult result;
 
     if (!config.contains("command") || !config["command"].is_string()) {
@@ -86,7 +88,10 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
         _exit(127);
     }
 
-    // Parent process - wait with timeout
+    // Parent process - report PID and wait with timeout
+    if (pid_callback) {
+        pid_callback(pid);
+    }
     auto start = std::chrono::steady_clock::now();
     int status = 0;
 

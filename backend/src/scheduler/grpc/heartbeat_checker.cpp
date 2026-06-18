@@ -83,7 +83,7 @@ void HeartbeatChecker::checkLoop() {
 
                 // Mark running task instances as NODE_OFFLINE
                 auto instances_result =
-                    task_instance_dao_.listByWorkflowInstance(
+                    task_instance_dao_.listByWorkerId(
                         worker.id);
                 if (instances_result.ok()) {
                     for (const auto& instance : instances_result.value()) {

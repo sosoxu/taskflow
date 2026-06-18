@@ -12,7 +12,9 @@ public:
     TaskResult execute(const std::string& task_instance_id,
                        const nlohmann::json& config,
                        int timeout,
-                       const std::string& log_dir) override;
+                       const std::string& log_dir,
+                       std::function<void(pid_t)> pid_callback = nullptr,
+                       LogSink* log_sink = nullptr) override;
 };
 
 }  // namespace taskflow::worker::executor

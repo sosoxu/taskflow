@@ -110,12 +110,13 @@ std::string ElasticLogSink::getLogPath(const std::string& workflow_instance_id,
 }
 
 std::unique_ptr<LogSink> createLogSink(const std::string& sink_type,
-                                        const std::string& base_dir) {
+                                        const std::string& base_dir,
+                                        const std::string& es_url,
+                                        const std::string& es_index) {
     if (sink_type == "file" || sink_type.empty()) {
         return std::make_unique<FileLogSink>(base_dir);
     } else if (sink_type == "elasticsearch") {
-        // Elasticsearch config will be read from worker config when implemented
-        return std::make_unique<ElasticLogSink>(base_dir);
+        return std::make_unique<ElasticLogSink>(base_dir, es_url, es_index);
     }
     spdlog::warn("createLogSink: unknown sink type '{}', falling back to file", sink_type);
     return std::make_unique<FileLogSink>(base_dir);

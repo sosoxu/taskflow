@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 #include "common/result/result.h"
+#include "worker/executor/log_sink.h"
 
 namespace taskflow::worker::executor {
 
@@ -24,7 +25,9 @@ public:
     virtual TaskResult execute(const std::string& task_instance_id,
                                const nlohmann::json& config,
                                int timeout,
-                               const std::string& log_dir) = 0;
+                               const std::string& log_dir,
+                               std::function<void(pid_t)> pid_callback = nullptr,
+                               LogSink* log_sink = nullptr) = 0;
 };
 
 class TaskExecutor {
@@ -38,6 +41,7 @@ public:
         const nlohmann::json& config,
         int timeout,
         const std::string& log_dir,
+        const std::string& workflow_instance_id,
         std::function<void(const TaskResult&)> callback);
 
     // Cancel a running task
@@ -49,12 +53,16 @@ public:
     void registerExecutor(const std::string& task_type,
                           std::function<std::unique_ptr<TaskExecutorBase>()> factory);
 
+    // Set the log sink for task execution
+    void setLogSink(std::shared_ptr<LogSink> log_sink);
+
 private:
     int max_tasks_;
     std::atomic<int> running_count_{0};
     std::map<std::string, pid_t> running_processes_;
     std::mutex mutex_;
     std::map<std::string, std::function<std::unique_ptr<TaskExecutorBase>()>> executor_factories_;
+    std::shared_ptr<LogSink> log_sink_;
 
     std::unique_ptr<TaskExecutorBase> createExecutor(const std::string& task_type);
 };

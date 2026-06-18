@@ -22,6 +22,7 @@ common::result::Result<void> TaskExecutor::submit(
     const nlohmann::json& config,
     int timeout,
     const std::string& log_dir,
+    const std::string& workflow_instance_id,
     std::function<void(const TaskResult&)> callback) {
     if (running_count_.load() >= max_tasks_) {
         return common::result::Result<void>::failure(
@@ -36,11 +37,25 @@ common::result::Result<void> TaskExecutor::submit(
 
     running_count_.fetch_add(1);
 
+    // Create a PID callback for the executor thread
+    auto pid_callback = [this, task_instance_id](pid_t pid) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        running_processes_[task_instance_id] = pid;
+    };
+
+    // Capture log_sink as raw pointer (shared_ptr keeps it alive)
+    auto* raw_log_sink = log_sink_.get();
+    auto log_sink_ref = log_sink_;  // Keep a reference to prevent destruction
+
     std::thread([this, task_instance_id, executor = std::move(executor),
-                 config, timeout, log_dir,
-                 callback = std::move(callback)]() mutable {
+                 config, timeout, log_dir, workflow_instance_id,
+                 callback = std::move(callback),
+                 pid_callback = std::move(pid_callback),
+                 raw_log_sink, log_sink_ref = std::move(log_sink_ref)]() mutable {
         TaskResult result = executor->execute(task_instance_id, config,
-                                              timeout, log_dir);
+                                              timeout, log_dir,
+                                              std::move(pid_callback),
+                                              raw_log_sink);
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -124,6 +139,11 @@ void TaskExecutor::registerExecutor(
     std::function<std::unique_ptr<TaskExecutorBase>()> factory) {
     executor_factories_[task_type] = std::move(factory);
     spdlog::info("TaskExecutor: registered custom executor for task type: {}", task_type);
+}
+
+void TaskExecutor::setLogSink(std::shared_ptr<LogSink> log_sink) {
+    log_sink_ = std::move(log_sink);
+    spdlog::info("TaskExecutor: log sink configured");
 }
 
 }  // namespace taskflow::worker::executor

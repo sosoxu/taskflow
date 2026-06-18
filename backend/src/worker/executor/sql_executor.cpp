@@ -12,7 +12,9 @@ namespace taskflow::worker::executor {
 TaskResult SqlExecutor::execute(const std::string& task_instance_id,
                                 const nlohmann::json& config,
                                 int /*timeout*/,
-                                const std::string& log_dir) {
+                                const std::string& log_dir,
+                                std::function<void(pid_t)> /*pid_callback*/,
+                                LogSink* /*log_sink*/) {
     TaskResult result;
 
     // Validate required config fields

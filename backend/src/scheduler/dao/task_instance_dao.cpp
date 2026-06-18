@@ -135,6 +135,26 @@ common::result::Result<std::vector<common::models::TaskInstance>> TaskInstanceDa
         });
 }
 
+common::result::Result<std::vector<common::models::TaskInstance>> TaskInstanceDao::listByWorkerId(
+    const std::string& worker_id) {
+
+    return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::TaskInstance>>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::TaskInstance>> {
+            auto res = txn.exec_params(
+                "SELECT * FROM task_instances WHERE worker_id = $1 "
+                "AND status IN ('RUNNING', 'DISPATCHED') "
+                "ORDER BY created_at ASC",
+                worker_id);
+
+            std::vector<common::models::TaskInstance> instances;
+            for (const auto& row : res) {
+                instances.push_back(common::models::TaskInstance::fromRow(row));
+            }
+
+            return instances;
+        });
+}
+
 common::result::Result<std::vector<std::string>> TaskInstanceDao::batchCreate(
     const std::string& workflow_instance_id,
     const std::vector<std::tuple<std::string, std::string, int, std::string>>& tasks) {
