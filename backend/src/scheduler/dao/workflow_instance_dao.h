@@ -28,6 +28,8 @@ public:
     common::result::Result<std::vector<common::models::WorkflowInstance>> listByWorkflow(
         const std::string& workflow_id, int offset, int limit);
 
+    common::result::Result<int> countByWorkflow(const std::string& workflow_id);
+
     common::result::Result<std::vector<common::models::WorkflowInstance>> listAll(int offset, int limit);
 
     common::result::Result<int> countAll();

@@ -147,9 +147,13 @@ common::result::Result<nlohmann::json> WorkflowService::listWorkflows(
         items.push_back(wf.toJson());
     }
 
+    // Get total count with same filters
+    auto countResult = workflow_dao_.count(keyword, creator_id);
+    int total = countResult.ok() ? countResult.value() : static_cast<int>(workflows.size());
+
     nlohmann::json response = {
         {"items", items},
-        {"total", static_cast<int>(workflows.size())},
+        {"total", total},
         {"page", page},
         {"page_size", page_size}
     };

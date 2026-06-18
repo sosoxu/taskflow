@@ -128,7 +128,7 @@
                 @click="openLogDialog(row)"
               >查看日志</el-button>
               <el-button
-                v-if="row.status === 'FAILED'"
+                v-if="row.status === 'FAILED' || row.status === 'TIMEOUT' || row.status === 'UPSTREAM_FAILED'"
                 type="warning"
                 link
                 size="small"
@@ -391,8 +391,10 @@ async function handleCancel() {
 
 async function handleRetryInstance() {
   if (!instance.value) return
-  // Retry the first failed task
-  const failedTask = instance.value.tasks.find((t) => t.status === 'FAILED')
+  // Retry the first failed/timed-out/upstream-failed task
+  const failedTask = instance.value.tasks.find(
+    (t) => t.status === 'FAILED' || t.status === 'TIMEOUT' || t.status === 'UPSTREAM_FAILED'
+  )
   if (failedTask) {
     await handleRetryTask(failedTask)
   }

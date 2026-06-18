@@ -104,9 +104,13 @@ common::result::Result<nlohmann::json> TaskService::listTasks(
         items.push_back(taskJson);
     }
 
+    // Get total count with same filters
+    auto countResult = task_dao_.count(type_filter, keyword, creator_id);
+    int total = countResult.ok() ? countResult.value() : static_cast<int>(tasks.size());
+
     nlohmann::json response = {
         {"items", items},
-        {"total", static_cast<int>(tasks.size())},
+        {"total", total},
         {"page", page},
         {"page_size", page_size}
     };
@@ -118,7 +122,7 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     const std::string& id, const std::string& name, const std::string& type,
     const nlohmann::json& config_json, const std::string& description,
     int timeout, int max_retries, int retry_interval,
-    const nlohmann::json& resource_tags,
+    const nlohmann::json& resource_tags, const nlohmann::json& parameters_json,
     const std::string& user_id, const std::string& role) {
 
     // Find existing task to check ownership and get defaults
@@ -137,6 +141,7 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     std::string effective_type = type.empty() ? existing_task.type : type;
     std::string effective_name = name.empty() ? existing_task.name : name;
     nlohmann::json effective_config = config_json.is_null() ? existing_task.config_json : config_json;
+    nlohmann::json effective_parameters = parameters_json.is_null() ? existing_task.parameters_json : parameters_json;
 
     // Validate type
     if (effective_type != "command" && effective_type != "script" && effective_type != "sql") {
@@ -161,7 +166,7 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     // Update task via DAO (version auto-increment is handled in DAO)
     auto updateResult = task_dao_.update(
         id, effective_name, effective_type, encrypted_config, description,
-        timeout, max_retries, retry_interval, resource_tags);
+        timeout, max_retries, retry_interval, resource_tags, effective_parameters);
     if (!updateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
             "Failed to update task: " + updateResult.error());

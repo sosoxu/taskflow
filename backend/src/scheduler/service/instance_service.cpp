@@ -345,9 +345,13 @@ common::result::Result<nlohmann::json> InstanceService::listInstances(
         items.push_back(inst.toJson());
     }
 
+    // Get total count
+    auto countResult = workflow_instance_dao_.countByWorkflow(workflow_id);
+    int total = countResult.ok() ? countResult.value() : static_cast<int>(instances.size());
+
     nlohmann::json response = {
         {"items", items},
-        {"total", static_cast<int>(instances.size())},
+        {"total", total},
         {"page", page},
         {"page_size", page_size}
     };

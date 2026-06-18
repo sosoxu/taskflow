@@ -115,6 +115,17 @@ common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowIn
         });
 }
 
+common::result::Result<int> WorkflowInstanceDao::countByWorkflow(const std::string& workflow_id) {
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            auto row = txn.exec_params(
+                "SELECT COUNT(*) FROM workflow_instances WHERE workflow_id = $1",
+                workflow_id);
+            int total = row[0][0].as<int>();
+            return total;
+        });
+}
+
 common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowInstanceDao::listActive() {
     return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::WorkflowInstance>>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::WorkflowInstance>> {

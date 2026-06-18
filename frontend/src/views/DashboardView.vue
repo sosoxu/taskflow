@@ -58,8 +58,12 @@
             </div>
           </template>
           <el-table :data="recentInstances" stripe style="width: 100%">
-            <el-table-column prop="id" label="实例 ID" width="100" />
-            <el-table-column prop="workflowName" label="工作流" />
+            <el-table-column prop="id" label="实例 ID" width="100">
+              <template #default="{ row }">
+                <router-link :to="`/instances/${row.id}`" class="link">{{ row.id.substring(0, 8) }}...</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column prop="workflow_id" label="工作流" />
             <el-table-column prop="status" label="状态" width="120">
               <template #default="{ row }">
                 <el-tag :type="statusTagType(row.status)" size="small">
@@ -67,8 +71,10 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="startTime" label="开始时间" width="180" />
-            <el-table-column prop="duration" label="耗时" width="120" />
+            <el-table-column prop="trigger_type" label="触发类型" width="100" />
+            <el-table-column label="创建时间" width="180">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
           </el-table>
           <el-empty v-if="recentInstances.length === 0" description="暂无实例数据" />
         </el-card>
@@ -97,8 +103,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { Document, Share, VideoPlay, Monitor, Plus } from '@element-plus/icons-vue'
+import { getTasks } from '../api/task'
+import { getWorkflows } from '../api/workflow'
+import { getWorkers } from '../api/worker'
+import { getAllInstances } from '../api/instance'
+import { formatTime } from '../utils/format'
 
 const stats = reactive({
   totalTasks: 0,
@@ -107,24 +118,60 @@ const stats = reactive({
   onlineWorkers: 0,
 })
 
-const recentInstances: {
+interface InstanceItem {
   id: string
-  workflowName: string
+  workflow_id: string
   status: string
-  startTime: string
-  duration: string
-}[] = []
+  trigger_type: string
+  created_at: string
+}
+
+const recentInstances = ref<InstanceItem[]>([])
 
 function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
   const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
-    running: '',
-    succeeded: 'success',
-    failed: 'danger',
-    paused: 'warning',
-    pending: 'info',
+    RUNNING: '',
+    SUCCESS: 'success',
+    FAILED: 'danger',
+    PAUSED: 'warning',
+    PENDING: 'info',
+    CANCELLED: 'info',
   }
   return map[status] || 'info'
 }
+
+async function loadDashboardData() {
+  try {
+    // Load task count
+    const tasksRes = await getTasks({ page: 1, page_size: 1 })
+    stats.totalTasks = tasksRes.data?.data?.total || 0
+
+    // Load workflow count
+    const workflowsRes = await getWorkflows({ page: 1, page_size: 1 })
+    stats.totalWorkflows = workflowsRes.data?.data?.total || 0
+
+    // Load workers
+    const workersRes = await getWorkers()
+    const workers = workersRes.data?.data || []
+    stats.onlineWorkers = Array.isArray(workers)
+      ? workers.filter((w: { status: string }) => w.status === 'online').length
+      : 0
+
+    // Load recent instances
+    const instancesRes = await getAllInstances({ page: 1, page_size: 5 })
+    const instancesData = instancesRes.data?.data
+    recentInstances.value = instancesData?.items || []
+    stats.runningInstances = instancesData?.items?.filter(
+      (i: InstanceItem) => i.status === 'RUNNING'
+    ).length || 0
+  } catch {
+    // Silently fail - dashboard shows zeros
+  }
+}
+
+onMounted(() => {
+  loadDashboardData()
+})
 </script>
 
 <style scoped>
@@ -194,5 +241,14 @@ function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 
 .quick-actions .el-button {
   width: 100%;
   justify-content: center;
+}
+
+.link {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
 }
 </style>

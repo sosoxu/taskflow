@@ -163,4 +163,40 @@ common::result::Result<std::vector<common::models::Workflow>> WorkflowDao::list(
         });
 }
 
+common::result::Result<int> WorkflowDao::count(
+    const std::string& keyword,
+    const std::string& creator_id) {
+
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            std::string sql = "SELECT COUNT(*) FROM workflows WHERE deleted = false";
+            int param_idx = 1;
+            std::vector<std::string> params;
+
+            if (!keyword.empty()) {
+                sql += " AND name ILIKE $" + std::to_string(param_idx++);
+                params.push_back("%" + keyword + "%");
+            }
+
+            if (!creator_id.empty()) {
+                sql += " AND creator_id = $" + std::to_string(param_idx++);
+                params.push_back(creator_id);
+            }
+
+            pqxx::result res;
+            int pcount = params.size();
+
+            if (pcount == 0) {
+                res = txn.exec_params(sql);
+            } else if (pcount == 1) {
+                res = txn.exec_params(sql, params[0]);
+            } else if (pcount == 2) {
+                res = txn.exec_params(sql, params[0], params[1]);
+            }
+
+            int total = res[0][0].as<int>();
+            return total;
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

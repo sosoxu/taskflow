@@ -79,7 +79,8 @@ common::result::Result<void> TaskDao::update(
     int timeout,
     int max_retries,
     int retry_interval,
-    const nlohmann::json& resource_tags) {
+    const nlohmann::json& resource_tags,
+    const nlohmann::json& parameters_json) {
 
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
@@ -87,11 +88,12 @@ common::result::Result<void> TaskDao::update(
                 "UPDATE tasks SET name = $1, type = $2, config_json = $3::jsonb, "
                 "description = $4, timeout = $5, max_retries = $6, "
                 "retry_interval = $7, resource_tags = $8::jsonb, "
+                "parameters_json = $9::jsonb, "
                 "version = version + 1, updated_at = NOW() "
-                "WHERE id = $9 AND deleted = false",
+                "WHERE id = $10 AND deleted = false",
                 name, type, config_json.dump(), description,
                 timeout, max_retries, retry_interval,
-                resource_tags.dump(), id);
+                resource_tags.dump(), parameters_json.dump(), id);
 
             if (res.affected_rows() == 0) {
                 return common::result::Result<void>::failure("任务不存在或已删除，更新失败");
@@ -168,6 +170,50 @@ common::result::Result<std::vector<common::models::Task>> TaskDao::list(
             }
 
             return tasks;
+        });
+}
+
+common::result::Result<int> TaskDao::count(
+    const std::string& type_filter,
+    const std::string& keyword,
+    const std::string& creator_id) {
+
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            std::string sql = "SELECT COUNT(*) FROM tasks WHERE deleted = false";
+            int param_idx = 1;
+            std::vector<std::string> params;
+
+            if (!type_filter.empty()) {
+                sql += " AND type = $" + std::to_string(param_idx++);
+                params.push_back(type_filter);
+            }
+
+            if (!keyword.empty()) {
+                sql += " AND name ILIKE $" + std::to_string(param_idx++);
+                params.push_back("%" + keyword + "%");
+            }
+
+            if (!creator_id.empty()) {
+                sql += " AND creator_id = $" + std::to_string(param_idx++);
+                params.push_back(creator_id);
+            }
+
+            pqxx::result res;
+            int pcount = params.size();
+
+            if (pcount == 0) {
+                res = txn.exec_params(sql);
+            } else if (pcount == 1) {
+                res = txn.exec_params(sql, params[0]);
+            } else if (pcount == 2) {
+                res = txn.exec_params(sql, params[0], params[1]);
+            } else if (pcount == 3) {
+                res = txn.exec_params(sql, params[0], params[1], params[2]);
+            }
+
+            int total = res[0][0].as<int>();
+            return total;
         });
 }
 

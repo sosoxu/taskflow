@@ -206,10 +206,17 @@ void TaskController::updateTask(
         resource_tags = jsoncppToNlohmann((*json)["resource_tags"]);
     }
 
+    nlohmann::json parameters_json;
+    if ((*json).isMember("parameters")) {
+        parameters_json = jsoncppToNlohmann((*json)["parameters"]);
+    } else if ((*json).isMember("parameters_json")) {
+        parameters_json = jsoncppToNlohmann((*json)["parameters_json"]);
+    }
+
     auto result = task_service_->updateTask(
         id, name, type, config_json, description,
         timeout, max_retries, retry_interval,
-        resource_tags, user_id, role);
+        resource_tags, parameters_json, user_id, role);
 
     if (!result.ok()) {
         int status = 400;

@@ -79,6 +79,9 @@ router.beforeEach((to, from, next) => {
   } else {
     if (!userStore.isLoggedIn) {
       next({ path: '/login', query: { redirect: to.fullPath } })
+    } else if (to.path === '/users' && !userStore.isAdmin) {
+      // Only admin can access user management page
+      next('/')
     } else {
       next()
     }

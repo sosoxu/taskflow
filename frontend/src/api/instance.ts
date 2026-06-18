@@ -8,6 +8,10 @@ export function getInstance(id: string) {
   return request.get(`/api/v1/instances/${id}`)
 }
 
+export function getAllInstances(params?: { page?: number; page_size?: number }) {
+  return request.get('/api/v1/instances', { params })
+}
+
 export function pauseInstance(id: string) {
   return request.post(`/api/v1/instances/${id}/pause`)
 }

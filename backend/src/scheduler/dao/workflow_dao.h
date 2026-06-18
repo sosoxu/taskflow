@@ -38,6 +38,11 @@ public:
         int offset, int limit,
         const std::string& keyword,
         const std::string& creator_id);
+
+    // 计数（与 list 相同筛选条件）
+    common::result::Result<int> count(
+        const std::string& keyword,
+        const std::string& creator_id);
 };
 
 }  // namespace taskflow::scheduler::dao
