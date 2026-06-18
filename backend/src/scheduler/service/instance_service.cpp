@@ -3,6 +3,7 @@
 #include <chrono>
 #include <map>
 #include <memory>
+#include <queue>
 #include <set>
 #include <string>
 #include <vector>
@@ -172,53 +173,31 @@ common::result::Result<void> InstanceService::retryTask(
             "Failed to reset task instance: " + reset_result.error());
     }
 
-    // Find and reset downstream tasks recursively
-    // Get all task instances for this workflow instance
+    // Find and reset downstream tasks recursively based on DAG structure.
+    // Fix #113: Previously this reset ALL UPSTREAM_FAILED/CANCELLED tasks in the
+    // workflow, which incorrectly reset unrelated branches. Now we traverse the
+    // DAG edges to find only the true downstream nodes of the retried task.
     auto all_tasks_result = task_instance_dao_.listByWorkflowInstance(instance_id);
     if (!all_tasks_result.ok()) {
         return common::result::Result<void>::failure(
             "Failed to list task instances: " + all_tasks_result.error());
     }
 
-    // Build task_id -> task_instance mapping
-    std::map<std::string, common::models::TaskInstance> task_map;
+    // Build node_id -> TaskInstance mapping
+    std::map<std::string, common::models::TaskInstance> node_to_instance;
     for (const auto& ti : all_tasks_result.value()) {
-        task_map[ti.task_id] = ti;
+        node_to_instance[ti.node_id] = ti;
     }
 
-    // Get the workflow to access dag_json for downstream traversal
+    // Get the workflow's dag_json to traverse downstream nodes
     const auto& instance = instance_result.value();
-    // We need the workflow's dag_json to find downstream tasks
-    // Use the workflow_instance's workflow_id to get the workflow
-    // But we don't have WorkflowDao here. Instead, we can use the DAG engine
-    // to find downstream tasks if we had the dag_json.
-    // Since we don't have WorkflowDao as a dependency, we'll use a simpler approach:
-    // Find downstream tasks by traversing the edges in the dag_json.
-    // We need to get the workflow - let's get it through the instance's workflow_id.
-    // However, WorkflowDao is not a member. Let's add a different approach:
-    // We'll reset downstream tasks by finding all tasks that are in UPSTREAM_FAILED,
-    // FAILED, or CANCELLED state that come after this task.
-
-    // For now, we reset all downstream tasks that are in a terminal non-success state.
-    // We need the dag_json from the workflow. Since we don't have WorkflowDao,
-    // we'll need to get the workflow instance's associated workflow.
-    // The simplest approach: get all task instances and reset those that are
-    // downstream based on the DAG structure.
-
-    // Since we don't have direct access to WorkflowDao, we'll reset all
-    // task instances in the workflow that are in UPSTREAM_FAILED or CANCELLED state
-    // (which are likely downstream of the retried task).
-    // A more precise approach would require the dag_json.
-
-    // Reset downstream tasks: any task in UPSTREAM_FAILED state should be reset to PENDING
-    for (const auto& ti : all_tasks_result.value()) {
-        if (ti.status == "UPSTREAM_FAILED" || ti.status == "CANCELLED") {
-            auto downstream_reset = task_instance_dao_.resetForRetry(ti.id);
-            if (!downstream_reset.ok()) {
-                spdlog::warn("InstanceService: failed to reset downstream task instance {}: {}",
-                             ti.id, downstream_reset.error());
-            }
-        }
+    auto workflow_result = workflow_dao_.findById(instance.workflow_id);
+    if (workflow_result.ok()) {
+        const auto& dag_json = workflow_result.value().dag_json;
+        resetDownstreamTasks(dag_json, task_instance.node_id, node_to_instance);
+    } else {
+        spdlog::warn("InstanceService: failed to get workflow {} for DAG traversal: {}",
+                     instance.workflow_id, workflow_result.error());
     }
 
     // If the workflow instance was in a terminal state, reset it to RUNNING
@@ -231,6 +210,52 @@ common::result::Result<void> InstanceService::retryTask(
     }
 
     return common::result::Result<void>();
+}
+
+void InstanceService::resetDownstreamTasks(
+    const nlohmann::json& dag_json,
+    const std::string& start_node_id,
+    const std::map<std::string, common::models::TaskInstance>& node_to_instance) {
+    // BFS traversal of downstream nodes via DAG edges
+    std::set<std::string> visited;
+    std::queue<std::string> queue;
+    queue.push(start_node_id);
+    visited.insert(start_node_id);
+
+    while (!queue.empty()) {
+        std::string current = queue.front();
+        queue.pop();
+
+        if (!dag_json.contains("edges") || !dag_json["edges"].is_array()) {
+            break;
+        }
+
+        for (const auto& edge : dag_json["edges"]) {
+            if (!edge.contains("source") || !edge.contains("target")) continue;
+            if (edge["source"].get<std::string>() != current) continue;
+
+            std::string target = edge["target"].get<std::string>();
+            if (visited.count(target)) continue;
+            visited.insert(target);
+
+            // Reset this downstream task instance if it exists and is in a
+            // non-success terminal state (UPSTREAM_FAILED, CANCELLED, FAILED, TIMEOUT)
+            auto it = node_to_instance.find(target);
+            if (it != node_to_instance.end()) {
+                const auto& ti = it->second;
+                if (ti.status == "UPSTREAM_FAILED" || ti.status == "CANCELLED" ||
+                    ti.status == "FAILED" || ti.status == "TIMEOUT") {
+                    auto downstream_reset = task_instance_dao_.resetForRetry(ti.id);
+                    if (!downstream_reset.ok()) {
+                        spdlog::warn("InstanceService: failed to reset downstream task instance {}: {}",
+                                     ti.id, downstream_reset.error());
+                    }
+                }
+            }
+
+            queue.push(target);
+        }
+    }
 }
 
 common::result::Result<void> InstanceService::killTask(

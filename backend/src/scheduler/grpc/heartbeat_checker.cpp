@@ -50,7 +50,13 @@ void HeartbeatChecker::checkLoop() {
                 continue;
             }
 
-            // Parse last_heartbeat string "YYYY-MM-DD HH:MM:SS"
+            // Parse last_heartbeat string "YYYY-MM-DD HH:MM:SS" (possibly with timezone offset)
+            // Fix #118: Use timegm to interpret as UTC to avoid timezone mismatch.
+            // PostgreSQL TIMESTAMPTZ returned by pqxx may include a timezone offset
+            // (e.g. "2026-06-18 12:34:56.789012+08"). sscanf parses the first 6
+            // numeric fields and ignores the offset. Using mktime (local time)
+            // would introduce an 8-hour skew if the DB session timezone differs
+            // from the process timezone. timegm treats the parsed tm as UTC.
             std::tm tm = {};
             if (sscanf(worker.last_heartbeat.c_str(), "%d-%d-%d %d:%d:%d",
                        &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
@@ -64,10 +70,15 @@ void HeartbeatChecker::checkLoop() {
 
             tm.tm_year -= 1900;
             tm.tm_mon -= 1;
-            tm.tm_isdst = -1;
+            tm.tm_isdst = 0;  // UTC has no DST
 
-            auto last_hb = std::chrono::system_clock::from_time_t(
-                std::mktime(&tm));
+            // timegm interprets tm as UTC (not affected by process timezone)
+            time_t t = timegm(&tm);
+            if (t == -1) {
+                spdlog::warn("HeartbeatChecker: timegm failed for worker {}", worker.id);
+                continue;
+            }
+            auto last_hb = std::chrono::system_clock::from_time_t(t);
 
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                                now - last_hb)

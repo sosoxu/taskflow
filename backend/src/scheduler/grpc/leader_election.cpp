@@ -86,15 +86,35 @@ bool LeaderElection::tryAcquireLock() {
 
 bool LeaderElection::renewLock() {
     // Advisory locks are session-level: as long as the connection stays open,
-    // the lock is held. We just verify the connection is still alive.
+    // the lock is held. Fix #115: If the connection was lost and ensureConnection()
+    // opened a NEW connection, that new connection does NOT hold the advisory lock.
+    // We must detect this and re-acquire the lock rather than assuming it's held.
     try {
+        bool was_connection_lost = (!lock_conn_ || !lock_conn_->is_open());
         ensureConnection();
         if (!lock_conn_ || !lock_conn_->is_open()) {
             return false;
         }
-        // Verify connection is still alive with a lightweight query
+
+        if (was_connection_lost) {
+            // Connection was lost and a new one was opened by ensureConnection().
+            // The new connection does NOT hold the advisory lock — re-acquire it.
+            spdlog::warn("LeaderElection: connection was lost, re-acquiring advisory lock");
+            pqxx::nontransaction txn(*lock_conn_);
+            auto res = txn.exec_params("SELECT pg_try_advisory_lock($1)", lock_id_);
+            bool acquired = res[0][0].as<bool>();
+            if (!acquired) {
+                // Another node holds the lock; we are no longer the leader.
+                spdlog::info("LeaderElection: failed to re-acquire lock, another node is leader");
+                return false;
+            }
+            return true;
+        }
+
+        // Connection is the same one that acquired the lock — verify it's alive.
         pqxx::nontransaction txn(*lock_conn_);
         auto res = txn.exec("SELECT 1");
+        (void)res;
         return true;
     } catch (const std::exception& e) {
         spdlog::error("LeaderElection: connection lost during renewal: {}",

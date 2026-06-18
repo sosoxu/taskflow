@@ -6,6 +6,7 @@
 #include "scheduler/dao/workflow_instance_dao.h"
 #include "scheduler/dao/task_instance_dao.h"
 #include "scheduler/dao/worker_dao.h"
+#include "scheduler/dao/workflow_dao.h"
 
 namespace taskflow::scheduler::service {
 
@@ -54,6 +55,13 @@ private:
     dao::WorkflowInstanceDao workflow_instance_dao_;
     dao::TaskInstanceDao task_instance_dao_;
     dao::WorkerDao worker_dao_;
+    dao::WorkflowDao workflow_dao_;
+
+    // Recursively reset downstream task instances to PENDING based on DAG edges.
+    // Fix #113: traverse DAG from the given node_id to find all downstream nodes.
+    void resetDownstreamTasks(const nlohmann::json& dag_json,
+                              const std::string& start_node_id,
+                              const std::map<std::string, common::models::TaskInstance>& node_to_instance);
 };
 
 }  // namespace taskflow::scheduler::service

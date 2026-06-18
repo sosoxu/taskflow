@@ -242,7 +242,7 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     std::map<std::string, std::string> updated_statuses;
     bool has_pending_retry = false;
     for (const auto& ti : updated_tasks_result.value()) {
-        updated_statuses[ti.task_id] = ti.status;
+        updated_statuses[ti.node_id] = ti.status;
         // Check if any failed task still has retries remaining
         if ((ti.status == "FAILED" || ti.status == "TIMEOUT")) {
             auto task_info_result = task_dao_.findById(ti.task_id);
@@ -331,6 +331,15 @@ common::result::Result<void> DagDriver::dispatchTask(
 
     auto worker_result = dispatcher->selectWorker(workers_result.value());
     if (!worker_result.ok()) {
+        // Mark task as FAILED when no worker is available (e.g., specified worker offline).
+        // Without this, the task stays PENDING and is retried indefinitely.
+        auto fail_result = task_instance_dao_.markFinished(
+            task_instance.id, "FAILED", -1,
+            "No available worker: " + worker_result.error());
+        if (!fail_result.ok()) {
+            spdlog::error("DagDriver: failed to mark task instance {} as FAILED: {}",
+                         task_instance.id, fail_result.error());
+        }
         return common::result::Result<void>::failure(
             "Failed to select worker: " + worker_result.error());
     }
@@ -372,8 +381,8 @@ common::result::Result<void> DagDriver::dispatchTask(
         const auto& dag = workflow.dag_json;
         if (dag.contains("nodes") && dag["nodes"].is_array()) {
             for (const auto& node : dag["nodes"]) {
-                if (node.contains("task_id") && node["task_id"].is_string() &&
-                    node["task_id"].get<std::string>() == task_instance.task_id) {
+                if (node.contains("id") && node["id"].is_string() &&
+                    node["id"].get<std::string>() == task_instance.node_id) {
                     if (node.contains("param_overrides") && node["param_overrides"].is_object()) {
                         for (auto& [key, value] : node["param_overrides"].items()) {
                             config[key] = value;
@@ -411,8 +420,8 @@ common::result::Result<void> DagDriver::dispatchTask(
             const auto& dag = workflow.dag_json;
             if (dag.contains("nodes") && dag["nodes"].is_array()) {
                 for (const auto& node : dag["nodes"]) {
-                    if (node.contains("task_id") && node["task_id"].is_string() &&
-                        node["task_id"].get<std::string>() == task_instance.task_id) {
+                    if (node.contains("id") && node["id"].is_string() &&
+                        node["id"].get<std::string>() == task_instance.node_id) {
                         if (node.contains("param_overrides") && node["param_overrides"].is_object()) {
                             for (auto& [key, value] : node["param_overrides"].items()) {
                                 params[key] = value;

@@ -192,6 +192,9 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     // Use existing values for fields not provided
     std::string effective_name = name.empty() ? existing_workflow.name : name;
     std::string effective_strategy = schedule_strategy.empty() ? existing_workflow.schedule_strategy : schedule_strategy;
+    // Fix #119: target_worker_id must also fall back to existing value when not provided,
+    // otherwise specified-strategy updates fail or overwrite the bound worker with empty string.
+    std::string effective_target_worker_id = target_worker_id.empty() ? existing_workflow.target_worker_id : target_worker_id;
     nlohmann::json effective_dag = dag_json.is_null() ? existing_workflow.dag_json : dag_json;
     std::string effective_cron_expression = cron_expression.empty() ? existing_workflow.cron_expression : cron_expression;
     bool effective_cron_enabled = cron_enabled.has_value() ? cron_enabled.value() : existing_workflow.cron_enabled;
@@ -228,11 +231,11 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
 
     // If schedule_strategy == "specified", check target_worker_id exists
     if (effective_strategy == "specified") {
-        if (target_worker_id.empty()) {
+        if (effective_target_worker_id.empty()) {
             return common::result::Result<nlohmann::json>::failure(
                 "target_worker_id is required when schedule_strategy is 'specified'");
         }
-        auto workerResult = worker_dao_.findById(target_worker_id);
+        auto workerResult = worker_dao_.findById(effective_target_worker_id);
         if (!workerResult.ok()) {
             return common::result::Result<nlohmann::json>::failure(
                 "Target worker not found: " + workerResult.error());
@@ -242,7 +245,7 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
     // Update workflow via DAO (version auto-increment is handled in DAO)
     auto updateResult = workflow_dao_.update(
         id, effective_name, description, effective_dag, effective_strategy,
-        target_worker_id, effective_cron_expression, effective_cron_enabled);
+        effective_target_worker_id, effective_cron_expression, effective_cron_enabled);
     if (!updateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
             "Failed to update workflow: " + updateResult.error());

@@ -82,6 +82,8 @@ public:
 
 private:
     // bcrypt base64 encoding (uses ./ instead of +/ and no padding)
+    // Fix #120: Correct the output length for partial input blocks.
+    // Standard bcrypt base64: 3 bytes -> 4 chars, 2 bytes -> 3 chars, 1 byte -> 2 chars.
     static std::string encodeBcryptBase64(const unsigned char* data, size_t len) {
         static const char kTable[] =
             "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -90,13 +92,30 @@ private:
         size_t i = 0;
         while (i < len) {
             unsigned int c0 = static_cast<unsigned int>(data[i++]);
-            unsigned int c1 = (i < len) ? static_cast<unsigned int>(data[i++]) : 0;
-            unsigned int c2 = (i < len) ? static_cast<unsigned int>(data[i++]) : 0;
+            unsigned int c1 = 0;
+            unsigned int c2 = 0;
+            bool has_c1 = false;
+            bool has_c2 = false;
+
+            if (i < len) {
+                c1 = static_cast<unsigned int>(data[i++]);
+                has_c1 = true;
+            }
+            if (i < len) {
+                c2 = static_cast<unsigned int>(data[i++]);
+                has_c2 = true;
+            }
 
             result += kTable[(c0 >> 2) & 0x3F];
             result += kTable[((c0 & 0x03) << 4) | ((c1 >> 4) & 0x0F)];
-            if (i - 1 < len) result += kTable[((c1 & 0x0F) << 2) | ((c2 >> 6) & 0x03)];
-            if (i < len) result += kTable[c2 & 0x3F];
+            // 3rd char only if c1 was real data (2+ bytes in this block)
+            if (has_c1) {
+                result += kTable[((c1 & 0x0F) << 2) | ((c2 >> 6) & 0x03)];
+            }
+            // 4th char only if c2 was real data (3 bytes in this block)
+            if (has_c2) {
+                result += kTable[c2 & 0x3F];
+            }
         }
         return result;
     }

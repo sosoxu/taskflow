@@ -160,4 +160,21 @@ common::result::Result<void> WorkerDao::updateRunningTasks(const std::string& id
         });
 }
 
+common::result::Result<void> WorkerDao::decrementRunningTasks(const std::string& id) {
+    // Fix #121: Atomically decrement running_tasks using SQL, avoiding negative values.
+    return common::database::DatabaseManager::instance().withTransaction<void>(
+        [&](pqxx::work& txn) -> common::result::Result<void> {
+            auto res = txn.exec_params(
+                "UPDATE workers SET running_tasks = GREATEST(running_tasks - 1, 0) "
+                "WHERE id = $1",
+                id);
+
+            if (res.affected_rows() == 0) {
+                return common::result::Result<void>::failure("Worker 不存在，递减运行任务数失败");
+            }
+
+            return common::result::Result<void>();
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

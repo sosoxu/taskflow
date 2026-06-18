@@ -52,7 +52,17 @@ common::result::Result<void> TaskExecutor::submit(
     const std::string& log_dir,
     const std::string& workflow_instance_id,
     std::function<void(const TaskResult&)> callback) {
-    if (running_count_.load() >= max_tasks_) {
+    // Fix #116: Atomically check and increment running_count_ to prevent
+    // the race condition where multiple threads pass the check before any
+    // increments, causing max_tasks_ to be exceeded.
+    int current = running_count_.load();
+    while (current < max_tasks_) {
+        if (running_count_.compare_exchange_weak(current, current + 1)) {
+            break;  // Successfully reserved a slot
+        }
+        // current was updated by compare_exchange_weak; retry
+    }
+    if (current >= max_tasks_) {
         return common::result::Result<void>::failure(
             "Too many running tasks, max=" + std::to_string(max_tasks_));
     }
@@ -60,6 +70,7 @@ common::result::Result<void> TaskExecutor::submit(
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (shutting_down_) {
+            running_count_.fetch_sub(1);
             return common::result::Result<void>::failure(
                 "TaskExecutor is shutting down");
         }
@@ -72,11 +83,11 @@ common::result::Result<void> TaskExecutor::submit(
     if (!executor) {
         std::lock_guard<std::mutex> lock(mutex_);
         running_processes_.erase(task_instance_id);
+        running_count_.fetch_sub(1);
         return common::result::Result<void>::failure(
             "Unknown task type: " + task_type);
     }
 
-    running_count_.fetch_add(1);
     active_threads_.fetch_add(1);
 
     // Create a PID callback for the executor thread

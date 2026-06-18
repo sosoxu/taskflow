@@ -225,7 +225,9 @@ int main(int argc, char* argv[]) {
     auto log_sink = taskflow::worker::executor::createLogSink(
         config.task_log.sink_type, config.task_log.dir,
         config.task_log.es_url, config.task_log.es_index);
-    executor.setLogSink(std::shared_ptr<taskflow::worker::executor::LogSink>(std::move(log_sink)));
+    // Fix #122: Keep a shared_ptr for the cleanup thread to use the LogSink interface.
+    std::shared_ptr<taskflow::worker::executor::LogSink> log_sink_ptr(std::move(log_sink));
+    executor.setLogSink(log_sink_ptr);
     spdlog::info("LogSink 配置完成, sink_type={}", config.task_log.sink_type);
 
     // 创建 gRPC 客户端连接 Scheduler
@@ -299,9 +301,10 @@ int main(int argc, char* argv[]) {
     });
 
     // 启动日志清理线程
-    std::string task_log_dir = config.task_log.dir;
+    // Fix #122: Use the LogSink interface for cleanup instead of duplicating
+    // filesystem logic, so that switching to ElasticLogSink will also work.
     int log_retention_days = config.task_log.retention_days;
-    std::thread log_cleanup_thread([&running, task_log_dir, log_retention_days]() {
+    std::thread log_cleanup_thread([&running, log_sink_ptr, log_retention_days]() {
         while (running.load()) {
             std::this_thread::sleep_for(std::chrono::hours(1));
             if (!running.load()) {
@@ -309,24 +312,11 @@ int main(int argc, char* argv[]) {
             }
 
             try {
-                if (!std::filesystem::exists(task_log_dir)) {
-                    continue;
+                if (log_sink_ptr) {
+                    log_sink_ptr->cleanup(log_retention_days);
+                    spdlog::info("日志清理完成 (retention={}d)", log_retention_days);
                 }
-
-                auto now = std::filesystem::file_time_type::clock::now();
-                auto retention = std::chrono::hours(24 * log_retention_days);
-
-                for (const auto& entry : std::filesystem::directory_iterator(task_log_dir)) {
-                    if (!entry.is_directory()) {
-                        continue;
-                    }
-                    auto last_modified = std::filesystem::last_write_time(entry);
-                    if (now - last_modified > retention) {
-                        std::filesystem::remove_all(entry.path());
-                        spdlog::info("日志清理: 删除过期日志目录 {}", entry.path().string());
-                    }
-                }
-            } catch (const std::filesystem::filesystem_error& e) {
+            } catch (const std::exception& e) {
                 spdlog::warn("日志清理失败: {}", e.what());
             }
         }

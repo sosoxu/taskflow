@@ -162,17 +162,40 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
         return common::result::Result<nlohmann::json>::failure(validateResult.error());
     }
 
-    // Encrypt sensitive fields
-    auto encryptResult = encryptSensitiveFields(effective_config, effective_type);
-    if (!encryptResult.ok()) {
-        return common::result::Result<nlohmann::json>::failure(encryptResult.error());
+    // Encrypt sensitive fields.
+    // Fix #112: Avoid double encryption when config_json is not provided (reuse existing
+    // encrypted config). Also handle the case where frontend sends back the masked
+    // value "***" — preserve the existing ciphertext instead of encrypting the mask.
+    nlohmann::json encrypted_config = effective_config;
+    if (effective_type == "sql" && effective_config.is_object()) {
+        if (config_json.is_null()) {
+            // Config not updated: reuse existing (already encrypted) config as-is
+            encrypted_config = existing_task.config_json;
+        } else if (effective_config.contains("db_password") &&
+                   effective_config["db_password"].is_string()) {
+            const auto& pwd = effective_config["db_password"].get<std::string>();
+            if (pwd == "***") {
+                // Frontend sent back the masked value: preserve existing ciphertext
+                if (existing_task.config_json.contains("db_password")) {
+                    encrypted_config["db_password"] = existing_task.config_json["db_password"];
+                }
+            } else {
+                // New plaintext password: encrypt it
+                auto encryptResult = common::util::CryptoUtil::encrypt(pwd, aes_key_);
+                if (!encryptResult.ok()) {
+                    return common::result::Result<nlohmann::json>::failure(
+                        "Failed to encrypt db_password: " + encryptResult.error());
+                }
+                encrypted_config["db_password"] = encryptResult.value();
+            }
+        }
     }
 
-    const auto& encrypted_config = encryptResult.value();
+    const auto& final_config = encrypted_config;
 
     // Update task via DAO (version auto-increment is handled in DAO)
     auto updateResult = task_dao_.update(
-        id, effective_name, effective_type, encrypted_config, description,
+        id, effective_name, effective_type, final_config, description,
         timeout, max_retries, retry_interval, resource_tags, effective_parameters);
     if (!updateResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(

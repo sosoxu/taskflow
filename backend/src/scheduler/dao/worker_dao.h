@@ -41,6 +41,10 @@ public:
 
     // 更新运行任务数
     common::result::Result<void> updateRunningTasks(const std::string& id, int running_tasks);
+
+    // 递减运行任务数（Fix #121: 任务完成时调用，避免负载均衡策略失效）
+    // 使用 SQL GREATEST(running_tasks - 1, 0) 避免负数
+    common::result::Result<void> decrementRunningTasks(const std::string& id);
 };
 
 }  // namespace taskflow::scheduler::dao
