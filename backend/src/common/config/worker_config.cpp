@@ -20,6 +20,7 @@ WorkerConfig WorkerConfig::load(const std::string& config_path) {
     if (root["server"]) {
         auto s = root["server"];
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
+        if (s["advertise_address"]) config.server.advertise_address = s["advertise_address"].as<std::string>();
     }
 
     // server.tls

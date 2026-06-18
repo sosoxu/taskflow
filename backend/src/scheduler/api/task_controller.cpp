@@ -106,7 +106,7 @@ void TaskController::createTask(
         return;
     }
 
-    sendSuccess(std::move(callback), result.value(), 201);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void TaskController::listTasks(

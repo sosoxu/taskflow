@@ -15,8 +15,14 @@ void AuthFilter::doFilter(
 
     const auto& path = req->path();
 
-    // 认证接口免认证
-    if (path.find("/api/v1/auth/") == 0) {
+    // register/login/refresh 免认证（completed-features.md 2.11）。
+    // - register/login: 公开接口
+    // - refresh: 使用 body 中的 refresh_token 换取新 access_token，调用时
+    //   access_token 可能已过期，无法通过 Bearer 校验，故免认证。
+    // logout 需经过认证过滤器以注入 user_id 等属性。
+    if (path == "/api/v1/auth/register" ||
+        path == "/api/v1/auth/login" ||
+        path == "/api/v1/auth/refresh") {
         fccb();
         return;
     }

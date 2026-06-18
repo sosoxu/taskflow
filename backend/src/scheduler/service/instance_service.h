@@ -17,33 +17,52 @@ public:
     explicit InstanceService(common::config::TlsConfig worker_tls = {});
 
     // Pause workflow instance
-    common::result::Result<void> pauseInstance(const std::string& id);
+    // Fix #134: resource-level permission check (creator_id)
+    common::result::Result<void> pauseInstance(const std::string& id,
+                                               const std::string& user_id = "",
+                                               const std::string& role = "");
 
     // Resume workflow instance
-    common::result::Result<void> resumeInstance(const std::string& id);
+    common::result::Result<void> resumeInstance(const std::string& id,
+                                                const std::string& user_id = "",
+                                                const std::string& role = "");
 
     // Cancel workflow instance and all pending/running tasks
-    common::result::Result<void> cancelInstance(const std::string& id);
+    common::result::Result<void> cancelInstance(const std::string& id,
+                                                const std::string& user_id = "",
+                                                const std::string& role = "");
 
     // Retry a specific task instance (reset to PENDING, increment retry_count, recursively reset downstream)
-    common::result::Result<void> retryTask(const std::string& instance_id, const std::string& task_instance_id);
+    common::result::Result<void> retryTask(const std::string& instance_id,
+                                           const std::string& task_instance_id,
+                                           const std::string& user_id = "",
+                                           const std::string& role = "");
 
     // Kill a running task
-    common::result::Result<void> killTask(const std::string& instance_id, const std::string& task_instance_id);
+    common::result::Result<void> killTask(const std::string& instance_id,
+                                          const std::string& task_instance_id,
+                                          const std::string& user_id = "",
+                                          const std::string& role = "");
 
     // Get instance details with all task instances
-    common::result::Result<nlohmann::json> getInstance(const std::string& id);
+    common::result::Result<nlohmann::json> getInstance(const std::string& id,
+                                                       const std::string& user_id = "",
+                                                       const std::string& role = "");
 
     // List workflow instances with pagination
     common::result::Result<nlohmann::json> listInstances(
-        const std::string& workflow_id, int page, int page_size);
+        const std::string& workflow_id, int page, int page_size,
+        const std::string& user_id = "", const std::string& role = "");
 
     // List all workflow instances with pagination
-    common::result::Result<nlohmann::json> listAllInstances(int page, int page_size);
+    common::result::Result<nlohmann::json> listAllInstances(int page, int page_size,
+                                                            const std::string& user_id = "",
+                                                            const std::string& role = "");
 
     // Get task log content (read from Worker via gRPC)
     common::result::Result<std::string> getTaskLog(
-        const std::string& instance_id, const std::string& task_instance_id);
+        const std::string& instance_id, const std::string& task_instance_id,
+        const std::string& user_id = "", const std::string& role = "");
 
     // Validate that a task instance belongs to the given workflow instance
     common::result::Result<void> validateTaskInstance(
@@ -66,6 +85,12 @@ private:
     void resetDownstreamTasks(const nlohmann::json& dag_json,
                               const std::string& start_node_id,
                               const std::map<std::string, common::models::TaskInstance>& node_to_instance);
+
+    // Fix #134: Check that the user has access to the given workflow instance.
+    // Admins bypass the check; non-admin users must own the workflow that
+    // created the instance. Empty user_id skips the check (internal calls).
+    common::result::Result<void> checkInstanceAccess(
+        const std::string& instance_id, const std::string& user_id, const std::string& role);
 };
 
 }  // namespace taskflow::scheduler::service

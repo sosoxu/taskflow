@@ -24,7 +24,37 @@ namespace taskflow::scheduler::service {
 InstanceService::InstanceService(common::config::TlsConfig worker_tls)
     : worker_tls_(std::move(worker_tls)) {}
 
-common::result::Result<void> InstanceService::pauseInstance(const std::string& id) {
+// Fix #134: Resource-level permission check. Admins bypass; non-admin users
+// must own the workflow that created the instance. Empty user_id skips
+// (internal calls from DagDriver/CronScheduler).
+common::result::Result<void> InstanceService::checkInstanceAccess(
+    const std::string& instance_id, const std::string& user_id, const std::string& role) {
+    if (user_id.empty() || role == "admin") {
+        return common::result::Result<void>();
+    }
+    auto instance_result = workflow_instance_dao_.findById(instance_id);
+    if (!instance_result.ok()) {
+        return common::result::Result<void>::failure(
+            "Workflow instance not found: " + instance_result.error());
+    }
+    auto workflow_result = workflow_dao_.findById(instance_result.value().workflow_id);
+    if (!workflow_result.ok()) {
+        return common::result::Result<void>::failure(
+            "Workflow not found: " + workflow_result.error());
+    }
+    if (workflow_result.value().creator_id != user_id) {
+        return common::result::Result<void>::failure(
+            "Permission denied: you do not own this workflow instance");
+    }
+    return common::result::Result<void>();
+}
+
+common::result::Result<void> InstanceService::pauseInstance(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+    auto access_result = checkInstanceAccess(id, user_id, role);
+    if (!access_result.ok()) {
+        return access_result;
+    }
     auto instance_result = workflow_instance_dao_.findById(id);
     if (!instance_result.ok()) {
         return common::result::Result<void>::failure(
@@ -32,7 +62,9 @@ common::result::Result<void> InstanceService::pauseInstance(const std::string& i
     }
 
     const auto& instance = instance_result.value();
-    if (instance.status != "RUNNING") {
+    // 允许 PENDING 和 RUNNING 状态暂停（completed-features.md 7.1 状态转换
+    // PENDING→PAUSED, RUNNING→PAUSED）
+    if (instance.status != "RUNNING" && instance.status != "PENDING") {
         return common::result::Result<void>::failure(
             "Cannot pause instance with status: " + instance.status);
     }
@@ -46,7 +78,12 @@ common::result::Result<void> InstanceService::pauseInstance(const std::string& i
     return common::result::Result<void>();
 }
 
-common::result::Result<void> InstanceService::resumeInstance(const std::string& id) {
+common::result::Result<void> InstanceService::resumeInstance(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+    auto access_result = checkInstanceAccess(id, user_id, role);
+    if (!access_result.ok()) {
+        return access_result;
+    }
     auto instance_result = workflow_instance_dao_.findById(id);
     if (!instance_result.ok()) {
         return common::result::Result<void>::failure(
@@ -68,7 +105,12 @@ common::result::Result<void> InstanceService::resumeInstance(const std::string& 
     return common::result::Result<void>();
 }
 
-common::result::Result<void> InstanceService::cancelInstance(const std::string& id) {
+common::result::Result<void> InstanceService::cancelInstance(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+    auto access_result = checkInstanceAccess(id, user_id, role);
+    if (!access_result.ok()) {
+        return access_result;
+    }
     auto instance_result = workflow_instance_dao_.findById(id);
     if (!instance_result.ok()) {
         return common::result::Result<void>::failure(
@@ -141,7 +183,13 @@ common::result::Result<void> InstanceService::cancelInstance(const std::string& 
 }
 
 common::result::Result<void> InstanceService::retryTask(
-    const std::string& instance_id, const std::string& task_instance_id) {
+    const std::string& instance_id, const std::string& task_instance_id,
+    const std::string& user_id, const std::string& role) {
+
+    auto access_result = checkInstanceAccess(instance_id, user_id, role);
+    if (!access_result.ok()) {
+        return access_result;
+    }
 
     // Verify the workflow instance exists
     auto instance_result = workflow_instance_dao_.findById(instance_id);
@@ -243,13 +291,18 @@ void InstanceService::resetDownstreamTasks(
             if (visited.count(target)) continue;
             visited.insert(target);
 
-            // Reset this downstream task instance if it exists and is in a
-            // non-success terminal state (UPSTREAM_FAILED, CANCELLED, FAILED, TIMEOUT)
+            // Reset this downstream task instance if it exists. All downstream
+            // tasks (including SUCCESS) must be reset to PENDING because the
+            // retried upstream task may produce different output
+            // (completed-features.md 7.4: 下游任务也随之重置为 PENDING 并重新执行)
             auto it = node_to_instance.find(target);
             if (it != node_to_instance.end()) {
                 const auto& ti = it->second;
                 if (ti.status == "UPSTREAM_FAILED" || ti.status == "CANCELLED" ||
-                    ti.status == "FAILED" || ti.status == "TIMEOUT") {
+                    ti.status == "FAILED" || ti.status == "TIMEOUT" ||
+                    ti.status == "SUCCESS" || ti.status == "DISPATCHED" ||
+                    ti.status == "RUNNING" || ti.status == "PENDING" ||
+                    ti.status == "NODE_OFFLINE") {
                     auto downstream_reset = task_instance_dao_.resetForRetry(ti.id);
                     if (!downstream_reset.ok()) {
                         spdlog::warn("InstanceService: failed to reset downstream task instance {}: {}",
@@ -264,7 +317,13 @@ void InstanceService::resetDownstreamTasks(
 }
 
 common::result::Result<void> InstanceService::killTask(
-    const std::string& instance_id, const std::string& task_instance_id) {
+    const std::string& instance_id, const std::string& task_instance_id,
+    const std::string& user_id, const std::string& role) {
+
+    auto access_result = checkInstanceAccess(instance_id, user_id, role);
+    if (!access_result.ok()) {
+        return access_result;
+    }
 
     // Verify the workflow instance exists
     auto instance_result = workflow_instance_dao_.findById(instance_id);
@@ -331,7 +390,13 @@ common::result::Result<void> InstanceService::killTask(
     return common::result::Result<void>();
 }
 
-common::result::Result<nlohmann::json> InstanceService::getInstance(const std::string& id) {
+common::result::Result<nlohmann::json> InstanceService::getInstance(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+
+    auto access_result = checkInstanceAccess(id, user_id, role);
+    if (!access_result.ok()) {
+        return common::result::Result<nlohmann::json>::failure(access_result.error());
+    }
     auto instance_result = workflow_instance_dao_.findById(id);
     if (!instance_result.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -359,7 +424,21 @@ common::result::Result<nlohmann::json> InstanceService::getInstance(const std::s
 }
 
 common::result::Result<nlohmann::json> InstanceService::listInstances(
-    const std::string& workflow_id, int page, int page_size) {
+    const std::string& workflow_id, int page, int page_size,
+    const std::string& user_id, const std::string& role) {
+
+    // Fix #134: non-admin users can only list instances of their own workflows
+    if (!user_id.empty() && role != "admin") {
+        auto wf_result = workflow_dao_.findById(workflow_id);
+        if (!wf_result.ok()) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Workflow not found: " + wf_result.error());
+        }
+        if (wf_result.value().creator_id != user_id) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Permission denied: you do not own this workflow");
+        }
+    }
 
     if (page < 1) page = 1;
     if (page_size < 1) page_size = 10;
@@ -392,7 +471,8 @@ common::result::Result<nlohmann::json> InstanceService::listInstances(
     return response;
 }
 
-common::result::Result<nlohmann::json> InstanceService::listAllInstances(int page, int page_size) {
+common::result::Result<nlohmann::json> InstanceService::listAllInstances(
+    int page, int page_size, const std::string& user_id, const std::string& role) {
     if (page < 1) page = 1;
     if (page_size < 1) page_size = 10;
 
@@ -407,6 +487,16 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(int pag
 
     nlohmann::json instances = nlohmann::json::array();
     for (const auto& inst : result.value()) {
+        // Fix #134: non-admin users only see their own workflow instances
+        if (!user_id.empty() && role != "admin") {
+            auto wf_result = workflow_dao_.findById(inst.workflow_id);
+            if (wf_result.ok() && wf_result.value().creator_id != user_id) {
+                continue;
+            }
+            if (!wf_result.ok()) {
+                continue;
+            }
+        }
         instances.push_back(inst.toJson());
     }
 
@@ -419,7 +509,13 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(int pag
 }
 
 common::result::Result<std::string> InstanceService::getTaskLog(
-    const std::string& instance_id, const std::string& task_instance_id) {
+    const std::string& instance_id, const std::string& task_instance_id,
+    const std::string& user_id, const std::string& role) {
+
+    auto access_result = checkInstanceAccess(instance_id, user_id, role);
+    if (!access_result.ok()) {
+        return common::result::Result<std::string>::failure(access_result.error());
+    }
 
     // Verify the workflow instance exists
     auto instance_result = workflow_instance_dao_.findById(instance_id);

@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, shallowRef, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
@@ -185,7 +185,7 @@ interface ApiDagEdge {
 interface WorkflowPayload {
   name: string
   description: string
-  dag: { nodes: unknown[]; edges: unknown[] }
+  dag_json: { nodes: unknown[]; edges: unknown[] }
   schedule_strategy: string
   cron_enabled: boolean
   cron_expression?: string
@@ -244,8 +244,11 @@ async function fetchTasks() {
 }
 
 // Vue Flow nodes and edges
-const vfNodes = ref<Node[]>([])
-const vfEdges = ref<Edge[]>([])
+// Use shallowRef to avoid TS2589 (Vue Flow's Node/Edge types are deeply
+// recursive and trigger "excessively deep" errors with ref's UnwrapRef).
+// Vue Flow's v-model updates via .value reassignment, so shallowRef works.
+const vfNodes = shallowRef<Node[]>([])
+const vfEdges = shallowRef<Edge[]>([])
 
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
@@ -300,8 +303,10 @@ function addNode(task: TaskItem) {
 }
 
 function removeNode(nodeId: string) {
-  vfNodes.value = vfNodes.value.filter((n) => n.id !== nodeId)
-  vfEdges.value = vfEdges.value.filter((e) => e.source !== nodeId && e.target !== nodeId)
+  // Use simple type annotations to avoid TS2589 (Vue Flow's Node/Edge
+  // types are deeply recursive and trigger "excessively deep" errors).
+  vfNodes.value = vfNodes.value.filter((n: { id: string }) => n.id !== nodeId)
+  vfEdges.value = vfEdges.value.filter((e: { source: string; target: string }) => e.source !== nodeId && e.target !== nodeId)
   dagNodeDataMap.value.delete(nodeId)
   if (selectedNodeId.value === nodeId) selectedNodeId.value = null
 }
@@ -312,9 +317,9 @@ function onNodeClick({ node }: { node: Node }) {
   // Load existing overrides
   const data = dagNodeDataMap.value.get(node.id)
   if (data && data.param_overrides) {
-    nodeOverrides.timeout = data.param_overrides.timeout
-    nodeOverrides.max_retries = data.param_overrides.max_retries
-    nodeOverrides.retry_interval = data.param_overrides.retry_interval
+    nodeOverrides.timeout = data.param_overrides.timeout as number | undefined
+    nodeOverrides.max_retries = data.param_overrides.max_retries as number | undefined
+    nodeOverrides.retry_interval = data.param_overrides.retry_interval as number | undefined
   } else {
     clearOverrides()
   }
@@ -343,7 +348,7 @@ function onConnect(params: { source: string; target: string }) {
 
 function removeSelectedEdge() {
   if (selectedEdgeId.value) {
-    vfEdges.value = vfEdges.value.filter((e) => e.id !== selectedEdgeId.value)
+    vfEdges.value = vfEdges.value.filter((e: { id: string }) => e.id !== selectedEdgeId.value)
     selectedEdgeId.value = null
   }
 }
@@ -404,9 +409,9 @@ async function loadWorkflow() {
     form.cron_enabled = data.cron_enabled || false
     form.cron_expression = data.cron_expression || ''
 
-    if (data.dag) {
-      const apiNodes = data.dag.nodes || []
-      const apiEdges = data.dag.edges || []
+    if (data.dag_json) {
+      const apiNodes = data.dag_json.nodes || []
+      const apiEdges = data.dag_json.edges || []
 
       // Build Vue Flow nodes
       vfNodes.value = apiNodes.map((n: ApiDagNode, i: number) => {
@@ -472,12 +477,12 @@ async function handleSave() {
       target: e.target,
     }))
 
-    const dag = { nodes, edges }
+    const dag_json = { nodes, edges }
 
     const payload: WorkflowPayload = {
       name: form.name,
       description: form.description,
-      dag,
+      dag_json,
       schedule_strategy: form.schedule_strategy,
       cron_enabled: form.cron_enabled,
       cron_expression: form.cron_enabled ? form.cron_expression : undefined,

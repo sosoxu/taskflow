@@ -223,8 +223,8 @@ async function fetchWorkflow() {
     const data = resp.data
     workflow.value = data
 
-    if (data.dag) {
-      const apiNodes = data.dag.nodes || []
+    if (data.dag_json) {
+      const apiNodes = data.dag_json.nodes || []
       dagNodes.value = apiNodes.map((n: ApiDagNode, i: number) => ({
         id: n.id,
         task_id: n.task_id,
@@ -233,7 +233,7 @@ async function fetchWorkflow() {
         x: n.x ?? 60 + i * 200,
         y: n.y ?? 60,
       }))
-      dagEdges.value = (data.dag.edges || []).map((e: ApiDagEdge) => ({
+      dagEdges.value = (data.dag_json.edges || []).map((e: ApiDagEdge) => ({
         source: e.source,
         target: e.target,
       }))

@@ -2,7 +2,7 @@ export interface WorkflowItem {
   id: string
   name: string
   description: string
-  dag: DagGraph
+  dag_json: DagGraph
   schedule_strategy: 'random' | 'load_balance' | 'specified'
   target_worker_id: string | null
   cron_expression: string | null
@@ -32,7 +32,7 @@ export interface DagGraph {
 export interface WorkflowCreateRequest {
   name: string
   description?: string
-  dag: DagGraph
+  dag_json: DagGraph
   schedule_strategy?: 'random' | 'load_balance' | 'specified'
   target_worker_id?: string
   cron_expression?: string

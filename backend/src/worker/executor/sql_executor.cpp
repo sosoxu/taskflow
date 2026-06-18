@@ -1,5 +1,10 @@
 #include "worker/executor/sql_executor.h"
 
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -9,11 +14,70 @@
 
 namespace taskflow::worker::executor {
 
+// Runs in the child process after fork(). Connects to PostgreSQL, executes
+// the statement, writes the result to the log file, and exits with 0 on
+// success or non-zero on failure. The child must NOT use spdlog or any
+// parent state — only async-signal-safe / child-safe operations.
+static int runSqlChild(const std::string& conn_str,
+                       const std::string& sql_statement,
+                       const std::string& log_path) {
+    std::ofstream ofs(log_path, std::ios::trunc);
+    if (!ofs) {
+        return 126;
+    }
+
+    try {
+        pqxx::connection conn(conn_str);
+
+        // Determine if this is a SELECT or a DML/DDL statement
+        std::string trimmed = sql_statement;
+        size_t start = trimmed.find_first_not_of(" \t\n\r");
+        if (start == std::string::npos) {
+            ofs << "Empty SQL statement\n";
+            return 1;
+        }
+        trimmed = trimmed.substr(start);
+
+        bool is_select = (trimmed.size() >= 6 &&
+                          (trimmed.substr(0, 6) == "SELECT" ||
+                           trimmed.substr(0, 6) == "select" ||
+                           trimmed.substr(0, 6) == "Select"));
+
+        if (is_select) {
+            pqxx::nontransaction txn(conn);
+            pqxx::result res = txn.exec(sql_statement);
+
+            for (const auto& row : res) {
+                for (int i = 0; i < static_cast<int>(row.size()); ++i) {
+                    if (i > 0) ofs << "\t";
+                    ofs << (row[i].is_null() ? "" : row[i].c_str());
+                }
+                ofs << "\n";
+            }
+        } else {
+            pqxx::work txn(conn);
+            pqxx::result res = txn.exec(sql_statement);
+            txn.commit();
+            ofs << "Affected rows: " << res.affected_rows() << "\n";
+        }
+        return 0;
+    } catch (const pqxx::broken_connection& e) {
+        ofs << "Connection failed: " << e.what() << "\n";
+        return 1;
+    } catch (const pqxx::sql_error& e) {
+        ofs << "SQL error: " << e.what() << "\n";
+        return 1;
+    } catch (const std::exception& e) {
+        ofs << "Execution error: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 TaskResult SqlExecutor::execute(const std::string& task_instance_id,
                                 const nlohmann::json& config,
-                                int /*timeout*/,
+                                int timeout,
                                 const std::string& log_dir,
-                                std::function<void(pid_t)> /*pid_callback*/,
+                                std::function<void(pid_t)> pid_callback,
                                 LogSink* /*log_sink*/) {
     TaskResult result;
 
@@ -59,88 +123,100 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
                            " user=" + db_user +
                            " password=" + db_password;
 
-    // Connect
-    std::unique_ptr<pqxx::connection> conn;
-    try {
-        conn = std::make_unique<pqxx::connection>(conn_str);
-    } catch (const pqxx::broken_connection& e) {
+    // Fix #147: Fork a child process to run the SQL so the task can be
+    // cancelled via SIGTERM (the same mechanism used by CommandExecutor and
+    // ScriptExecutor). Previously SqlExecutor ran the query inline in the
+    // executor thread with no PID registered, so TaskExecutor::cancel()
+    // could never reach it.
+    pid_t pid = fork();
+    if (pid < 0) {
         result.status = "FAILED";
         result.exit_code = 1;
-        result.error_message = std::string("Connection failed: ") + e.what();
-        return result;
-    } catch (const std::exception& e) {
-        result.status = "FAILED";
-        result.exit_code = 1;
-        result.error_message = std::string("Connection failed: ") + e.what();
+        result.error_message = "fork() failed";
         return result;
     }
 
-    // Execute SQL
-    std::string output;
-    try {
-        // Determine if this is a SELECT or a DML/DDL statement
-        std::string trimmed = sql_statement;
-        // Trim leading whitespace
-        size_t start = trimmed.find_first_not_of(" \t\n\r");
-        if (start == std::string::npos) {
+    if (pid == 0) {
+        // Child process
+        int rc = runSqlChild(conn_str, sql_statement, log_path);
+        _exit(rc);
+    }
+
+    // Parent process - report PID so cancel() can signal the child
+    if (pid_callback) {
+        pid_callback(pid);
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    int status = 0;
+
+    while (true) {
+        pid_t ret = waitpid(pid, &status, WNOHANG);
+        if (ret == pid) {
+            break;
+        }
+        if (ret < 0) {
             result.status = "FAILED";
             result.exit_code = 1;
-            result.error_message = "Empty SQL statement";
+            result.error_message = "waitpid() failed";
             return result;
         }
-        trimmed = trimmed.substr(start);
 
-        bool is_select = (trimmed.size() >= 6 &&
-                          (trimmed.substr(0, 6) == "SELECT" ||
-                           trimmed.substr(0, 6) == "select" ||
-                           trimmed.substr(0, 6) == "Select"));
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (timeout > 0 && elapsed >= timeout) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            result.status = "TIMEOUT";
+            result.exit_code = -1;
+            result.error_message = "Task timed out after " +
+                                   std::to_string(timeout) + " seconds";
+            return result;
+        }
 
-        if (is_select) {
-            // Use nontransaction for SELECT
-            pqxx::nontransaction txn(*conn);
-            pqxx::result res = txn.exec(sql_statement);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
-            std::ostringstream oss;
-            for (const auto& row : res) {
-                for (int i = 0; i < static_cast<int>(row.size()); ++i) {
-                    if (i > 0) oss << "\t";
-                    oss << row[i].c_str();
+    if (WIFEXITED(status)) {
+        result.exit_code = WEXITSTATUS(status);
+        result.status = (result.exit_code == 0) ? "SUCCESS" : "FAILED";
+        if (result.exit_code != 0) {
+            // Read the error message written by the child
+            std::ifstream log_file(log_path);
+            if (log_file.is_open()) {
+                std::string line;
+                std::string last_lines;
+                int line_count = 0;
+                while (std::getline(log_file, line)) {
+                    if (!last_lines.empty()) last_lines += "\n";
+                    last_lines += line;
+                    line_count++;
+                    if (line_count > 10) {
+                        size_t pos = last_lines.find('\n');
+                        if (pos != std::string::npos) {
+                            last_lines = last_lines.substr(pos + 1);
+                        }
+                        line_count--;
+                    }
                 }
-                oss << "\n";
+                result.error_message = last_lines.empty()
+                    ? "SQL execution failed with exit code " + std::to_string(result.exit_code)
+                    : last_lines;
+            } else {
+                result.error_message = "SQL execution failed with exit code " + std::to_string(result.exit_code);
             }
-            output = oss.str();
-        } else {
-            // Use work for DML/DDL
-            pqxx::work txn(*conn);
-            pqxx::result res = txn.exec(sql_statement);
-            txn.commit();
-
-            std::ostringstream oss;
-            oss << "Affected rows: " << res.affected_rows() << "\n";
-            output = oss.str();
         }
-    } catch (const pqxx::sql_error& e) {
+    } else if (WIFSIGNALED(status)) {
+        result.exit_code = -WTERMSIG(status);
+        result.status = "FAILED";
+        result.error_message = "Process killed by signal " +
+                               std::to_string(WTERMSIG(status));
+    } else {
         result.status = "FAILED";
         result.exit_code = 1;
-        result.error_message = std::string("SQL error: ") + e.what();
-        return result;
-    } catch (const std::exception& e) {
-        result.status = "FAILED";
-        result.exit_code = 1;
-        result.error_message = std::string("Execution error: ") + e.what();
-        return result;
+        result.error_message = "Process terminated abnormally";
     }
 
-    // Write results to log file
-    {
-        std::ofstream ofs(log_path, std::ios::app);
-        if (ofs) {
-            ofs << output;
-        }
-    }
-
-    result.status = "SUCCESS";
-    result.exit_code = 0;
     return result;
 }
 

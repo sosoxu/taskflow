@@ -2,7 +2,7 @@ export interface TaskItem {
   id: string
   name: string
   type: 'command' | 'script' | 'sql'
-  config: TaskConfig
+  config_json: TaskConfig
   description: string
   timeout: number
   max_retries: number
@@ -17,7 +17,7 @@ export interface TaskItem {
 export interface TaskConfig {
   // Command
   command?: string
-  work_dir?: string
+  working_dir?: string
   env_vars?: Record<string, string>
   // Script
   script_content?: string
@@ -33,7 +33,7 @@ export interface TaskConfig {
 export interface TaskCreateRequest {
   name: string
   type: 'command' | 'script' | 'sql'
-  config: TaskConfig
+  config_json: TaskConfig
   description?: string
   timeout?: number
   max_retries?: number

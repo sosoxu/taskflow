@@ -36,8 +36,9 @@ services:
     configs:
       - source: scheduler_config
         target: /app/scheduler.yaml
-    deploy:
-      replicas: 2
+    # Fix #142: deploy.replicas is ignored in non-swarm docker compose.
+    # Multi-scheduler HA requires a load balancer (scheduler binds fixed
+    # ports 8080/50051). Use Docker Swarm for true replica scheduling.
     restart: unless-stopped
 
   worker:
@@ -55,8 +56,8 @@ services:
     configs:
       - source: worker_config
         target: /app/worker.yaml
-    deploy:
-      replicas: 2
+    # Fix #142: deploy.replicas is ignored in non-swarm docker compose.
+    # To run multiple workers: docker compose up -d --scale worker=2
     restart: unless-stopped
 
   frontend:
@@ -103,6 +104,9 @@ configs:
     content: |
       server:
         grpc_port: 50052
+        # Fix #146: Advertise the Docker service hostname so the scheduler
+        # can dial back this worker container (not localhost).
+        advertise_address: "worker:50052"
       scheduler:
         address: "scheduler:50051"
       worker:

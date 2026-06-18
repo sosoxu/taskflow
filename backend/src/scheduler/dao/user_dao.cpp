@@ -78,7 +78,8 @@ common::result::Result<void> UserDao::updateRole(const std::string& id, const st
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
             auto res = txn.exec_params(
-                "UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2",
+                "UPDATE users SET role = $1, updated_at = NOW() "
+                "WHERE id = $2 AND deleted_at IS NULL",
                 role, id);
 
             if (res.affected_rows() == 0) {
@@ -102,6 +103,15 @@ common::result::Result<std::vector<common::models::User>> UserDao::list(int offs
             }
 
             return users;
+        });
+}
+
+common::result::Result<int> UserDao::count() {
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            auto res = txn.exec_params(
+                "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
+            return static_cast<int>(res[0][0].as<long>());
         });
 }
 

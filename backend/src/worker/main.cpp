@@ -266,7 +266,13 @@ int main(int argc, char* argv[]) {
         worker_name = "worker-" + std::to_string(config.server.grpc_port);
     }
 
-    std::string worker_address = "localhost:" + std::to_string(config.server.grpc_port);
+    std::string worker_address = config.server.advertise_address;
+    if (worker_address.empty()) {
+        // Fix #146: Fall back to localhost:<port> for single-host dev setups.
+        // Operators must set server.advertise_address when running in Docker
+        // or on a remote host so the scheduler can dial back this worker.
+        worker_address = "localhost:" + std::to_string(config.server.grpc_port);
+    }
 
     std::string worker_id;
     int register_retries = 0;
@@ -309,14 +315,13 @@ int main(int argc, char* argv[]) {
     // 启动日志清理线程
     // Fix #122: Use the LogSink interface for cleanup instead of duplicating
     // filesystem logic, so that switching to ElasticLogSink will also work.
+    // Fix #145: Use short sleep slices (1s) so the thread responds to
+    // `running` being cleared within ~1s instead of blocking for up to 1h.
+    // Run cleanup once at startup so a long-stopped worker doesn't keep
+    // stale logs around until the first hourly tick.
     int log_retention_days = config.task_log.retention_days;
     std::thread log_cleanup_thread([&running, log_sink_ptr, log_retention_days]() {
-        while (running.load()) {
-            std::this_thread::sleep_for(std::chrono::hours(1));
-            if (!running.load()) {
-                break;
-            }
-
+        auto run_cleanup = [&]() {
             try {
                 if (log_sink_ptr) {
                     log_sink_ptr->cleanup(log_retention_days);
@@ -324,6 +329,24 @@ int main(int argc, char* argv[]) {
                 }
             } catch (const std::exception& e) {
                 spdlog::warn("日志清理失败: {}", e.what());
+            }
+        };
+
+        // Initial cleanup pass at startup.
+        run_cleanup();
+
+        constexpr int kSleepSeconds = 1;
+        constexpr int kLoopSeconds = 3600;  // 1 hour between cleanups
+        int elapsed = 0;
+        while (running.load()) {
+            std::this_thread::sleep_for(std::chrono::seconds(kSleepSeconds));
+            if (!running.load()) {
+                break;
+            }
+            elapsed += kSleepSeconds;
+            if (elapsed >= kLoopSeconds) {
+                elapsed = 0;
+                run_cleanup();
             }
         }
     });
@@ -371,8 +394,12 @@ int main(int argc, char* argv[]) {
     // Fix #124: Graceful shutdown on SIGTERM/SIGINT.
     // Order: stop gRPC server (no new tasks) → wait for running tasks →
     // deregister from scheduler → stop background threads.
+    // Fix #145: The signal handler must be async-signal-safe — only
+    // async-signal-safe functions (write(), _exit(), etc.) are allowed.
+    // spdlog (malloc/locks/iostream) is NOT safe, so we only set the flag
+    // here and log from the main loop below.
     auto signal_handler = [](int sig) {
-        spdlog::info("Received signal {}, initiating graceful shutdown...", sig);
+        (void)sig;
         // std::signal handlers cannot capture state, so we set a global flag
         // and let the main loop perform the actual shutdown sequence.
         g_shutdown_flag.store(true);
@@ -384,6 +411,8 @@ int main(int argc, char* argv[]) {
     while (!g_shutdown_flag.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+
+    spdlog::info("Received shutdown signal, initiating graceful shutdown...");
 
     spdlog::info("Stopping gRPC server (no new tasks will be accepted)...");
     server->Shutdown();

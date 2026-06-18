@@ -11,7 +11,11 @@ AuthService::AuthService(const std::string& jwt_secret, int access_ttl, int refr
 
 common::result::Result<nlohmann::json> AuthService::registerUser(
     const std::string& username, const std::string& password,
-    const std::string& role) {
+    const std::string& /*role*/) {
+    // The role parameter is intentionally ignored: public registration always
+    // creates an "operator" user (security: prevent privilege escalation).
+    // Admin-only user creation with arbitrary roles is handled by
+    // UserService::createUser.
 
     // Validate username length (3-32 chars)
     if (username.length() < 3 || username.length() > 32) {
@@ -25,11 +29,10 @@ common::result::Result<nlohmann::json> AuthService::registerUser(
             "Password must be at least 8 characters");
     }
 
-    // Determine role: use provided role if valid, otherwise default to "operator"
+    // Public registration always creates an "operator" user (security: prevent
+    // privilege escalation via role selection). Admin-only user creation with
+    // arbitrary roles is handled by UserService::createUser.
     std::string user_role = "operator";
-    if (!role.empty() && (role == "admin" || role == "operator" || role == "viewer")) {
-        user_role = role;
-    }
 
     // Check username uniqueness
     auto existingResult = user_dao_.findByUsername(username);
@@ -61,21 +64,9 @@ common::result::Result<nlohmann::json> AuthService::registerUser(
 
     const auto& user = userResult.value();
 
-    // Generate tokens
-    auto tokenResult = common::util::JwtUtil::generateTokens(
-        user.id, user.username, user.role,
-        jwt_secret_, access_ttl_, refresh_ttl_);
-    if (!tokenResult.ok()) {
-        return common::result::Result<nlohmann::json>::failure(
-            "Failed to generate tokens: " + tokenResult.error());
-    }
-
-    nlohmann::json response = {
-        {"user", user.toSafeJson()},
-        {"access_token", tokenResult.value().access_token},
-        {"refresh_token", tokenResult.value().refresh_token},
-        {"expires_in", 86400}
-    };
+    // Registration returns only user info; tokens are obtained via the login
+    // endpoint (per completed-features.md section 2.1).
+    nlohmann::json response = user.toSafeJson();
 
     return response;
 }

@@ -106,7 +106,7 @@ void UserController::createUser(
         return;
     }
 
-    sendSuccess(std::move(callback), result.value(), 201);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void UserController::updateUserRole(

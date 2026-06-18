@@ -1,5 +1,7 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
+import router from '../router'
+import { useUserStore } from '../stores/userStore'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -35,6 +37,18 @@ function onTokenRefreshed(token: string) {
   refreshSubscribers = []
 }
 
+// Fix #144: Redirect to login via Vue Router (SPA navigation, preserves
+// redirect query) instead of window.location.href (full page reload).
+// Also clear the Pinia user store so stale role state doesn't linger.
+function redirectToLogin() {
+  const userStore = useUserStore()
+  userStore.clearUser()
+  const currentPath = router.currentRoute.value.fullPath
+  if (currentPath !== '/login') {
+    router.push({ path: '/login', query: { redirect: currentPath } })
+  }
+}
+
 // 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -48,9 +62,7 @@ request.interceptors.response.use(
 
       if (!refreshToken) {
         // 没有refresh token，直接跳转登录
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
+        redirectToLogin()
         return Promise.reject(error)
       }
 
@@ -86,16 +98,12 @@ request.interceptors.response.use(
           return request(originalRequest)
         } else {
           // 刷新失败，跳转登录
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
+          redirectToLogin()
           return Promise.reject(error)
         }
       } catch (refreshError) {
         // 刷新失败，跳转登录
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
+        redirectToLogin()
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false

@@ -43,11 +43,11 @@
           <!-- Command config -->
           <template v-if="task.type === 'command'">
             <el-descriptions :column="1" border>
-              <el-descriptions-item label="命令">{{ task.config?.command || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="工作目录">{{ task.config?.work_dir || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="命令">{{ task.config_json?.command || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="工作目录">{{ task.config_json?.working_dir || '-' }}</el-descriptions-item>
               <el-descriptions-item label="环境变量">
-                <template v-if="task.config?.env_vars && Object.keys(task.config.env_vars).length">
-                  <div v-for="(val, key) in task.config.env_vars" :key="key" class="env-item">
+                <template v-if="task.config_json?.env_vars && Object.keys(task.config_json.env_vars).length">
+                  <div v-for="(val, key) in task.config_json.env_vars" :key="key" class="env-item">
                     <span class="env-key">{{ key }}</span>={{ val }}
                   </div>
                 </template>
@@ -60,7 +60,7 @@
           <template v-else-if="task.type === 'script'">
             <el-descriptions :column="1" border>
               <el-descriptions-item label="脚本内容">
-                <pre class="script-content">{{ task.config?.script_content || '-' }}</pre>
+                <pre class="script-content">{{ task.config_json?.script_content || '-' }}</pre>
               </el-descriptions-item>
             </el-descriptions>
           </template>
@@ -68,19 +68,19 @@
           <!-- SQL config -->
           <template v-else-if="task.type === 'sql'">
             <el-descriptions :column="2" border>
-              <el-descriptions-item label="数据库地址">{{ task.config?.db_host || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="端口">{{ task.config?.db_port || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="数据库名">{{ task.config?.db_name || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="用户名">{{ task.config?.db_user || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="数据库地址">{{ task.config_json?.db_host || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="端口">{{ task.config_json?.db_port || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="数据库名">{{ task.config_json?.db_name || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="用户名">{{ task.config_json?.db_user || '-' }}</el-descriptions-item>
               <el-descriptions-item label="SQL 语句" :span="2">
-                <pre class="script-content">{{ task.config?.sql_statement || '-' }}</pre>
+                <pre class="script-content">{{ task.config_json?.sql_statement || '-' }}</pre>
               </el-descriptions-item>
             </el-descriptions>
           </template>
 
           <!-- Fallback: raw JSON -->
           <template v-else>
-            <pre class="config-json">{{ JSON.stringify(task.config, null, 2) }}</pre>
+            <pre class="config-json">{{ JSON.stringify(task.config_json, null, 2) }}</pre>
           </template>
         </el-card>
       </template>

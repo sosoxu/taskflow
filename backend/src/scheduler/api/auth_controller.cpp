@@ -52,20 +52,21 @@ void AuthController::registerUser(
 
     std::string username = (*json)["username"].asString();
     std::string password = (*json)["password"].asString();
-    std::string role = (*json).get("role", "").asString();
 
     if (username.empty() || password.empty()) {
         sendError(std::move(callback), 400, 40002, "Username and password are required");
         return;
     }
 
-    auto result = auth_service_->registerUser(username, password, role);
+    // Public registration always creates an operator user; role is ignored to
+    // prevent privilege escalation (completed-features.md section 2.1).
+    auto result = auth_service_->registerUser(username, password, "");
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40003, result.error());
         return;
     }
 
-    sendSuccess(std::move(callback), result.value(), 201);
+    sendSuccess(std::move(callback), result.value());
 }
 
 void AuthController::login(

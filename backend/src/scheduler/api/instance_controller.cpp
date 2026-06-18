@@ -56,7 +56,7 @@ InstanceController::InstanceController(std::shared_ptr<service::InstanceService>
     : instance_service_(std::move(instance_service)), jwt_secret_(jwt_secret) {}
 
 void InstanceController::pauseInstance(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
@@ -65,7 +65,9 @@ void InstanceController::pauseInstance(
         return;
     }
 
-    auto result = instance_service_->pauseInstance(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->pauseInstance(id, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40008, result.error());
@@ -82,7 +84,7 @@ void InstanceController::pauseInstance(
 }
 
 void InstanceController::resumeInstance(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
@@ -91,7 +93,9 @@ void InstanceController::resumeInstance(
         return;
     }
 
-    auto result = instance_service_->resumeInstance(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->resumeInstance(id, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40008, result.error());
@@ -108,7 +112,7 @@ void InstanceController::resumeInstance(
 }
 
 void InstanceController::cancelInstance(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
@@ -117,7 +121,9 @@ void InstanceController::cancelInstance(
         return;
     }
 
-    auto result = instance_service_->cancelInstance(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->cancelInstance(id, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40008, result.error());
@@ -134,7 +140,7 @@ void InstanceController::cancelInstance(
 }
 
 void InstanceController::retryTask(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id,
     const std::string& taskInstanceId) {
@@ -148,7 +154,9 @@ void InstanceController::retryTask(
         return;
     }
 
-    auto result = instance_service_->retryTask(id, taskInstanceId);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->retryTask(id, taskInstanceId, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40009, result.error());
@@ -165,7 +173,7 @@ void InstanceController::retryTask(
 }
 
 void InstanceController::killTask(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id,
     const std::string& taskInstanceId) {
@@ -179,7 +187,9 @@ void InstanceController::killTask(
         return;
     }
 
-    auto result = instance_service_->killTask(id, taskInstanceId);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->killTask(id, taskInstanceId, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40009, result.error());
@@ -196,7 +206,7 @@ void InstanceController::killTask(
 }
 
 void InstanceController::getInstance(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
@@ -205,7 +215,9 @@ void InstanceController::getInstance(
         return;
     }
 
-    auto result = instance_service_->getInstance(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->getInstance(id, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 404, 40403, result.error());
@@ -238,7 +250,9 @@ void InstanceController::listInstances(
         try { page_size = std::stoi(page_size_str); } catch (...) {}
     }
 
-    auto result = instance_service_->listInstances(id, page, page_size);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->listInstances(id, page, page_size, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 50001, result.error());
@@ -266,13 +280,16 @@ void InstanceController::listAllInstances(
         try { page_size = std::stoi(page_size_str); } catch (...) {}
     }
 
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+
     // If workflow_id is provided, filter by it
     if (!workflow_id.empty()) {
         if (!isValidUUID(workflow_id)) {
             sendError(std::move(callback), 400, 40001, "Invalid workflow_id format: must be a valid UUID");
             return;
         }
-        auto result = instance_service_->listInstances(workflow_id, page, page_size);
+        auto result = instance_service_->listInstances(workflow_id, page, page_size, user_id, role);
         if (!result.ok()) {
             sendError(std::move(callback), 400, 50001, result.error());
             return;
@@ -281,7 +298,7 @@ void InstanceController::listAllInstances(
         return;
     }
 
-    auto result = instance_service_->listAllInstances(page, page_size);
+    auto result = instance_service_->listAllInstances(page, page_size, user_id, role);
 
     if (!result.ok()) {
         sendError(std::move(callback), 400, 50001, result.error());
@@ -292,7 +309,7 @@ void InstanceController::listAllInstances(
 }
 
 void InstanceController::getTaskLog(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id,
     const std::string& taskInstanceId) {
@@ -306,10 +323,18 @@ void InstanceController::getTaskLog(
         return;
     }
 
-    auto result = instance_service_->getTaskLog(id, taskInstanceId);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->getTaskLog(id, taskInstanceId, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40404, result.error());
+        // Fix #137: distinguish not-found (404) from other errors (400)
+        int status = 400;
+        if (result.error().find("not found") != std::string::npos ||
+            result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40404, result.error());
         return;
     }
 
@@ -321,7 +346,7 @@ void InstanceController::getTaskLog(
 }
 
 void InstanceController::streamTaskLog(
-    const drogon::HttpRequestPtr& /*req*/,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id,
     const std::string& taskInstanceId) {
@@ -335,6 +360,10 @@ void InstanceController::streamTaskLog(
         sendError(std::move(callback), 400, 40001, "Invalid task instance ID format: must be a valid UUID");
         return;
     }
+
+    // Fix #134: resource-level permission check
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
 
     // Validate the task instance exists
     auto validate_result = instance_service_->validateTaskInstance(id, taskInstanceId);
@@ -351,10 +380,11 @@ void InstanceController::streamTaskLog(
     httpResp->addHeader("Connection", "keep-alive");
 
     // Fetch log content via gRPC and send as SSE events
-    auto log_result = instance_service_->getTaskLog(id, taskInstanceId);
+    auto log_result = instance_service_->getTaskLog(id, taskInstanceId, user_id, role);
 
     if (!log_result.ok()) {
-        std::string sse_data = "data: " + log_result.error() + "\n\n";
+        // Fix #137: use error event instead of data event for errors
+        std::string sse_data = "event: error\ndata: " + log_result.error() + "\n\n";
         httpResp->setBody(sse_data);
         callback(httpResp);
         return;

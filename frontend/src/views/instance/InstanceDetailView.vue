@@ -325,16 +325,18 @@ function nodeFill(nodeId: string): string {
   if (!node) return '#f5f7fa'
   const task = instance.value.tasks.find((t) => t.task_id === node.task_id)
   if (!task) return '#f5f7fa'
+  // Fix #143: Colors per completed-features.md section 9.8:
+  // PENDING-灰色, RUNNING-蓝色, SUCCESS-绿色, FAILED-红色, UPSTREAM_FAILED-橙色
   const colorMap: Record<string, string> = {
-    PENDING: '#f5f7fa',
-    DISPATCHED: '#ecf5ff',
-    RUNNING: '#fdf6ec',
-    SUCCESS: '#f0f9eb',
-    FAILED: '#fef0f0',
-    TIMEOUT: '#fef0f0',
-    CANCELLED: '#f5f7fa',
-    UPSTREAM_FAILED: '#fdf6ec',
-    NODE_OFFLINE: '#fef0f0',
+    PENDING: '#e9e9eb',          // 灰色
+    DISPATCHED: '#ecf5ff',       // 浅蓝 (派发中，接近 RUNNING)
+    RUNNING: '#ecf5ff',          // 蓝色
+    SUCCESS: '#f0f9eb',          // 绿色
+    FAILED: '#fef0f0',           // 红色
+    TIMEOUT: '#fef0f0',          // 红色 (超时视为失败)
+    CANCELLED: '#f5f7fa',        // 灰色 (取消视为待定/终止)
+    UPSTREAM_FAILED: '#fdf6ec',  // 橙色
+    NODE_OFFLINE: '#fef0f0',     // 红色 (节点离线视为失败)
   }
   return colorMap[task.status] || '#f5f7fa'
 }

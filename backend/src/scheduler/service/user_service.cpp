@@ -27,9 +27,16 @@ common::result::Result<nlohmann::json> UserService::listUsers(int page, int page
         items.push_back(user.toSafeJson());
     }
 
+    // Use real total count for correct pagination (completed-features.md 12.7)
+    int total = static_cast<int>(users.size());
+    auto countResult = user_dao_.count();
+    if (countResult.ok()) {
+        total = countResult.value();
+    }
+
     nlohmann::json response = {
         {"items", items},
-        {"total", static_cast<int>(users.size())},
+        {"total", total},
         {"page", page},
         {"page_size", page_size}
     };

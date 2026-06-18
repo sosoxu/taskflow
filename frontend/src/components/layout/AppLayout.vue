@@ -24,7 +24,7 @@
           <el-menu-item index="/workers">
             <span>执行节点</span>
           </el-menu-item>
-          <el-menu-item index="/users">
+          <el-menu-item v-if="userStore.isAdmin" index="/users">
             <span>用户管理</span>
           </el-menu-item>
         </el-menu>

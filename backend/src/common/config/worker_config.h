@@ -15,6 +15,10 @@ struct WorkerTlsConfig {
 
 struct WorkerServerConfig {
     int grpc_port = 50052;
+    // Address advertised to the scheduler for inbound gRPC (host:port).
+    // Empty falls back to "localhost:<grpc_port>". Set this when the worker
+    // runs in a container or on a remote host so the scheduler can reach it.
+    std::string advertise_address;
     WorkerTlsConfig tls;
 };
 

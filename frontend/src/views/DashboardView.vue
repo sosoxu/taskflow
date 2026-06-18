@@ -29,10 +29,10 @@
         <el-card shadow="hover" class="stat-card">
           <div class="stat-content">
             <div class="stat-info">
-              <div class="stat-label">运行中实例</div>
-              <div class="stat-value">{{ stats.runningInstances }}</div>
+              <div class="stat-label">今日执行数</div>
+              <div class="stat-value">{{ stats.todayExecutions }}</div>
             </div>
-            <el-icon class="stat-icon" :size="48" color="#e6a23c"><VideoPlay /></el-icon>
+            <el-icon class="stat-icon" :size="48" color="#e6a23c"><TrendCharts /></el-icon>
           </div>
         </el-card>
       </el-col>
@@ -44,6 +44,31 @@
               <div class="stat-value">{{ stats.onlineWorkers }}</div>
             </div>
             <el-icon class="stat-icon" :size="48" color="#f56c6c"><Monitor /></el-icon>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" class="stat-row">
+      <el-col :span="12">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-content">
+            <div class="stat-info">
+              <div class="stat-label">运行中实例</div>
+              <div class="stat-value">{{ stats.runningInstances }}</div>
+            </div>
+            <el-icon class="stat-icon" :size="40" color="#409eff"><VideoPlay /></el-icon>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="12">
+        <el-card shadow="hover" class="stat-card">
+          <div class="stat-content">
+            <div class="stat-info">
+              <div class="stat-label">成功率</div>
+              <div class="stat-value">{{ stats.successRate }}%</div>
+            </div>
+            <el-icon class="stat-icon" :size="40" color="#67c23a"><CircleCheck /></el-icon>
           </div>
         </el-card>
       </el-col>
@@ -104,7 +129,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
-import { Document, Share, VideoPlay, Monitor, Plus } from '@element-plus/icons-vue'
+import { Document, Share, VideoPlay, Monitor, Plus, TrendCharts, CircleCheck } from '@element-plus/icons-vue'
 import { getDashboardStats } from '../api/dashboard'
 import { formatTime } from '../utils/format'
 

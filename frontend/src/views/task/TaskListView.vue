@@ -107,6 +107,20 @@
           <el-form-item label="命令">
             <el-input v-model="form.config.command" placeholder="请输入命令" />
           </el-form-item>
+          <el-form-item label="工作目录">
+            <el-input v-model="form.config.working_dir" placeholder="留空使用默认目录" />
+          </el-form-item>
+          <el-form-item label="环境变量">
+            <div class="env-editor">
+              <div v-for="(_, key) in form.config.env_vars" :key="key" class="env-row">
+                <el-input v-model="envKeyTemp[key]" placeholder="变量名" style="width: 160px" @change="updateEnvKey(key)" />
+                <span class="env-eq">=</span>
+                <el-input v-model="form.config.env_vars![key]" placeholder="变量值" style="flex: 1" />
+                <el-button :icon="Delete" circle size="small" @click="removeEnvVar(key)" />
+              </div>
+              <el-button size="small" :icon="Plus" @click="addEnvVar">添加环境变量</el-button>
+            </div>
+          </el-form-item>
         </template>
 
         <!-- Script config -->
@@ -114,6 +128,20 @@
           <el-divider content-position="left">Script 配置</el-divider>
           <el-form-item label="脚本内容">
             <div ref="scriptEditorRef" class="code-editor"></div>
+          </el-form-item>
+          <el-form-item label="工作目录">
+            <el-input v-model="form.config.working_dir" placeholder="留空使用默认目录" />
+          </el-form-item>
+          <el-form-item label="环境变量">
+            <div class="env-editor">
+              <div v-for="(_, key) in form.config.env_vars" :key="key" class="env-row">
+                <el-input v-model="envKeyTemp[key]" placeholder="变量名" style="width: 160px" @change="updateEnvKey(key)" />
+                <span class="env-eq">=</span>
+                <el-input v-model="form.config.env_vars![key]" placeholder="变量值" style="flex: 1" />
+                <el-button :icon="Delete" circle size="small" @click="removeEnvVar(key)" />
+              </div>
+              <el-button size="small" :icon="Plus" @click="addEnvVar">添加环境变量</el-button>
+            </div>
           </el-form-item>
         </template>
 
@@ -152,7 +180,7 @@
 import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Search, Plus, Delete } from '@element-plus/icons-vue'
 import { getTasks, getTask, createTask, updateTask, deleteTask } from '../../api/task'
 import type { TaskItem, TaskConfig } from '../../types/task'
 import { formatTime } from '../../utils/format'
@@ -216,7 +244,42 @@ const editingId = ref('')
 const submitting = ref(false)
 const formRef = ref()
 
-const defaultConfig = (): TaskConfig => ({})
+const defaultConfig = (): TaskConfig => ({
+  env_vars: {},
+})
+
+// Env vars editor helpers
+const envKeyTemp = ref<Record<string, string>>({})
+let envKeyCounter = 0
+
+function addEnvVar() {
+  const placeholder = `__new_${++envKeyCounter}`
+  if (!form.config.env_vars) form.config.env_vars = {}
+  form.config.env_vars[placeholder] = ''
+  envKeyTemp.value[placeholder] = ''
+}
+
+function removeEnvVar(key: string) {
+  if (form.config.env_vars) {
+    delete form.config.env_vars[key]
+    // Trigger reactivity
+    form.config.env_vars = { ...form.config.env_vars }
+  }
+  delete envKeyTemp.value[key]
+}
+
+function updateEnvKey(oldKey: string) {
+  const newKey = envKeyTemp.value[oldKey]?.trim()
+  if (!newKey || newKey === oldKey) return
+  if (!form.config.env_vars) return
+  const value: string = form.config.env_vars[oldKey] ?? ''
+  delete form.config.env_vars[oldKey]
+  form.config.env_vars[newKey] = value
+  delete envKeyTemp.value[oldKey]
+  envKeyTemp.value[newKey] = newKey
+  // Trigger reactivity
+  form.config.env_vars = { ...form.config.env_vars }
+}
 
 const form = reactive({
   name: '',
@@ -243,6 +306,7 @@ function resetForm() {
   form.retry_interval = 60
   form.resource_tags = []
   form.config = defaultConfig()
+  envKeyTemp.value = {}
 }
 
 function handleTypeChange() {
@@ -345,7 +409,14 @@ async function handleEdit(row: TaskItem) {
     form.max_retries = task.max_retries ?? 0
     form.retry_interval = task.retry_interval ?? 60
     form.resource_tags = task.resource_tags || []
-    form.config = { ...defaultConfig(), ...(task.config || {}) }
+    form.config = { ...defaultConfig(), ...(task.config_json || {}) }
+    // Populate env key temp for editing
+    envKeyTemp.value = {}
+    if (form.config.env_vars) {
+      for (const key of Object.keys(form.config.env_vars)) {
+        envKeyTemp.value[key] = key
+      }
+    }
     destroyEditors()
     dialogVisible.value = true
     nextTick(() => {
@@ -364,6 +435,23 @@ async function handleSubmit() {
   }
   submitting.value = true
   try {
+    // Clean up env_vars: remove placeholder keys (keys starting with __new_)
+    const cleanConfig = { ...form.config }
+    if (cleanConfig.env_vars) {
+      const cleaned: Record<string, string> = {}
+      for (const [k, v] of Object.entries(cleanConfig.env_vars)) {
+        const realKey = envKeyTemp.value[k]?.trim() || k
+        if (realKey && !realKey.startsWith('__new_')) {
+          cleaned[realKey] = v
+        }
+      }
+      cleanConfig.env_vars = Object.keys(cleaned).length > 0 ? cleaned : undefined
+    }
+    // Remove env_vars if empty
+    if (cleanConfig.env_vars && Object.keys(cleanConfig.env_vars).length === 0) {
+      delete cleanConfig.env_vars
+    }
+
     const payload = {
       name: form.name,
       type: form.type,
@@ -372,7 +460,7 @@ async function handleSubmit() {
       max_retries: form.max_retries,
       retry_interval: form.retry_interval,
       resource_tags: form.resource_tags,
-      config: form.config,
+      config_json: cleanConfig,
     }
     if (isEdit.value) {
       await updateTask(editingId.value, payload)
@@ -456,5 +544,21 @@ onBeforeUnmount(() => {
 
 .code-editor :deep(.cm-scroller) {
   overflow: auto;
+}
+
+.env-editor {
+  width: 100%;
+}
+
+.env-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.env-eq {
+  color: #909399;
+  font-weight: 600;
 }
 </style>
