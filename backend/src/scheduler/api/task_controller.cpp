@@ -92,6 +92,8 @@ void TaskController::createTask(
     nlohmann::json parameters_json;
     if ((*json).isMember("parameters")) {
         parameters_json = jsoncppToNlohmann((*json)["parameters"]);
+    } else if ((*json).isMember("parameters_json")) {
+        parameters_json = jsoncppToNlohmann((*json)["parameters_json"]);
     }
 
     auto result = task_service_->createTask(

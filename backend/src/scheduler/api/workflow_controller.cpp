@@ -205,6 +205,10 @@ void WorkflowController::updateWorkflow(
         if (result.error().find("权限不足") != std::string::npos) {
             status = 403;
             code = 40301;
+        } else if (result.error().find("不存在") != std::string::npos ||
+                   result.error().find("已删除") != std::string::npos) {
+            status = 404;
+            code = 40402;
         }
         sendError(std::move(callback), status, code, result.error());
         return;
@@ -264,7 +268,14 @@ void WorkflowController::triggerWorkflow(
     auto result = workflow_service_->triggerWorkflow(id, creator_id, param_overrides);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40402, result.error());
+        int status = 400;
+        int code = 40004;
+        if (result.error().find("不存在") != std::string::npos ||
+            result.error().find("已删除") != std::string::npos) {
+            status = 404;
+            code = 40402;
+        }
+        sendError(std::move(callback), status, code, result.error());
         return;
     }
 

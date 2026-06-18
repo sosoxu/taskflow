@@ -18,12 +18,21 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
     // Validate required config fields
     auto get_string = [&config, &result](const std::string& key)
         -> std::string {
-        if (!config.contains(key) || !config[key].is_string()) {
+        if (!config.contains(key)) {
             result.status = "FAILED";
             result.error_message = "Missing or invalid '" + key + "' in config";
             return "";
         }
-        return config[key].get<std::string>();
+        if (config[key].is_string()) {
+            return config[key].get<std::string>();
+        }
+        // Allow numeric types (e.g., db_port as integer)
+        if (config[key].is_number()) {
+            return std::to_string(config[key].get<int>());
+        }
+        result.status = "FAILED";
+        result.error_message = "Missing or invalid '" + key + "' in config";
+        return "";
     };
 
     std::string db_host = get_string("db_host");

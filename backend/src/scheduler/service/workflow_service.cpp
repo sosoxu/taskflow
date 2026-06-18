@@ -321,6 +321,17 @@ common::result::Result<void> WorkflowService::deleteWorkflow(
         return common::result::Result<void>::failure("权限不足，只能删除自己创建的工作流");
     }
 
+    // Check if there are running instances
+    auto runningInstances = workflow_instance_dao_.listByWorkflow(id, 0, 100);
+    if (runningInstances.ok()) {
+        for (const auto& inst : runningInstances.value()) {
+            if (inst.status == "PENDING" || inst.status == "RUNNING" || inst.status == "PAUSED") {
+                return common::result::Result<void>::failure(
+                    "工作流有正在运行的实例，无法删除。请先取消或等待实例完成。");
+            }
+        }
+    }
+
     // Soft delete the workflow
     auto deleteResult = workflow_dao_.softDelete(id);
     if (!deleteResult.ok()) {
@@ -352,6 +363,12 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
             "Workflow not found: " + wfResult.error());
     }
     const auto& workflow = wfResult.value();
+
+    // Check if workflow has been deleted
+    if (workflow.deleted) {
+        return common::result::Result<nlohmann::json>::failure(
+            "工作流不存在或已删除");
+    }
 
     // 2. Create WorkflowInstance (status=PENDING, trigger_type="manual")
     auto instanceResult = workflow_instance_dao_.create(

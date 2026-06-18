@@ -257,12 +257,28 @@ void InstanceController::listAllInstances(
 
     std::string page_str = std::string(req->getParameter("page"));
     std::string page_size_str = std::string(req->getParameter("page_size"));
+    std::string workflow_id = std::string(req->getParameter("workflow_id"));
 
     if (!page_str.empty()) {
         try { page = std::stoi(page_str); } catch (...) {}
     }
     if (!page_size_str.empty()) {
         try { page_size = std::stoi(page_size_str); } catch (...) {}
+    }
+
+    // If workflow_id is provided, filter by it
+    if (!workflow_id.empty()) {
+        if (!isValidUUID(workflow_id)) {
+            sendError(std::move(callback), 400, 40001, "Invalid workflow_id format: must be a valid UUID");
+            return;
+        }
+        auto result = instance_service_->listInstances(workflow_id, page, page_size);
+        if (!result.ok()) {
+            sendError(std::move(callback), 400, 50001, result.error());
+            return;
+        }
+        sendSuccess(std::move(callback), result.value());
+        return;
     }
 
     auto result = instance_service_->listAllInstances(page, page_size);

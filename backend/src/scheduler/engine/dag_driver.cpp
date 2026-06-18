@@ -297,6 +297,19 @@ common::result::Result<void> DagDriver::dispatchTask(
 
     const auto& task = task_result.value();
 
+    // Check if task has been deleted
+    if (task.deleted) {
+        auto fail_result = task_instance_dao_.markFinished(
+            task_instance.id, "FAILED", -1,
+            "Task has been deleted: " + task_instance.task_id);
+        if (!fail_result.ok()) {
+            spdlog::error("DagDriver: failed to mark task instance {} as FAILED for deleted task: {}",
+                         task_instance.id, fail_result.error());
+        }
+        return common::result::Result<void>::failure(
+            "Task has been deleted: " + task_instance.task_id);
+    }
+
     // 2. Create appropriate Dispatcher based on schedule_strategy
     std::unique_ptr<Dispatcher> dispatcher;
     if (workflow.schedule_strategy == "random") {
@@ -453,6 +466,13 @@ common::result::Result<void> DagDriver::dispatchTask(
     if (!running_result.ok()) {
         spdlog::warn("DagDriver: failed to mark task instance {} as RUNNING: {}",
                      task_instance.id, running_result.error());
+    }
+
+    // Increment worker's running_tasks immediately for accurate load balancing
+    auto update_tasks_result = worker_dao_.updateRunningTasks(worker.id, worker.running_tasks + 1);
+    if (!update_tasks_result.ok()) {
+        spdlog::warn("DagDriver: failed to update running_tasks for worker {}: {}",
+                     worker.id, update_tasks_result.error());
     }
 
     spdlog::info("DagDriver: dispatched task instance {} to worker {} ({})",
