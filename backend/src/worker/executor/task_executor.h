@@ -4,8 +4,10 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <functional>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 #include "common/result/result.h"
@@ -34,6 +36,10 @@ class TaskExecutor {
 public:
     explicit TaskExecutor(int max_tasks);
 
+    // Destructor: cancels all running tasks and waits for threads to finish
+    // to avoid use-after-free from detached threads accessing destroyed state.
+    ~TaskExecutor();
+
     // Execute a task, returns immediately if accepted, runs in background thread
     common::result::Result<void> submit(
         const std::string& task_instance_id,
@@ -44,7 +50,7 @@ public:
         const std::string& workflow_instance_id,
         std::function<void(const TaskResult&)> callback);
 
-    // Cancel a running task
+    // Cancel a running task (sends SIGTERM, then SIGKILL after grace period)
     common::result::Result<void> cancel(const std::string& task_instance_id);
 
     int runningCount() const;
@@ -59,8 +65,14 @@ public:
 private:
     int max_tasks_;
     std::atomic<int> running_count_{0};
+    // Tracks detached threads that are still alive (including callback execution).
+    // The destructor waits for this to reach 0 to avoid use-after-free.
+    std::atomic<int> active_threads_{0};
+    // Map of task_instance_id -> pid. pid=0 means task submitted but PID not yet known.
     std::map<std::string, pid_t> running_processes_;
     std::mutex mutex_;
+    std::condition_variable cv_;
+    bool shutting_down_{false};
     std::map<std::string, std::function<std::unique_ptr<TaskExecutorBase>()>> executor_factories_;
     std::shared_ptr<LogSink> log_sink_;
 
