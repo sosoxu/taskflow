@@ -12,6 +12,7 @@ struct User {
     std::string role;  // admin, operator, viewer
     std::string created_at;
     std::string updated_at;
+    std::string deleted_at;
 
     static User fromRow(const pqxx::row& row) {
         User user;
@@ -21,6 +22,7 @@ struct User {
         user.role = row["role"].as<std::string>();
         user.created_at = row["created_at"].as<std::string>();
         user.updated_at = row["updated_at"].as<std::string>();
+        user.deleted_at = row["deleted_at"].is_null() ? "" : row["deleted_at"].as<std::string>();
         return user;
     }
 

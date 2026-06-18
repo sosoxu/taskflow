@@ -59,6 +59,21 @@ common::result::Result<common::models::User> UserDao::findByUsername(const std::
         });
 }
 
+common::result::Result<common::models::User> UserDao::findByUsernameIncludeDeleted(const std::string& username) {
+    return common::database::DatabaseManager::instance().withReadTransaction<common::models::User>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<common::models::User> {
+            auto res = txn.exec_params(
+                "SELECT * FROM users WHERE username = $1",
+                username);
+
+            if (res.empty()) {
+                return common::result::Result<common::models::User>::failure("用户不存在");
+            }
+
+            return common::models::User::fromRow(res[0]);
+        });
+}
+
 common::result::Result<void> UserDao::updateRole(const std::string& id, const std::string& role) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {

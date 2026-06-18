@@ -19,6 +19,9 @@ public:
     // 按用户名查找
     common::result::Result<common::models::User> findByUsername(const std::string& username);
 
+    // 查找用户（包含已软删除的）
+    common::result::Result<common::models::User> findByUsernameIncludeDeleted(const std::string& username);
+
     // 修改角色
     common::result::Result<void> updateRole(const std::string& id, const std::string& role);
 

@@ -76,14 +76,20 @@ common::result::Result<nlohmann::json> AuthService::registerUser(
 common::result::Result<nlohmann::json> AuthService::login(
     const std::string& username, const std::string& password) {
 
-    // Find user by username
-    auto userResult = user_dao_.findByUsername(username);
+    // Find user by username (including soft-deleted to give specific error)
+    auto userResult = user_dao_.findByUsernameIncludeDeleted(username);
     if (!userResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
             "Invalid username or password");
     }
 
     const auto& user = userResult.value();
+
+    // Check if user is soft-deleted
+    if (!user.deleted_at.empty()) {
+        return common::result::Result<nlohmann::json>::failure(
+            "账号已被禁用");
+    }
 
     // Verify password
     auto verifyResult = common::util::PasswordUtil::verifyPassword(password, user.password_hash);
@@ -142,6 +148,7 @@ common::result::Result<nlohmann::json> AuthService::refreshToken(
 
     nlohmann::json response = {
         {"access_token", tokenResult.value().access_token},
+        {"refresh_token", tokenResult.value().refresh_token},
         {"expires_in", 86400}
     };
 
