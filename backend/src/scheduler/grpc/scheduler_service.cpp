@@ -1,5 +1,8 @@
 #include "scheduler/grpc/scheduler_service.h"
 
+#include <string>
+#include <unordered_set>
+
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
@@ -71,18 +74,58 @@ SchedulerServiceImpl::SchedulerServiceImpl() = default;
     ::grpc::ServerContext* /*context*/,
     const taskflow::v1::TaskResultRequest* request,
     taskflow::v1::TaskResultResponse* response) {
-    task_instance_dao_.markFinished(request->task_instance_id(),
-                                    request->status(), request->exit_code(),
-                                    request->error_message());
+
+    const std::string& ti_id = request->task_instance_id();
+    const std::string& status = request->status();
+
+    // Fix #159: Validate that the reported status is a legal terminal status.
+    static const std::unordered_set<std::string> kValidStatuses = {
+        "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED", "NODE_OFFLINE"
+    };
+    if (kValidStatuses.find(status) == kValidStatuses.end()) {
+        spdlog::warn("ReportTaskResult: invalid status '{}' for task instance {}", status, ti_id);
+        response->set_acknowledged(false);
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Invalid task status: " + status);
+    }
+
+    // Fix #151: Do not overwrite an existing terminal state. If the task was
+    // already CANCELLED/TIMEOUT/etc. (e.g. by cancelInstance or DagDriver
+    // timeout), ignore the worker's late ReportTaskResult to avoid resurrecting
+    // a cancelled task as SUCCESS and triggering wrong downstream dispatch.
+    auto ti_result = task_instance_dao_.findById(ti_id);
+    if (ti_result.ok()) {
+        const auto& ti = ti_result.value();
+        static const std::unordered_set<std::string> kTerminal = {
+            "SUCCESS", "FAILED", "TIMEOUT", "CANCELLED", "NODE_OFFLINE", "UPSTREAM_FAILED"
+        };
+        if (kTerminal.count(ti.status) > 0) {
+            spdlog::info("ReportTaskResult: ignoring late report for task instance {} "
+                         "(current status={}, reported status={})",
+                         ti_id, ti.status, status);
+            // Still decrement running_tasks if the worker had a task assigned.
+            if (!ti.worker_id.empty()) {
+                worker_dao_.decrementRunningTasks(ti.worker_id);
+            }
+            response->set_acknowledged(true);
+            return ::grpc::Status::OK;
+        }
+    }
+
+    // Fix #159: Check markFinished return value instead of ignoring it.
+    auto finish_result = task_instance_dao_.markFinished(
+        ti_id, status, request->exit_code(), request->error_message());
+    if (!finish_result.ok()) {
+        spdlog::warn("ReportTaskResult: markFinished failed for task instance {}: {}",
+                     ti_id, finish_result.error());
+    }
 
     // Fix #121: Decrement the worker's running_tasks counter when a task finishes.
     // Without this, LoadBalanceDispatcher sees stale (inflated) load between heartbeats.
-    auto ti_result = task_instance_dao_.findById(request->task_instance_id());
     if (ti_result.ok() && !ti_result.value().worker_id.empty()) {
         auto dec_result = worker_dao_.decrementRunningTasks(ti_result.value().worker_id);
         if (!dec_result.ok()) {
-            // Non-fatal: log and continue. The next heartbeat will self-correct.
-            // (Logging requires spdlog include; kept minimal here.)
+            spdlog::warn("ReportTaskResult: failed to decrement running_tasks for worker {}: {}",
+                         ti_result.value().worker_id, dec_result.error());
         }
     }
 

@@ -91,6 +91,11 @@ private:
     // created the instance. Empty user_id skips the check (internal calls).
     common::result::Result<void> checkInstanceAccess(
         const std::string& instance_id, const std::string& user_id, const std::string& role);
+
+    // Fix #150/#151: Send CancelTask gRPC to the worker running a task.
+    // Used by cancelInstance, killTask, and resetDownstreamTasks to stop
+    // RUNNING/DISPATCHED tasks before resetting their state.
+    void sendCancelTask(const std::string& task_instance_id, const std::string& worker_id);
 };
 
 }  // namespace taskflow::scheduler::service

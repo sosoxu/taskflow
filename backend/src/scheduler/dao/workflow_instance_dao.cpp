@@ -167,4 +167,36 @@ common::result::Result<int> WorkflowInstanceDao::countAll() {
         });
 }
 
+common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowInstanceDao::listByCreator(
+    const std::string& creator_id, int offset, int limit) {
+    // Fix #157: Push creator_id filter into SQL so pagination is correct.
+    return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::WorkflowInstance>>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::WorkflowInstance>> {
+            auto res = txn.exec_params(
+                "SELECT * FROM workflow_instances WHERE creator_id = $1 "
+                "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+                creator_id, limit, offset);
+
+            std::vector<common::models::WorkflowInstance> instances;
+            for (const auto& row : res) {
+                instances.push_back(common::models::WorkflowInstance::fromRow(row));
+            }
+
+            return instances;
+        });
+}
+
+common::result::Result<int> WorkflowInstanceDao::countByCreator(const std::string& creator_id) {
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            auto result = txn.exec_params(
+                "SELECT COUNT(*) FROM workflow_instances WHERE creator_id = $1",
+                creator_id);
+            // Fix: exec_params returns a pqxx::result; access the first row's
+            // first field (not row.as<int>() which yields std::tuple<int>).
+            int total = result[0][0].as<int>();
+            return total;
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

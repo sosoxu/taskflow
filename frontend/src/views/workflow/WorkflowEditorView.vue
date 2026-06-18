@@ -151,6 +151,7 @@ import { getTasks } from '../../api/task'
 import { getWorkers } from '../../api/worker'
 import type { TaskItem } from '../../types/task'
 import type { WorkerInfo } from '../../types/worker'
+import type { DagGraph } from '../../types/workflow'
 
 interface DagNodeData {
   id: string
@@ -182,11 +183,14 @@ interface ApiDagEdge {
   target: string
 }
 
+// Fix #164/#166: Use the shared DagGraph type instead of an untyped
+// { nodes: unknown[]; edges: unknown[] } shape, so createWorkflow /
+// updateWorkflow receive a properly typed payload.
 interface WorkflowPayload {
   name: string
   description: string
-  dag_json: { nodes: unknown[]; edges: unknown[] }
-  schedule_strategy: string
+  dag_json: DagGraph
+  schedule_strategy: 'random' | 'load_balance' | 'specified'
   cron_enabled: boolean
   cron_expression?: string
   target_worker_id?: string
@@ -294,12 +298,17 @@ function addNode(task: TaskItem) {
     param_overrides: undefined,
   })
 
-  vfNodes.value.push({
-    id,
-    type: 'custom',
-    position: { x: 100 + offset, y: 100 + offset },
-    data: { label: task.name, taskType: task.type },
-  })
+  // Fix #160: shallowRef does not track .push() mutations. Reassign the array
+  // so Vue Flow re-renders the new node.
+  vfNodes.value = [
+    ...vfNodes.value,
+    {
+      id,
+      type: 'custom',
+      position: { x: 100 + offset, y: 100 + offset },
+      data: { label: task.name, taskType: task.type },
+    },
+  ]
 }
 
 function removeNode(nodeId: string) {
@@ -335,15 +344,53 @@ function onConnect(params: { source: string; target: string }) {
   const exists = vfEdges.value.some(
     (e) => e.source === params.source && e.target === params.target,
   )
-  if (!exists && params.source !== params.target) {
-    vfEdges.value.push({
+  if (exists || params.source === params.target) return
+
+  // Fix #163: Detect cycles before adding the edge. A cycle would cause the
+  // backend topological sort to fail. Do a DFS from target back to source;
+  // if source is reachable, adding this edge would create a cycle.
+  if (wouldCreateCycle(params.source, params.target)) {
+    ElMessage.warning('不能创建环：该连线会导致 DAG 出现循环依赖')
+    return
+  }
+
+  // Fix #160: shallowRef does not track .push() mutations. Reassign the array.
+  vfEdges.value = [
+    ...vfEdges.value,
+    {
       id: `e-${params.source}-${params.target}`,
       source: params.source,
       target: params.target,
       type: 'smoothstep',
       animated: true,
-    })
+    },
+  ]
+}
+
+// Fix #163: Returns true if adding edge source->target would create a cycle.
+// This happens if target can already reach source via existing edges.
+function wouldCreateCycle(source: string, target: string): boolean {
+  // Build adjacency list from current edges
+  const adj = new Map<string, string[]>()
+  for (const e of vfEdges.value) {
+    const arr = adj.get(e.source) || []
+    arr.push(e.target)
+    adj.set(e.source, arr)
   }
+  // DFS from target: if we can reach source, then source->target creates a cycle
+  const visited = new Set<string>()
+  const stack = [target]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node === source) return true
+    if (visited.has(node)) continue
+    visited.add(node)
+    const neighbors = adj.get(node) || []
+    for (const n of neighbors) {
+      if (!visited.has(n)) stack.push(n)
+    }
+  }
+  return false
 }
 
 function removeSelectedEdge() {

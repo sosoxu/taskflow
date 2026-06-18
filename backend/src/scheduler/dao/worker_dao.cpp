@@ -177,4 +177,22 @@ common::result::Result<void> WorkerDao::decrementRunningTasks(const std::string&
         });
 }
 
+common::result::Result<void> WorkerDao::incrementRunningTasks(const std::string& id) {
+    // Fix #154: Atomically increment running_tasks using SQL to avoid the
+    // read-modify-write race with HeartbeatChecker (updateHeartbeat) and
+    // ReportTaskResult (decrementRunningTasks).
+    return common::database::DatabaseManager::instance().withTransaction<void>(
+        [&](pqxx::work& txn) -> common::result::Result<void> {
+            auto res = txn.exec_params(
+                "UPDATE workers SET running_tasks = running_tasks + 1 WHERE id = $1",
+                id);
+
+            if (res.affected_rows() == 0) {
+                return common::result::Result<void>::failure("Worker 不存在，递增运行任务数失败");
+            }
+
+            return common::result::Result<void>();
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

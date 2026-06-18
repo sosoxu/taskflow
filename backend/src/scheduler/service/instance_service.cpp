@@ -138,42 +138,22 @@ common::result::Result<void> InstanceService::cancelInstance(
     }
 
     for (const auto& task_instance : tasks_result.value()) {
-        if (task_instance.status == "PENDING" || task_instance.status == "DISPATCHED") {
-            auto task_update = task_instance_dao_.updateStatus(task_instance.id, "CANCELLED");
+        if (task_instance.status == "PENDING") {
+            // Fix #159: Use markFinished (sets finished_at/exit_code) for consistency.
+            auto task_update = task_instance_dao_.markFinished(
+                task_instance.id, "CANCELLED", -1, "Cancelled by user");
             if (!task_update.ok()) {
                 spdlog::warn("InstanceService: failed to cancel task instance {}: {}",
                              task_instance.id, task_update.error());
             }
-        } else if (task_instance.status == "RUNNING") {
-            // Send CancelTask gRPC to the worker to kill the running process
-            if (!task_instance.worker_id.empty()) {
-                auto worker_result = worker_dao_.findById(task_instance.worker_id);
-                if (worker_result.ok()) {
-                    const auto& worker = worker_result.value();
-                    auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
-                    auto stub = taskflow::v1::WorkerService::NewStub(channel);
-
-                    taskflow::v1::TaskCancelRequest request;
-                    request.set_task_instance_id(task_instance.id);
-
-                    taskflow::v1::TaskCancelResponse response;
-                    // Fix #127: Retry CancelTask on transient failures.
-                    auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
-                        grpc::ClientContext ctx;
-                        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
-                        return stub->CancelTask(&ctx, request, &response);
-                    });
-
-                    if (!grpc_status.ok()) {
-                        spdlog::warn("InstanceService: gRPC CancelTask failed for task instance {}: {}",
-                                     task_instance.id, grpc_status.error_message());
-                    }
-                }
-            }
+        } else if (task_instance.status == "DISPATCHED" || task_instance.status == "RUNNING") {
+            // Fix #151: Send CancelTask for DISPATCHED tasks too — the task has
+            // already been sent to the worker and may have started executing.
+            sendCancelTask(task_instance.id, task_instance.worker_id);
             auto task_update = task_instance_dao_.markFinished(
                 task_instance.id, "CANCELLED", -1, "Cancelled by user");
             if (!task_update.ok()) {
-                spdlog::warn("InstanceService: failed to cancel running task instance {}: {}",
+                spdlog::warn("InstanceService: failed to cancel task instance {}: {}",
                              task_instance.id, task_update.error());
             }
         }
@@ -196,6 +176,16 @@ common::result::Result<void> InstanceService::retryTask(
     if (!instance_result.ok()) {
         return common::result::Result<void>::failure(
             "Workflow instance not found: " + instance_result.error());
+    }
+
+    const auto& instance = instance_result.value();
+    // Fix #156: Only allow retry when the instance is in a terminal state
+    // (FAILED/CANCELLED) or PAUSED. Retrying while RUNNING races with DagDriver
+    // (dispatch overwrites PENDING, or resetForRetry overwrites DISPATCHED).
+    if (instance.status == "RUNNING" || instance.status == "PENDING") {
+        return common::result::Result<void>::failure(
+            "Cannot retry task while instance is " + instance.status +
+            ". Wait for the instance to finish or pause it first");
     }
 
     // Find the task instance
@@ -243,7 +233,6 @@ common::result::Result<void> InstanceService::retryTask(
     }
 
     // Get the workflow's dag_json to traverse downstream nodes
-    const auto& instance = instance_result.value();
     auto workflow_result = workflow_dao_.findById(instance.workflow_id);
     if (workflow_result.ok()) {
         const auto& dag_json = workflow_result.value().dag_json;
@@ -263,6 +252,36 @@ common::result::Result<void> InstanceService::retryTask(
     }
 
     return common::result::Result<void>();
+}
+
+void InstanceService::sendCancelTask(const std::string& task_instance_id,
+                                     const std::string& worker_id) {
+    // Fix #150/#151: Best-effort CancelTask gRPC to stop a running/dispatched task.
+    if (worker_id.empty()) return;
+    auto worker_result = worker_dao_.findById(worker_id);
+    if (!worker_result.ok()) {
+        spdlog::warn("InstanceService: worker {} not found for CancelTask (task {}): {}",
+                     worker_id, task_instance_id, worker_result.error());
+        return;
+    }
+    const auto& worker = worker_result.value();
+    auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
+    auto stub = taskflow::v1::WorkerService::NewStub(channel);
+
+    taskflow::v1::TaskCancelRequest request;
+    request.set_task_instance_id(task_instance_id);
+
+    taskflow::v1::TaskCancelResponse response;
+    auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+        return stub->CancelTask(&ctx, request, &response);
+    });
+
+    if (!grpc_status.ok()) {
+        spdlog::warn("InstanceService: gRPC CancelTask failed for task instance {}: {}",
+                     task_instance_id, grpc_status.error_message());
+    }
 }
 
 void InstanceService::resetDownstreamTasks(
@@ -303,6 +322,13 @@ void InstanceService::resetDownstreamTasks(
                     ti.status == "SUCCESS" || ti.status == "DISPATCHED" ||
                     ti.status == "RUNNING" || ti.status == "PENDING" ||
                     ti.status == "NODE_OFFLINE") {
+                    // Fix #150: For RUNNING/DISPATCHED tasks, send CancelTask to
+                    // the worker BEFORE resetting. Otherwise the worker keeps
+                    // executing and its ReportTaskResult overwrites the reset
+                    // PENDING state, causing data inconsistency.
+                    if (ti.status == "RUNNING" || ti.status == "DISPATCHED") {
+                        sendCancelTask(ti.id, ti.worker_id);
+                    }
                     auto downstream_reset = task_instance_dao_.resetForRetry(ti.id);
                     if (!downstream_reset.ok()) {
                         spdlog::warn("InstanceService: failed to reset downstream task instance {}: {}",
@@ -351,33 +377,7 @@ common::result::Result<void> InstanceService::killTask(
     }
 
     // If the task has a worker assigned, send CancelTask gRPC to the worker
-    if (!task_instance.worker_id.empty()) {
-        auto worker_result = worker_dao_.findById(task_instance.worker_id);
-        if (worker_result.ok()) {
-            const auto& worker = worker_result.value();
-            auto channel = common::util::createWorkerChannel(worker.address, worker_tls_);
-            auto stub = taskflow::v1::WorkerService::NewStub(channel);
-
-            taskflow::v1::TaskCancelRequest request;
-            request.set_task_instance_id(task_instance_id);
-
-            taskflow::v1::TaskCancelResponse response;
-            // Fix #127: Retry CancelTask on transient failures.
-            auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
-                grpc::ClientContext ctx;
-                ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
-                return stub->CancelTask(&ctx, request, &response);
-            });
-
-            if (!grpc_status.ok()) {
-                spdlog::warn("InstanceService: gRPC CancelTask failed for task instance {}: {}",
-                             task_instance_id, grpc_status.error_message());
-            }
-        } else {
-            spdlog::warn("InstanceService: worker not found for task instance {}: {}",
-                         task_instance_id, worker_result.error());
-        }
-    }
+    sendCancelTask(task_instance_id, task_instance.worker_id);
 
     // Mark the task instance as FAILED
     auto update_result = task_instance_dao_.markFinished(
@@ -477,31 +477,40 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(
     if (page_size < 1) page_size = 10;
 
     int offset = (page - 1) * page_size;
-    auto result = workflow_instance_dao_.listAll(offset, page_size);
-    if (!result.ok()) {
-        return common::result::Result<nlohmann::json>::failure(result.error());
+
+    // Fix #157: Push creator_id filter into SQL for correct pagination.
+    // Previously we fetched a global page then filtered in memory, which
+    // returned fewer items than page_size and a wrong total for non-admin users.
+    bool filter_by_creator = !user_id.empty() && role != "admin";
+
+    std::vector<common::models::WorkflowInstance> instances;
+    int total = 0;
+
+    if (filter_by_creator) {
+        auto result = workflow_instance_dao_.listByCreator(user_id, offset, page_size);
+        if (!result.ok()) {
+            return common::result::Result<nlohmann::json>::failure(result.error());
+        }
+        instances = std::move(result.value());
+        auto countResult = workflow_instance_dao_.countByCreator(user_id);
+        total = countResult.ok() ? countResult.value() : 0;
+    } else {
+        auto result = workflow_instance_dao_.listAll(offset, page_size);
+        if (!result.ok()) {
+            return common::result::Result<nlohmann::json>::failure(result.error());
+        }
+        instances = std::move(result.value());
+        auto countResult = workflow_instance_dao_.countAll();
+        total = countResult.ok() ? countResult.value() : 0;
     }
 
-    auto countResult = workflow_instance_dao_.countAll();
-    int total = countResult.ok() ? countResult.value() : 0;
-
-    nlohmann::json instances = nlohmann::json::array();
-    for (const auto& inst : result.value()) {
-        // Fix #134: non-admin users only see their own workflow instances
-        if (!user_id.empty() && role != "admin") {
-            auto wf_result = workflow_dao_.findById(inst.workflow_id);
-            if (wf_result.ok() && wf_result.value().creator_id != user_id) {
-                continue;
-            }
-            if (!wf_result.ok()) {
-                continue;
-            }
-        }
-        instances.push_back(inst.toJson());
+    nlohmann::json items = nlohmann::json::array();
+    for (const auto& inst : instances) {
+        items.push_back(inst.toJson());
     }
 
     return nlohmann::json{
-        {"items", instances},
+        {"items", items},
         {"page", page},
         {"page_size", page_size},
         {"total", total}

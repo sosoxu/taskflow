@@ -52,16 +52,18 @@ TEST_CASE("DagValidator: edge from non-existent node rejected", "[dag_validator_
     REQUIRE_FALSE(result.ok());
 }
 
-TEST_CASE("DagValidator: duplicate node id - current behavior accepts (deduped by unordered_set)", "[dag_validator_ext]") {
+TEST_CASE("DagValidator: duplicate node id is rejected (Fix #158)", "[dag_validator_ext]") {
     nlohmann::json dag;
     dag["nodes"] = nlohmann::json::array();
     dag["edges"] = nlohmann::json::array();
     dag["nodes"].push_back({{"id", "a"}, {"task_id", "t1"}});
     dag["nodes"].push_back({{"id", "a"}, {"task_id", "t2"}});  // duplicate id
 
-    // Current implementation uses unordered_set which dedupes, so this is accepted
+    // Fix #158: Duplicate node IDs are now rejected (previously deduped
+    // silently by unordered_set, causing data loss).
     auto result = DagValidator::validate(dag);
-    REQUIRE(result.ok());
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("Duplicate node ID") != std::string::npos);
 }
 
 TEST_CASE("DagValidator: diamond DAG is valid", "[dag_validator_ext]") {

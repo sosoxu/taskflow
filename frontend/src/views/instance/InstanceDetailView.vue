@@ -101,7 +101,9 @@
           <span>任务实例</span>
         </template>
         <el-table :data="instance.tasks" border stripe>
-          <el-table-column prop="task_name" label="节点名称" min-width="120" />
+          <el-table-column prop="node_id" label="节点 ID" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.node_id || '-' }}</template>
+          </el-table-column>
           <el-table-column prop="task_name" label="任务名称" min-width="120" />
           <el-table-column label="状态" width="140">
             <template #default="{ row }">
@@ -179,7 +181,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getInstance, pauseInstance, resumeInstance, cancelInstance, retryTask, killTask } from '../../api/instance'
@@ -348,47 +350,69 @@ async function fetchInstance() {
   try {
     const res = await getInstance(id)
     instance.value = res.data.data
-    // Fetch workflow for name and DAG (only once, or when workflow_id changes)
-    if (instance.value?.workflow_id && !workflowName.value) {
+    // Fetch workflow for name and DAG. Re-fetch when the workflow_id changes
+    // (e.g. navigating to a different instance) so stale data isn't shown.
+    if (instance.value?.workflow_id) {
       const wfRes = await getWorkflow(instance.value.workflow_id)
       workflowName.value = wfRes.data?.data?.name || ''
       dag.value = wfRes.data?.data?.dag_json || null
     }
-  } catch (err) {
+  } catch {
     ElMessage.error('获取实例详情失败')
   } finally {
     loading.value = false
   }
 }
 
+// Fix #162: Distinguish ElMessageBox cancellation (no error message) from
+// actual API failures (show error message). Previously all errors were
+// silently swallowed, so the user got no feedback when the API call failed.
 async function handlePause() {
   if (!instance.value) return
   try {
     await ElMessageBox.confirm('确定要暂停该实例吗？', '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await pauseInstance(instance.value.id)
     ElMessage.success('已暂停')
     fetchInstance()
-  } catch { /* cancelled */ }
+  } catch {
+    ElMessage.error('暂停失败')
+  }
 }
 
 async function handleResume() {
   if (!instance.value) return
   try {
     await ElMessageBox.confirm('确定要恢复该实例吗？', '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await resumeInstance(instance.value.id)
     ElMessage.success('已恢复')
     fetchInstance()
-  } catch { /* cancelled */ }
+  } catch {
+    ElMessage.error('恢复失败')
+  }
 }
 
 async function handleCancel() {
   if (!instance.value) return
   try {
     await ElMessageBox.confirm('确定要取消该实例吗？此操作不可撤销。', '警告', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await cancelInstance(instance.value.id)
     ElMessage.success('已取消')
     fetchInstance()
-  } catch { /* cancelled */ }
+  } catch {
+    ElMessage.error('取消失败')
+  }
 }
 
 async function handleRetryInstance() {
@@ -406,20 +430,32 @@ async function handleRetryTask(task: TaskInstance) {
   if (!instance.value) return
   try {
     await ElMessageBox.confirm(`确定要重试任务 "${task.task_name}" 吗？`, '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await retryTask(instance.value.id, task.id)
     ElMessage.success('已提交重试')
     fetchInstance()
-  } catch { /* cancelled */ }
+  } catch {
+    ElMessage.error('重试失败')
+  }
 }
 
 async function handleKillTask(task: TaskInstance) {
   if (!instance.value) return
   try {
     await ElMessageBox.confirm(`确定要终止任务 "${task.task_name}" 吗？`, '警告', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
     await killTask(instance.value.id, task.id)
     ElMessage.success('已终止')
     fetchInstance()
-  } catch { /* cancelled */ }
+  } catch {
+    ElMessage.error('终止失败')
+  }
 }
 
 async function openLogDialog(task: TaskInstance) {
@@ -487,6 +523,14 @@ function refreshLog() {
   fetchLog()
 }
 
+// Fix #162: Stop the SSE log stream when the log dialog is closed, otherwise
+// the EventSource keeps consuming resources in the background.
+watch(logDialogVisible, (visible) => {
+  if (!visible) {
+    stopLogStream()
+  }
+})
+
 function goBack() {
   router.back()
 }
@@ -514,6 +558,16 @@ function startPolling() {
 onMounted(() => {
   fetchInstance()
   startPolling()
+})
+
+// Fix #161: Re-fetch when the route param changes (e.g. navigating from one
+// instance detail to another without unmounting). Without this watch the page
+// shows stale data from the previous instance.
+watch(() => route.params.id, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    stopLogStream()
+    fetchInstance()
+  }
 })
 
 onUnmounted(() => {

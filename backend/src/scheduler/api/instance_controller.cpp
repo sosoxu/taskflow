@@ -70,7 +70,15 @@ void InstanceController::pauseInstance(
     auto result = instance_service_->pauseInstance(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40008, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40008, result.error());
         return;
     }
 
@@ -98,7 +106,15 @@ void InstanceController::resumeInstance(
     auto result = instance_service_->resumeInstance(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40008, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40008, result.error());
         return;
     }
 
@@ -126,7 +142,15 @@ void InstanceController::cancelInstance(
     auto result = instance_service_->cancelInstance(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40008, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40008, result.error());
         return;
     }
 
@@ -159,7 +183,15 @@ void InstanceController::retryTask(
     auto result = instance_service_->retryTask(id, taskInstanceId, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40009, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40009, result.error());
         return;
     }
 
@@ -192,7 +224,15 @@ void InstanceController::killTask(
     auto result = instance_service_->killTask(id, taskInstanceId, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 40009, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40009, result.error());
         return;
     }
 
@@ -220,7 +260,15 @@ void InstanceController::getInstance(
     auto result = instance_service_->getInstance(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40403, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40403, result.error());
         return;
     }
 
@@ -255,7 +303,15 @@ void InstanceController::listInstances(
     auto result = instance_service_->listInstances(id, page, page_size, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 50001, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 50001, result.error());
         return;
     }
 
@@ -291,7 +347,15 @@ void InstanceController::listAllInstances(
         }
         auto result = instance_service_->listInstances(workflow_id, page, page_size, user_id, role);
         if (!result.ok()) {
-            sendError(std::move(callback), 400, 50001, result.error());
+            // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+            int status = 400;
+            if (result.error().find("Permission denied") != std::string::npos) {
+                status = 403;
+            } else if (result.error().find("not found") != std::string::npos ||
+                       result.error().find("不存在") != std::string::npos) {
+                status = 404;
+            }
+            sendError(std::move(callback), status, 50001, result.error());
             return;
         }
         sendSuccess(std::move(callback), result.value());
@@ -301,7 +365,15 @@ void InstanceController::listAllInstances(
     auto result = instance_service_->listAllInstances(page, page_size, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 400, 50001, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("not found") != std::string::npos ||
+                   result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 50001, result.error());
         return;
     }
 

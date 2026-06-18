@@ -68,12 +68,17 @@ common::result::Result<void> TaskInstanceDao::dispatch(const std::string& id,
                                                         const std::string& worker_id) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #156: Only dispatch if the task is still PENDING. This prevents
+            // racing with cancelInstance/retryTask which may have changed the
+            // status between DagDriver's snapshot and this dispatch.
             auto res = txn.exec_params(
-                "UPDATE task_instances SET status = 'DISPATCHED', worker_id = $1 WHERE id = $2",
+                "UPDATE task_instances SET status = 'DISPATCHED', worker_id = $1 "
+                "WHERE id = $2 AND status = 'PENDING'",
                 worker_id, id);
 
             if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("任务实例不存在，调度失败");
+                return common::result::Result<void>::failure(
+                    "任务实例不存在或状态已变更（非 PENDING），调度失败");
             }
 
             return common::result::Result<void>();

@@ -115,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getWorkflow, triggerWorkflow } from '../../api/workflow'
@@ -296,6 +296,17 @@ function goBack() {
 onMounted(() => {
   fetchWorkflow()
   fetchInstances()
+})
+
+// Fix #161: Re-fetch when the route param changes (e.g. navigating from one
+// workflow detail to another without unmounting). Without this watch the page
+// shows stale data from the previous workflow.
+watch(workflowId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    fetchWorkflow()
+    instancePage.value = 1
+    fetchInstances()
+  }
 })
 </script>
 

@@ -41,7 +41,11 @@ public:
             if (!node.contains("task_id") || !node["task_id"].is_string()) {
                 return common::result::Result<void>::failure("Each node must have a string 'task_id' field");
             }
-            node_ids.insert(node["id"].get<std::string>());
+            // Fix #158: Detect duplicate node IDs (unordered_set::insert silently dedups).
+            std::string nid = node["id"].get<std::string>();
+            if (!node_ids.insert(nid).second) {
+                return common::result::Result<void>::failure("Duplicate node ID: " + nid);
+            }
         }
 
         // Build adjacency list from edges

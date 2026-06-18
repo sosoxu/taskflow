@@ -141,7 +141,7 @@ void WorkflowController::listWorkflows(
 }
 
 void WorkflowController::getWorkflow(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
@@ -150,10 +150,25 @@ void WorkflowController::getWorkflow(
         return;
     }
 
-    auto result = workflow_service_->getWorkflow(id);
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = workflow_service_->getWorkflow(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40402, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        int code = 40004;
+        if (result.error().find("权限不足") != std::string::npos ||
+            result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+            code = 40301;
+        } else if (result.error().find("不存在") != std::string::npos ||
+                   result.error().find("已删除") != std::string::npos ||
+                   result.error().find("not found") != std::string::npos) {
+            status = 404;
+            code = 40402;
+        }
+        sendError(std::move(callback), status, code, result.error());
         return;
     }
 
@@ -233,7 +248,20 @@ void WorkflowController::deleteWorkflow(
     auto result = workflow_service_->deleteWorkflow(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40402, result.error());
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
+        int status = 400;
+        int code = 40004;
+        if (result.error().find("权限不足") != std::string::npos ||
+            result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+            code = 40301;
+        } else if (result.error().find("不存在") != std::string::npos ||
+                   result.error().find("已删除") != std::string::npos ||
+                   result.error().find("not found") != std::string::npos) {
+            status = 404;
+            code = 40402;
+        }
+        sendError(std::move(callback), status, code, result.error());
         return;
     }
 
@@ -257,6 +285,7 @@ void WorkflowController::triggerWorkflow(
     }
 
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
 
     // Read param_overrides from request body
     nlohmann::json param_overrides = nlohmann::json::object();
@@ -265,13 +294,19 @@ void WorkflowController::triggerWorkflow(
         param_overrides = jsoncppToNlohmann((*json)["param_overrides"]);
     }
 
-    auto result = workflow_service_->triggerWorkflow(id, creator_id, param_overrides);
+    auto result = workflow_service_->triggerWorkflow(id, creator_id, role, param_overrides);
 
     if (!result.ok()) {
+        // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
         int status = 400;
         int code = 40004;
-        if (result.error().find("不存在") != std::string::npos ||
-            result.error().find("已删除") != std::string::npos) {
+        if (result.error().find("权限不足") != std::string::npos ||
+            result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+            code = 40301;
+        } else if (result.error().find("不存在") != std::string::npos ||
+                   result.error().find("已删除") != std::string::npos ||
+                   result.error().find("not found") != std::string::npos) {
             status = 404;
             code = 40402;
         }

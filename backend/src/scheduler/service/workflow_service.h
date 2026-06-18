@@ -28,7 +28,9 @@ public:
         const std::string& creator_id);
 
     // Get workflow by ID
-    common::result::Result<nlohmann::json> getWorkflow(const std::string& id);
+    // Fix #159: add user_id/role for resource-level permission check
+    common::result::Result<nlohmann::json> getWorkflow(
+        const std::string& id, const std::string& user_id, const std::string& role);
 
     // List workflows with pagination
     common::result::Result<nlohmann::json> listWorkflows(
@@ -49,8 +51,10 @@ public:
         const std::string& id, const std::string& user_id, const std::string& role);
 
     // Trigger workflow execution: create WorkflowInstance + TaskInstances
+    // Fix #159: add role for resource-level permission check
     common::result::Result<nlohmann::json> triggerWorkflow(
         const std::string& workflow_id, const std::string& creator_id,
+        const std::string& role,
         const nlohmann::json& param_overrides = nlohmann::json::object());
 
 private:

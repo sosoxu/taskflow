@@ -33,6 +33,9 @@ export interface TaskInstance {
   id: string
   workflow_instance_id: string
   task_id: string
+  // Fix #164/#165: node_id is returned by the backend but was missing from
+  // the type, forcing callers to use untyped access.
+  node_id: string
   task_version: number
   task_name: string
   status: TaskInstanceStatus

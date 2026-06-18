@@ -5,6 +5,8 @@
 #include <vector>
 #include <unordered_set>
 
+#include <nlohmann/json.hpp>
+
 #include "common/models/worker_info.h"
 #include "common/result/result.h"
 

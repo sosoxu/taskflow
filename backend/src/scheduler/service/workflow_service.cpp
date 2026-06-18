@@ -119,7 +119,8 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
     return fetchResult.value().toJson();
 }
 
-common::result::Result<nlohmann::json> WorkflowService::getWorkflow(const std::string& id) {
+common::result::Result<nlohmann::json> WorkflowService::getWorkflow(
+    const std::string& id, const std::string& user_id, const std::string& role) {
     auto result = workflow_dao_.findById(id);
     if (!result.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -127,6 +128,11 @@ common::result::Result<nlohmann::json> WorkflowService::getWorkflow(const std::s
     }
     if (result.value().deleted) {
         return common::result::Result<nlohmann::json>::failure("工作流不存在或已删除");
+    }
+    // Fix #159: resource-level permission check - non-admin users can only
+    // view their own workflows.
+    if (role != "admin" && result.value().creator_id != user_id) {
+        return common::result::Result<nlohmann::json>::failure("权限不足，只能查看自己创建的工作流");
     }
     return result.value().toJson();
 }
@@ -357,6 +363,7 @@ common::result::Result<void> WorkflowService::deleteWorkflow(
 
 common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
     const std::string& workflow_id, const std::string& creator_id,
+    const std::string& role,
     const nlohmann::json& param_overrides) {
 
     // 1. Find workflow by id
@@ -371,6 +378,12 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
     if (workflow.deleted) {
         return common::result::Result<nlohmann::json>::failure(
             "工作流不存在或已删除");
+    }
+
+    // Fix #159: resource-level permission check - non-admin users can only
+    // trigger their own workflows.
+    if (role != "admin" && workflow.creator_id != creator_id) {
+        return common::result::Result<nlohmann::json>::failure("权限不足，只能触发自己创建的工作流");
     }
 
     // 2. Create WorkflowInstance (status=PENDING, trigger_type="manual")

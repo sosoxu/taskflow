@@ -108,6 +108,18 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     const auto& workflow = workflow_result.value();
     const auto& dag_json = workflow.dag_json;
 
+    // Fix #155: Build node_id -> param_overrides map so timeout detection can
+    // honour node-level timeout overrides (验收标准 4.3).
+    std::map<std::string, nlohmann::json> node_param_overrides;
+    if (dag_json.contains("nodes") && dag_json["nodes"].is_array()) {
+        for (const auto& node : dag_json["nodes"]) {
+            if (node.contains("id") && node["id"].is_string() &&
+                node.contains("param_overrides") && node["param_overrides"].is_object()) {
+                node_param_overrides[node["id"].get<std::string>()] = node["param_overrides"];
+            }
+        }
+    }
+
     // 4. 检查超时的 RUNNING 任务
     for (const auto& ti : task_instances) {
         if (ti.status == "RUNNING" && !ti.started_at.empty()) {
@@ -117,7 +129,7 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
                 std::istringstream iss(ti.started_at);
                 iss >> std::get_time(&tm_started, "%Y-%m-%d %H:%M:%S");
                 if (!iss.fail()) {
-                    auto started_tp = std::chrono::system_clock::from_time_t(std::mktime(&tm_started));
+                    auto started_tp = std::chrono::system_clock::from_time_t(timegm(&tm_started));
                     auto now_tp = std::chrono::system_clock::now();
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - started_tp).count();
 
@@ -126,6 +138,14 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
                     int timeout = 3600;  // 默认超时
                     if (task_info_result.ok()) {
                         timeout = task_info_result.value().timeout;
+                    }
+                    // Fix #155: Apply node-level timeout override from param_overrides.
+                    auto npo_it = node_param_overrides.find(ti.node_id);
+                    if (npo_it != node_param_overrides.end()) {
+                        const auto& overrides = npo_it->second;
+                        if (overrides.contains("timeout") && overrides["timeout"].is_number_integer()) {
+                            timeout = overrides["timeout"].get<int>();
+                        }
                     }
 
                     if (elapsed > timeout) {
@@ -169,7 +189,7 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
                     std::istringstream iss(ti.finished_at);
                     iss >> std::get_time(&tm_finished, "%Y-%m-%d %H:%M:%S");
                     if (!iss.fail()) {
-                        auto finished_tp = std::chrono::system_clock::from_time_t(std::mktime(&tm_finished));
+                        auto finished_tp = std::chrono::system_clock::from_time_t(timegm(&tm_finished));
                         auto now_tp = std::chrono::system_clock::now();
                         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - finished_tp).count();
 
@@ -195,6 +215,53 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
             } else {
                 spdlog::error("DagDriver: failed to reset task instance {} for retry: {}",
                               ti.id, retry_result.error());
+            }
+        }
+    }
+
+    // Fix #149: When a previously-failed task succeeds after retry, reset its
+    // downstream UPSTREAM_FAILED tasks to PENDING so they can be rescheduled.
+    // Without this, downstream tasks stay stuck in UPSTREAM_FAILED forever
+    // because findReadyTasks/findBlockedTasks only pick PENDING tasks.
+    {
+        std::map<std::string, std::vector<std::string>> downstream_adj;
+        if (dag_json.contains("nodes") && dag_json["nodes"].is_array()) {
+            for (const auto& node : dag_json["nodes"]) {
+                if (node.contains("id") && node["id"].is_string()) {
+                    downstream_adj[node["id"].get<std::string>()] = {};
+                }
+            }
+        }
+        if (dag_json.contains("edges") && dag_json["edges"].is_array()) {
+            for (const auto& edge : dag_json["edges"]) {
+                if (edge.contains("source") && edge["source"].is_string() &&
+                    edge.contains("target") && edge["target"].is_string()) {
+                    downstream_adj[edge["source"].get<std::string>()].push_back(
+                        edge["target"].get<std::string>());
+                }
+            }
+        }
+        for (const auto& [node_id, status] : task_statuses) {
+            if (status != "SUCCESS") continue;
+            auto adj_it = downstream_adj.find(node_id);
+            if (adj_it == downstream_adj.end()) continue;
+            for (const auto& down_id : adj_it->second) {
+                auto ds_it = task_statuses.find(down_id);
+                if (ds_it != task_statuses.end() && ds_it->second == "UPSTREAM_FAILED") {
+                    auto inst_it = node_to_instance.find(down_id);
+                    if (inst_it != node_to_instance.end()) {
+                        auto reset = task_instance_dao_.resetForRetry(inst_it->second.id);
+                        if (reset.ok()) {
+                            task_statuses[down_id] = "PENDING";
+                            spdlog::info("DagDriver: reset downstream task instance {} (node {}) "
+                                         "to PENDING after upstream {} succeeded",
+                                         inst_it->second.id, down_id, node_id);
+                        } else {
+                            spdlog::error("DagDriver: failed to reset downstream task instance {}: {}",
+                                          inst_it->second.id, reset.error());
+                        }
+                    }
+                }
             }
         }
     }
@@ -476,6 +543,14 @@ common::result::Result<void> DagDriver::dispatchTask(
     request.set_workflow_instance_id(task_instance.workflow_instance_id);
     request.set_config_json(config.dump());
 
+    // Fix #155: Apply timeout override from param_overrides. The param_overrides
+    // (DAG node + instance runtime) have been merged into config above. If a
+    // "timeout" key is present, override the gRPC request's timeout field so
+    // the worker and scheduler use the node-level value (验收标准 4.3).
+    if (config.contains("timeout") && config["timeout"].is_number_integer()) {
+        request.set_timeout(config["timeout"].get<int>());
+    }
+
     taskflow::v1::TaskDispatchResponse response;
     // Fix #127: Retry DispatchTask on transient failures (UNAVAILABLE, DEADLINE_EXCEEDED)
     // with exponential backoff. A fresh ClientContext must be created for each
@@ -487,11 +562,25 @@ common::result::Result<void> DagDriver::dispatchTask(
     });
 
     if (!grpc_status.ok()) {
+        // Fix #148: Roll back task to PENDING so it can be rescheduled on the
+        // next drive cycle. Without this the task is stuck in DISPATCHED forever
+        // (findReadyTasks only picks PENDING, timeout check only covers RUNNING).
+        auto rollback = task_instance_dao_.resetForRetry(task_instance.id);
+        if (!rollback.ok()) {
+            spdlog::error("DagDriver: failed to roll back task instance {} after gRPC failure: {}",
+                          task_instance.id, rollback.error());
+        }
         return common::result::Result<void>::failure(
             "gRPC DispatchTask failed: " + grpc_status.error_message());
     }
 
     if (!response.accepted()) {
+        // Fix #148: Roll back task to PENDING when the worker rejects it.
+        auto rollback = task_instance_dao_.resetForRetry(task_instance.id);
+        if (!rollback.ok()) {
+            spdlog::error("DagDriver: failed to roll back task instance {} after worker rejection: {}",
+                          task_instance.id, rollback.error());
+        }
         return common::result::Result<void>::failure(
             "Worker rejected task: " + response.error_message());
     }
@@ -504,7 +593,9 @@ common::result::Result<void> DagDriver::dispatchTask(
     }
 
     // Increment worker's running_tasks immediately for accurate load balancing
-    auto update_tasks_result = worker_dao_.updateRunningTasks(worker.id, worker.running_tasks + 1);
+    // Fix #154: Use atomic SQL increment instead of read-modify-write to avoid
+    // racing with HeartbeatChecker (updateHeartbeat) and ReportTaskResult (decrementRunningTasks).
+    auto update_tasks_result = worker_dao_.incrementRunningTasks(worker.id);
     if (!update_tasks_result.ok()) {
         spdlog::warn("DagDriver: failed to update running_tasks for worker {}: {}",
                      worker.id, update_tasks_result.error());

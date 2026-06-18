@@ -34,6 +34,12 @@ public:
 
     common::result::Result<int> countAll();
 
+    // Fix #157: SQL-level filtering by creator_id for correct pagination.
+    common::result::Result<std::vector<common::models::WorkflowInstance>> listByCreator(
+        const std::string& creator_id, int offset, int limit);
+
+    common::result::Result<int> countByCreator(const std::string& creator_id);
+
     common::result::Result<std::vector<common::models::WorkflowInstance>> listActive();
 };
 

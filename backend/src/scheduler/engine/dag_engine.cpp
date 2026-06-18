@@ -45,6 +45,11 @@ common::result::Result<std::vector<std::vector<std::string>>> DagEngine::topolog
 
     for (const auto& node : nodes) {
         std::string id = node["id"].get<std::string>();
+        // Fix #158: Detect duplicate node IDs (operator[] silently overwrites).
+        if (adj.count(id)) {
+            return common::result::Result<std::vector<std::vector<std::string>>>::failure(
+                "Duplicate node ID: " + id);
+        }
         adj[id] = {};
         in_degree[id] = 0;
     }
@@ -53,6 +58,15 @@ common::result::Result<std::vector<std::vector<std::string>>> DagEngine::topolog
         for (const auto& edge : dag_json["edges"]) {
             std::string source = edge["source"].get<std::string>();
             std::string target = edge["target"].get<std::string>();
+            // Fix #158: Validate edge endpoints reference existing nodes.
+            if (adj.find(source) == adj.end()) {
+                return common::result::Result<std::vector<std::vector<std::string>>>::failure(
+                    "Edge source '" + source + "' does not reference an existing node ID");
+            }
+            if (in_degree.find(target) == in_degree.end()) {
+                return common::result::Result<std::vector<std::vector<std::string>>>::failure(
+                    "Edge target '" + target + "' does not reference an existing node ID");
+            }
             adj[source].push_back(target);
             in_degree[target]++;
         }

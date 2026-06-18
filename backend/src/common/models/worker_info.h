@@ -28,7 +28,10 @@ struct WorkerInfo {
         worker.memory_usage = row["memory_usage"].as<double>();
         worker.running_tasks = row["running_tasks"].as<int>();
         worker.max_tasks = row["max_tasks"].as<int>();
-        worker.resource_tags = nlohmann::json::parse(row["resource_tags"].as<std::string>());
+        // Fix #159: Handle NULL resource_tags gracefully (default to empty array).
+        worker.resource_tags = row["resource_tags"].is_null()
+            ? nlohmann::json::array()
+            : nlohmann::json::parse(row["resource_tags"].as<std::string>());
         worker.last_heartbeat = row["last_heartbeat"].as<std::string>();
         worker.registered_at = row["registered_at"].as<std::string>();
         return worker;
