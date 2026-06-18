@@ -51,8 +51,9 @@ void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
 
 }  // namespace
 
-InstanceController::InstanceController(std::shared_ptr<service::InstanceService> instance_service)
-    : instance_service_(std::move(instance_service)) {}
+InstanceController::InstanceController(std::shared_ptr<service::InstanceService> instance_service,
+                                       const std::string& jwt_secret)
+    : instance_service_(std::move(instance_service)), jwt_secret_(jwt_secret) {}
 
 void InstanceController::pauseInstance(
     const drogon::HttpRequestPtr&,

@@ -246,7 +246,7 @@ int main(int argc, char* argv[]) {
     drogon::app().registerController(workflowCtrl);
 
     auto instance_service = std::make_shared<taskflow::scheduler::service::InstanceService>();
-    auto instanceCtrl = std::make_shared<taskflow::scheduler::api::InstanceController>(instance_service);
+    auto instanceCtrl = std::make_shared<taskflow::scheduler::api::InstanceController>(instance_service, config.auth.jwt_secret);
     drogon::app().registerController(instanceCtrl);
 
     auto worker_dao = std::make_shared<taskflow::scheduler::dao::WorkerDao>();

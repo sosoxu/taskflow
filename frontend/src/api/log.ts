@@ -6,5 +6,6 @@ export function getTaskLogs(instanceId: string, taskInstanceId: string) {
 
 export function getTaskLogStreamUrl(instanceId: string, taskInstanceId: string): string {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
-  return `${baseUrl}/api/v1/instances/${instanceId}/tasks/${taskInstanceId}/logs/stream`
+  const token = localStorage.getItem('access_token')
+  return `${baseUrl}/api/v1/instances/${instanceId}/tasks/${taskInstanceId}/logs/stream?token=${encodeURIComponent(token || '')}`
 }

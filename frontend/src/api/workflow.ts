@@ -20,6 +20,10 @@ export function deleteWorkflow(id: string) {
   return request.delete(`/api/v1/workflows/${id}`)
 }
 
-export function triggerWorkflow(id: string) {
-  return request.post(`/api/v1/workflows/${id}/trigger`)
+export function triggerWorkflow(id: string, paramOverrides?: Record<string, unknown>) {
+  const data: Record<string, unknown> = {}
+  if (paramOverrides && Object.keys(paramOverrides).length > 0) {
+    data.param_overrides = paramOverrides
+  }
+  return request.post(`/api/v1/workflows/${id}/trigger`, data)
 }

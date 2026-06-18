@@ -374,7 +374,7 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(int pag
     }
 
     return nlohmann::json{
-        {"instances", instances},
+        {"items", instances},
         {"page", page},
         {"page_size", page_size},
         {"total", total}

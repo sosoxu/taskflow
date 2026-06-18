@@ -29,7 +29,16 @@ void AuthFilter::doFilter(
 
     // 提取 Authorization 头
     auto auth_header = req->getHeader("authorization");
-    if (auth_header.empty() || auth_header.find("Bearer ") != 0) {
+    std::string token;
+
+    if (!auth_header.empty() && auth_header.find("Bearer ") == 0) {
+        token = auth_header.substr(7);  // "Bearer " 长度为 7
+    } else {
+        // SSE (EventSource) doesn't support custom headers, allow token via query parameter
+        token = std::string(req->getParameter("token"));
+    }
+
+    if (token.empty()) {
         Json::Value resp;
         resp["code"] = 40101;
         resp["message"] = "未认证";
@@ -39,8 +48,6 @@ void AuthFilter::doFilter(
         fcb(httpResp);
         return;
     }
-
-    std::string token = auth_header.substr(7);  // "Bearer " 长度为 7
 
     auto result = common::util::JwtUtil::verifyToken(token, jwt_secret_);
     if (!result.ok()) {

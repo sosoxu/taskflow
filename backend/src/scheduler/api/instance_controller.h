@@ -8,7 +8,8 @@ namespace taskflow::scheduler::api {
 
 class InstanceController : public drogon::HttpController<InstanceController, false> {
 public:
-    explicit InstanceController(std::shared_ptr<service::InstanceService> instance_service);
+    InstanceController(std::shared_ptr<service::InstanceService> instance_service,
+                       const std::string& jwt_secret = "");
 
     METHOD_LIST_BEGIN
     ADD_METHOD_TO(InstanceController::pauseInstance, "/api/v1/instances/{id}/pause", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
@@ -68,6 +69,7 @@ public:
 
 private:
     std::shared_ptr<service::InstanceService> instance_service_;
+    std::string jwt_secret_;
 };
 
 }  // namespace taskflow::scheduler::api
