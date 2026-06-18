@@ -13,7 +13,8 @@ public:
     AuthService(const std::string& jwt_secret, int access_ttl, int refresh_ttl);
 
     common::result::Result<nlohmann::json> registerUser(
-        const std::string& username, const std::string& password);
+        const std::string& username, const std::string& password,
+        const std::string& role = "");
 
     common::result::Result<nlohmann::json> login(
         const std::string& username, const std::string& password);

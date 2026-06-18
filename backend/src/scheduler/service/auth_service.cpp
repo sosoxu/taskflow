@@ -10,7 +10,8 @@ AuthService::AuthService(const std::string& jwt_secret, int access_ttl, int refr
     : jwt_secret_(jwt_secret), access_ttl_(access_ttl), refresh_ttl_(refresh_ttl) {}
 
 common::result::Result<nlohmann::json> AuthService::registerUser(
-    const std::string& username, const std::string& password) {
+    const std::string& username, const std::string& password,
+    const std::string& role) {
 
     // Validate username length (3-32 chars)
     if (username.length() < 3 || username.length() > 32) {
@@ -22,6 +23,12 @@ common::result::Result<nlohmann::json> AuthService::registerUser(
     if (password.length() < 8) {
         return common::result::Result<nlohmann::json>::failure(
             "Password must be at least 8 characters");
+    }
+
+    // Determine role: use provided role if valid, otherwise default to "operator"
+    std::string user_role = "operator";
+    if (!role.empty() && (role == "admin" || role == "operator" || role == "viewer")) {
+        user_role = role;
     }
 
     // Check username uniqueness
@@ -38,8 +45,8 @@ common::result::Result<nlohmann::json> AuthService::registerUser(
             "Failed to hash password: " + hashResult.error());
     }
 
-    // Create user with default role "operator"
-    auto createResult = user_dao_.create(username, hashResult.value(), "operator");
+    // Create user with specified or default role
+    auto createResult = user_dao_.create(username, hashResult.value(), user_role);
     if (!createResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
             "Failed to create user: " + createResult.error());

@@ -33,10 +33,27 @@ void AuthFilter::doFilter(
 
     if (!auth_header.empty() && auth_header.find("Bearer ") == 0) {
         token = auth_header.substr(7);  // "Bearer " 长度为 7
-    } else if (path.size() >= 13 && path.substr(path.size() - 13) == "/logs/stream") {
+    } else if (path.size() >= 12 && path.substr(path.size() - 12) == "/logs/stream") {
         // SSE (EventSource) doesn't support custom headers, allow token via query parameter
         // Only allowed for SSE stream endpoints to minimize security risk
-        token = std::string(req->getParameter("token"));
+        const auto& param_token = req->getParameter("token");
+        if (!param_token.empty()) {
+            token = param_token;
+        } else {
+            std::string query = std::string(req->query());
+            if (!query.empty()) {
+                size_t token_pos = query.find("token=");
+                if (token_pos != std::string::npos) {
+                    size_t value_start = token_pos + 6;
+                    size_t value_end = query.find('&', value_start);
+                    if (value_end == std::string::npos) {
+                        token = query.substr(value_start);
+                    } else {
+                        token = query.substr(value_start, value_end - value_start);
+                    }
+                }
+            }
+        }
     }
 
     if (token.empty()) {

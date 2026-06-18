@@ -7,16 +7,25 @@ namespace taskflow::scheduler::dao {
 
 common::result::Result<std::string> CronJobDao::create(
     const std::string& workflow_id,
-    const std::string& cron_expression) {
+    const std::string& cron_expression,
+    const std::string& next_trigger_time) {
 
     auto id = common::util::generateUuid();
 
     auto result = common::database::DatabaseManager::instance().withTransaction<std::string>(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
-            auto res = txn.exec_params(
-                "INSERT INTO cron_jobs (id, workflow_id, cron_expression, enabled, next_trigger_time) "
-                "VALUES ($1, $2, $3, true, NULL) RETURNING id",
-                id, workflow_id, cron_expression);
+            pqxx::result res;
+            if (next_trigger_time.empty()) {
+                res = txn.exec_params(
+                    "INSERT INTO cron_jobs (id, workflow_id, cron_expression, enabled, next_trigger_time) "
+                    "VALUES ($1, $2, $3, true, NULL) RETURNING id",
+                    id, workflow_id, cron_expression);
+            } else {
+                res = txn.exec_params(
+                    "INSERT INTO cron_jobs (id, workflow_id, cron_expression, enabled, next_trigger_time) "
+                    "VALUES ($1, $2, $3, true, $4::timestamptz) RETURNING id",
+                    id, workflow_id, cron_expression, next_trigger_time);
+            }
 
             if (res.empty()) {
                 return common::result::Result<std::string>::failure("创建 CronJob 失败");
@@ -129,6 +138,23 @@ common::result::Result<std::vector<common::models::CronJob>> CronJobDao::listDue
                 "AND next_trigger_time <= $1::timestamptz "
                 "ORDER BY next_trigger_time",
                 current_time);
+
+            std::vector<common::models::CronJob> jobs;
+            for (const auto& row : res) {
+                jobs.push_back(common::models::CronJob::fromRow(row));
+            }
+
+            return jobs;
+        });
+}
+
+common::result::Result<std::vector<common::models::CronJob>> CronJobDao::listNullTriggerTime() {
+
+    return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::CronJob>>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::CronJob>> {
+            auto res = txn.exec_params(
+                "SELECT * FROM cron_jobs WHERE enabled = true "
+                "AND next_trigger_time IS NULL");
 
             std::vector<common::models::CronJob> jobs;
             for (const auto& row : res) {

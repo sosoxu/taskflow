@@ -201,6 +201,8 @@ int main(int argc, char* argv[]) {
         std::string arg = argv[i];
         if (arg == "--config" && i + 1 < argc) {
             config_path = argv[++i];
+        } else if (arg.find("--config=") == 0) {
+            config_path = arg.substr(9);
         }
     }
 

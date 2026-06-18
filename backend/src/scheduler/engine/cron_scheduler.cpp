@@ -77,6 +77,17 @@ void CronScheduler::cronLoop() {
 
         std::string current_time = formatCurrentTime();
 
+        // Fix cron jobs with NULL next_trigger_time (legacy data)
+        auto null_result = cron_job_dao_.listNullTriggerTime();
+        if (null_result.ok()) {
+            for (const auto& job : null_result.value()) {
+                std::string next_time = computeNextTriggerTime(job.cron_expression);
+                cron_job_dao_.updateNextTriggerTime(job.id, next_time);
+                spdlog::info("CronScheduler: fixed NULL next_trigger_time for cron job {} to {}",
+                             job.id, next_time);
+            }
+        }
+
         auto due_result = cron_job_dao_.listDue(current_time);
         if (!due_result.ok()) {
             spdlog::error("CronScheduler: failed to list due jobs: {}",

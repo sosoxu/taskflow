@@ -386,12 +386,46 @@ common::result::Result<void> DagDriver::dispatchTask(
         spdlog::warn("DagDriver: failed to merge workflow instance param_overrides: {}", e.what());
     }
 
-    // Resolve ${var} placeholders in config using task.parameters_json
+    // Resolve ${var} placeholders in config using task.parameters_json + param_overrides
     try {
         nlohmann::json params = task.parameters_json;
-        if (params.is_object()) {
-            resolvePlaceholders(config, params);
+        if (!params.is_object()) {
+            params = nlohmann::json::object();
         }
+
+        // Merge DAG node param_overrides into params (override default parameters)
+        try {
+            const auto& dag = workflow.dag_json;
+            if (dag.contains("nodes") && dag["nodes"].is_array()) {
+                for (const auto& node : dag["nodes"]) {
+                    if (node.contains("task_id") && node["task_id"].is_string() &&
+                        node["task_id"].get<std::string>() == task_instance.task_id) {
+                        if (node.contains("param_overrides") && node["param_overrides"].is_object()) {
+                            for (auto& [key, value] : node["param_overrides"].items()) {
+                                params[key] = value;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            spdlog::warn("DagDriver: failed to merge DAG node param_overrides into params: {}", e.what());
+        }
+
+        // Merge WorkflowInstance param_overrides into params (highest priority, runtime overrides)
+        try {
+            auto instance_result = workflow_instance_dao_.findById(task_instance.workflow_instance_id);
+            if (instance_result.ok() && instance_result.value().param_overrides.is_object()) {
+                for (auto& [key, value] : instance_result.value().param_overrides.items()) {
+                    params[key] = value;
+                }
+            }
+        } catch (const std::exception& e) {
+            spdlog::warn("DagDriver: failed to merge workflow instance param_overrides into params: {}", e.what());
+        }
+
+        resolvePlaceholders(config, params);
     } catch (const std::exception& e) {
         spdlog::warn("DagDriver: failed to resolve placeholders: {}", e.what());
     }

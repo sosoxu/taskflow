@@ -52,13 +52,14 @@ void AuthController::registerUser(
 
     std::string username = (*json)["username"].asString();
     std::string password = (*json)["password"].asString();
+    std::string role = (*json).get("role", "").asString();
 
     if (username.empty() || password.empty()) {
         sendError(std::move(callback), 400, 40002, "Username and password are required");
         return;
     }
 
-    auto result = auth_service_->registerUser(username, password);
+    auto result = auth_service_->registerUser(username, password, role);
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40003, result.error());
         return;

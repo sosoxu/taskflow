@@ -75,6 +75,10 @@ common::result::Result<nlohmann::json> TaskService::getTask(const std::string& i
     }
 
     const auto& task = taskResult.value();
+    if (task.deleted) {
+        return common::result::Result<nlohmann::json>::failure("任务不存在或已删除");
+    }
+
     auto taskJson = task.toJson();
     taskJson["config_json"] = maskSensitiveFields(taskJson["config_json"], task.type);
 
@@ -133,6 +137,9 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     }
 
     const auto& existing_task = existingTaskResult.value();
+    if (existing_task.deleted) {
+        return common::result::Result<nlohmann::json>::failure("任务不存在或已删除");
+    }
     if (role != "admin" && existing_task.creator_id != user_id) {
         return common::result::Result<nlohmann::json>::failure("权限不足，只能编辑自己创建的任务");
     }
@@ -196,6 +203,9 @@ common::result::Result<void> TaskService::deleteTask(
     }
 
     const auto& task = taskResult.value();
+    if (task.deleted) {
+        return common::result::Result<void>::failure("任务不存在或已删除");
+    }
     if (role != "admin" && task.creator_id != user_id) {
         return common::result::Result<void>::failure("权限不足，只能删除自己创建的任务");
     }

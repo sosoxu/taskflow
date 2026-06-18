@@ -101,7 +101,8 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
                 "Invalid cron expression: " + cronValidateResult.error());
         }
 
-        auto cronResult = cron_job_dao_.create(createResult.value(), cron_expression);
+        auto cronResult = cron_job_dao_.create(
+            createResult.value(), cron_expression, cronValidateResult.value());
         if (!cronResult.ok()) {
             return common::result::Result<nlohmann::json>::failure(
                 "Failed to create cron job: " + cronResult.error());
@@ -261,8 +262,16 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
                 return common::result::Result<nlohmann::json>::failure(
                     "Failed to update cron job: " + cronUpdateResult.error());
             }
+            // Update next_trigger_time when cron expression changes
+            auto nextTriggerResult = cron_job_dao_.updateNextTriggerTime(
+                cronJobResult.value().id, cronValidateResult.value());
+            if (!nextTriggerResult.ok()) {
+                return common::result::Result<nlohmann::json>::failure(
+                    "Failed to update cron next trigger time: " + nextTriggerResult.error());
+            }
         } else {
-            auto cronCreateResult = cron_job_dao_.create(id, cron_expression);
+            auto cronCreateResult = cron_job_dao_.create(
+                id, cron_expression, cronValidateResult.value());
             if (!cronCreateResult.ok()) {
                 return common::result::Result<nlohmann::json>::failure(
                     "Failed to create cron job: " + cronCreateResult.error());
