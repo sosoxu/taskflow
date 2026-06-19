@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <thread>
 #include <chrono>
 
@@ -20,6 +21,14 @@ struct LogDirFixture2 {
     }
 };
 
+// Fix #243: Helper to read a task log file content for output verification.
+static std::string readTaskLog(const std::string& task_instance_id) {
+    std::ifstream log_file(TEST_LOG_DIR + "/" + task_instance_id + ".log");
+    if (!log_file.is_open()) return "";
+    return std::string((std::istreambuf_iterator<char>(log_file)),
+                       std::istreambuf_iterator<char>());
+}
+
 // ============================================================================
 // CommandExecutor env_vars 测试
 // 验收指标：
@@ -30,6 +39,8 @@ struct LogDirFixture2 {
 // ============================================================================
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars single variable", "[command_env]") {
+    // Fix #243: 原测试只检查 status==SUCCESS，不读取日志验证环境变量值。
+    // 现在读取日志验证 $MY_TEST_VAR 确实被替换为 "hello_env"。
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo $MY_TEST_VAR";
@@ -38,9 +49,14 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars single variable", "[
     auto result = executor.execute("env-test-1", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("env-test-1");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("hello_env") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars multiple variables", "[command_env]") {
+    // Fix #243: 验证多个环境变量同时设置并在子进程中可用
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo $VAR_A $VAR_B $VAR_C";
@@ -49,9 +65,16 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars multiple variables",
     auto result = executor.execute("env-test-2", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("env-test-2");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("alpha") != std::string::npos);
+    REQUIRE(log.find("beta") != std::string::npos);
+    REQUIRE(log.find("gamma") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars with special characters", "[command_env]") {
+    // Fix #243: 验证含特殊字符的环境变量值正确传递
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo $SPECIAL_VAR";
@@ -60,6 +83,10 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars with special charact
     auto result = executor.execute("env-test-3", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("env-test-3");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("hello=world&foo=bar") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: empty env_vars does not affect execution", "[command_env]") {
@@ -71,6 +98,10 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: empty env_vars does not affec
     auto result = executor.execute("env-test-4", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("env-test-4");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("no_env") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: no env_vars field does not affect execution", "[command_env]") {
@@ -81,6 +112,10 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: no env_vars field does not af
     auto result = executor.execute("env-test-5", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("env-test-5");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("no_env_field") != std::string::npos);
 }
 
 // ============================================================================
@@ -93,6 +128,7 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: no env_vars field does not af
 // ============================================================================
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: working_dir /tmp", "[command_workdir]") {
+    // Fix #243: 验证 pwd 输出确实是 /tmp
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "pwd";
@@ -101,9 +137,14 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: working_dir /tmp", "[command_
     auto result = executor.execute("workdir-test-1", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("workdir-test-1");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("/tmp") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: working_dir /var/log", "[command_workdir]") {
+    // Fix #243: 验证 pwd 输出确实是 /var/log
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "pwd";
@@ -112,6 +153,10 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: working_dir /var/log", "[comm
     auto result = executor.execute("workdir-test-2", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("workdir-test-2");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("/var/log") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: invalid working_dir returns FAILED", "[command_workdir]") {
@@ -148,6 +193,7 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: no working_dir field does not
 // ============================================================================
 
 TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars and working_dir combined", "[command_combined]") {
+    // Fix #243: 验证 env_vars 和 working_dir 同时生效
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo $COMBINED_VAR";
@@ -157,6 +203,10 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars and working_dir comb
     auto result = executor.execute("combined-test-1", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("combined-test-1");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("combined_test") != std::string::npos);
 }
 
 // ============================================================================
@@ -164,6 +214,7 @@ TEST_CASE_METHOD(LogDirFixture2, "CommandExecutor: env_vars and working_dir comb
 // ============================================================================
 
 TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: env_vars in script", "[script_env]") {
+    // Fix #243: 验证脚本中环境变量可用
     ScriptExecutor executor;
     nlohmann::json config;
     config["script_content"] = "#!/bin/bash\necho $SCRIPT_ENV_VAR";
@@ -172,9 +223,14 @@ TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: env_vars in script", "[script_
     auto result = executor.execute("script-env-1", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("script-env-1");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("script_env_value") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: working_dir in script", "[script_workdir]") {
+    // Fix #243: 验证脚本中 pwd 输出为 /tmp
     ScriptExecutor executor;
     nlohmann::json config;
     config["script_content"] = "#!/bin/bash\npwd";
@@ -183,9 +239,14 @@ TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: working_dir in script", "[scri
     auto result = executor.execute("script-workdir-1", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("script-workdir-1");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("/tmp") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: env_vars and working_dir combined", "[script_combined]") {
+    // Fix #243: 验证脚本中 env_vars 和 working_dir 同时生效
     ScriptExecutor executor;
     nlohmann::json config;
     config["script_content"] = "#!/bin/bash\npwd\necho $COMBINED_SCRIPT_VAR";
@@ -195,6 +256,11 @@ TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: env_vars and working_dir combi
     auto result = executor.execute("script-combined-1", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "SUCCESS");
     REQUIRE(result.exit_code == 0);
+
+    std::string log = readTaskLog("script-combined-1");
+    REQUIRE_FALSE(log.empty());
+    REQUIRE(log.find("/tmp") != std::string::npos);
+    REQUIRE(log.find("combined_script_value") != std::string::npos);
 }
 
 TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: invalid working_dir returns FAILED", "[script_workdir]") {

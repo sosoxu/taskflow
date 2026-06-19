@@ -9,6 +9,29 @@ PASS=0
 FAIL=0
 ISSUES=()
 
+# Fix #246: 测试数据清理。原脚本创建测试用户但不清理，重复运行时因
+# 用户名重复（"already exists"）导致注册相关断言失败。
+# cleanup 函数在脚本退出时（正常或异常）删除所有测试创建的用户。
+CLEANUP_USERS="user1 viewer1 testadmin2 operatorb publicuser todelete"
+cleanup() {
+    local exit_code=$?
+    echo -e "\n${YELLOW}========================================${NC}"
+    echo -e "${YELLOW}清理测试数据${NC}"
+    echo -e "${YELLOW}========================================${NC}"
+    for username in $CLEANUP_USERS; do
+        PGPASSWORD=taskflow123 psql -h localhost -U taskflow -d taskflow \
+            -c "DELETE FROM users WHERE username='$username';" >/dev/null 2>&1
+    done
+    # 清理测试创建的任务和工作流（按名称匹配）
+    PGPASSWORD=taskflow123 psql -h localhost -U taskflow -d taskflow \
+        -c "DELETE FROM tasks WHERE name IN ('cmd-task-1','script-task-1','sql-task-1','crud-task','crud-task-updated','admin-task','operator-a-task','viewer-to-op-task','bad-task');" >/dev/null 2>&1
+    PGPASSWORD=taskflow123 psql -h localhost -U taskflow -d taskflow \
+        -c "DELETE FROM workflows WHERE name IN ('test-workflow-1','bad-workflow','trigger-workflow');" >/dev/null 2>&1
+    echo -e "${GREEN}清理完成${NC}"
+    exit $exit_code
+}
+trap cleanup EXIT
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

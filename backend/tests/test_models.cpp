@@ -268,16 +268,26 @@ TEST_CASE("WorkflowInstance: default values", "[model_workflow_instance]") {
     WorkflowInstance wi;
     REQUIRE(wi.status.empty());
     REQUIRE(wi.trigger_type.empty());
+    REQUIRE(wi.workflow_version == 0);
+    REQUIRE(wi.id.empty());
+    REQUIRE(wi.workflow_id.empty());
+    REQUIRE(wi.creator_id.empty());
+    REQUIRE(wi.started_at.empty());
+    REQUIRE(wi.finished_at.empty());
+    REQUIRE(wi.created_at.empty());
 }
 
 TEST_CASE("WorkflowInstance: toJson contains all fields", "[model_workflow_instance]") {
+    // Fix #242: 原测试设置了 created_at 但未验证 toJson 输出，且未设置/验证
+    // workflow_version 字段。toJson() 输出包含 workflow_version 和 created_at。
     WorkflowInstance wi;
     wi.id = "wi-001";
     wi.workflow_id = "wf-001";
+    wi.workflow_version = 3;
     wi.status = "SUCCESS";
     wi.trigger_type = "manual";
     wi.creator_id = "user-001";
-    wi.param_overrides = nlohmann::json::object();
+    wi.param_overrides = nlohmann::json::object({{"key", "val"}});
     wi.started_at = "2025-01-01T00:00:01Z";
     wi.finished_at = "2025-01-01T00:00:10Z";
     wi.created_at = "2025-01-01T00:00:00Z";
@@ -285,7 +295,29 @@ TEST_CASE("WorkflowInstance: toJson contains all fields", "[model_workflow_insta
     auto j = wi.toJson();
     REQUIRE(j["id"] == "wi-001");
     REQUIRE(j["workflow_id"] == "wf-001");
+    REQUIRE(j["workflow_version"] == 3);
     REQUIRE(j["status"] == "SUCCESS");
     REQUIRE(j["trigger_type"] == "manual");
     REQUIRE(j["creator_id"] == "user-001");
+    REQUIRE(j["param_overrides"]["key"] == "val");
+    REQUIRE(j["started_at"] == "2025-01-01T00:00:01Z");
+    REQUIRE(j["finished_at"] == "2025-01-01T00:00:10Z");
+    REQUIRE(j["created_at"] == "2025-01-01T00:00:00Z");
+}
+
+TEST_CASE("WorkflowInstance: toJson with default param_overrides", "[model_workflow_instance]") {
+    // Fix #242: 验证 param_overrides 默认值（空 JSON）正确序列化
+    WorkflowInstance wi;
+    wi.id = "wi-002";
+    wi.workflow_id = "wf-002";
+    wi.status = "PENDING";
+    wi.trigger_type = "cron";
+
+    auto j = wi.toJson();
+    REQUIRE(j["id"] == "wi-002");
+    REQUIRE(j["workflow_version"] == 0);
+    REQUIRE(j["status"] == "PENDING");
+    REQUIRE(j["trigger_type"] == "cron");
+    // param_overrides 默认构造为 null（nlohmann::json 默认），toJson 直接输出
+    REQUIRE(j.contains("param_overrides"));
 }

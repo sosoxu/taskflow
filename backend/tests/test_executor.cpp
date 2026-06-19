@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <thread>
 #include <chrono>
 #include <sys/stat.h>
@@ -21,7 +22,7 @@ namespace fs = std::filesystem;
 //   2. 执行失败命令返回 exit_code!=0, status=FAILED
 //   3. 缺少 command 参数返回 FAILED
 //   4. 超时命令返回 status=TIMEOUT
-//   5. 使用 execvp 而非 shell 执行
+//   5. 使用 /bin/sh -c 执行（支持 shell 操作符 &&, ||, |, ; 等）
 // ============================================================================
 
 // Helper to create log directory before tests
@@ -80,16 +81,47 @@ TEST_CASE_METHOD(LogDirFixture, "CommandExecutor: timeout", "[command_executor]"
     REQUIRE(result.status == "TIMEOUT");
 }
 
-TEST_CASE_METHOD(LogDirFixture, "CommandExecutor: execvp does not interpret shell metacharacters", "[command_executor]") {
+// §6.2 验收指标 5: 使用 /bin/sh -c 执行（支持 shell 操作符）
+// Fix #237: 实现使用 /bin/sh -c，会解释 shell 元字符 (&&, ||, |, ; 等)。
+// 原测试名称 "execvp does not interpret shell metacharacters" 与实现矛盾，
+// 且断言接受 SUCCESS 或 FAILED 两种结果，无法验证任何行为。
+TEST_CASE_METHOD(LogDirFixture, "CommandExecutor: /bin/sh -c interprets shell metacharacters", "[command_executor]") {
     CommandExecutor executor;
     nlohmann::json config;
-    // With execvp, "&&" is treated as a literal argument, not a shell operator
-    config["command"] = "/bin/echo hello && echo world";
+    // "&&" 是 shell 操作符：echo hello 成功后才会执行 echo world
+    config["command"] = "/bin/echo hello && /bin/echo world";
 
     auto result = executor.execute("test-instance-6", config, 5, TEST_LOG_DIR);
-    // execvp will pass "&&" and "echo" and "world" as arguments to /bin/echo
-    // This demonstrates that shell injection doesn't work
-    REQUIRE((result.status == "SUCCESS" || result.status == "FAILED"));
+    // shell 解释了 &&，整条命令成功执行
+    REQUIRE(result.status == "SUCCESS");
+    REQUIRE(result.exit_code == 0);
+
+    // 读取日志验证两个 echo 都执行了（shell 解释 && 的证据）
+    std::ifstream log_file(TEST_LOG_DIR + "/test-instance-6.log");
+    REQUIRE(log_file.is_open());
+    std::string content((std::istreambuf_iterator<char>(log_file)),
+                        std::istreambuf_iterator<char>());
+    REQUIRE(content.find("hello") != std::string::npos);
+    REQUIRE(content.find("world") != std::string::npos);
+}
+
+TEST_CASE_METHOD(LogDirFixture, "CommandExecutor: shell short-circuit operator stops on failure", "[command_executor]") {
+    // Fix #237: 进一步验证 shell 元字符被解释 —— "||" 短路逻辑
+    CommandExecutor executor;
+    nlohmann::json config;
+    // false 失败后，由于 ||，会执行 /bin/echo fallback
+    config["command"] = "/bin/false || /bin/echo fallback_ran";
+
+    auto result = executor.execute("test-instance-7", config, 5, TEST_LOG_DIR);
+    // 整条命令因 echo 成功而返回 0
+    REQUIRE(result.status == "SUCCESS");
+    REQUIRE(result.exit_code == 0);
+
+    std::ifstream log_file(TEST_LOG_DIR + "/test-instance-7.log");
+    REQUIRE(log_file.is_open());
+    std::string content((std::istreambuf_iterator<char>(log_file)),
+                        std::istreambuf_iterator<char>());
+    REQUIRE(content.find("fallback_ran") != std::string::npos);
 }
 
 // ============================================================================
