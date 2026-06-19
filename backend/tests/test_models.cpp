@@ -321,3 +321,194 @@ TEST_CASE("WorkflowInstance: toJson with default param_overrides", "[model_workf
     // param_overrides 默认构造为 null（nlohmann::json 默认），toJson 直接输出
     REQUIRE(j.contains("param_overrides"));
 }
+
+// ============================================================================
+// Fix #256: WorkerInfo/User/TaskInstance toJson 完整字段验证
+// 验收指标：
+//   1. WorkerInfo toJson 包含 cpu_usage/memory_usage/resource_tags/last_heartbeat/registered_at
+//   2. User toJson 包含 password_hash
+//   3. User toSafeJson 不含 password_hash
+//   4. TaskInstance toJson 包含 started_at/finished_at/error_message/created_at
+// ============================================================================
+
+TEST_CASE("WorkerInfo: toJson includes all 11 fields", "[model_worker_full]") {
+    // Fix #256: 验证 WorkerInfo toJson 输出全部 11 个字段
+    WorkerInfo w;
+    w.id = "worker-full";
+    w.name = "worker-full-name";
+    w.address = "10.0.0.1:50052";
+    w.status = "online";
+    w.cpu_usage = 75.5;
+    w.memory_usage = 82.3;
+    w.running_tasks = 5;
+    w.max_tasks = 20;
+    w.resource_tags = {{"gpu", "A100"}, {"zone", "us-east-1a"}};
+    w.last_heartbeat = "2025-06-20T10:00:00Z";
+    w.registered_at = "2025-01-01T00:00:00Z";
+
+    auto j = w.toJson();
+
+    // 验证全部 11 个字段
+    REQUIRE(j["id"] == "worker-full");
+    REQUIRE(j["name"] == "worker-full-name");
+    REQUIRE(j["address"] == "10.0.0.1:50052");
+    REQUIRE(j["status"] == "online");
+    REQUIRE(j["cpu_usage"] == 75.5);
+    REQUIRE(j["memory_usage"] == 82.3);
+    REQUIRE(j["running_tasks"] == 5);
+    REQUIRE(j["max_tasks"] == 20);
+    REQUIRE(j["resource_tags"]["gpu"] == "A100");
+    REQUIRE(j["resource_tags"]["zone"] == "us-east-1a");
+    REQUIRE(j["last_heartbeat"] == "2025-06-20T10:00:00Z");
+    REQUIRE(j["registered_at"] == "2025-01-01T00:00:00Z");
+
+    // 确保恰好 11 个字段
+    REQUIRE(j.size() == 11);
+}
+
+TEST_CASE("WorkerInfo: toJson with default resource_tags", "[model_worker_full]") {
+    // Fix #256: 验证 resource_tags 默认值（null）正确输出
+    WorkerInfo w;
+    w.id = "worker-default-tags";
+    w.name = "worker-default";
+    w.address = "localhost:50052";
+    w.status = "online";
+
+    auto j = w.toJson();
+    REQUIRE(j.contains("resource_tags"));
+    REQUIRE(j["cpu_usage"] == 0.0);
+    REQUIRE(j["memory_usage"] == 0.0);
+    REQUIRE(j["last_heartbeat"] == "");
+    REQUIRE(j["registered_at"] == "");
+}
+
+TEST_CASE("User: toJson includes password_hash", "[model_user_full]") {
+    // Fix #256: 验证 toJson 包含 password_hash 字段
+    User u;
+    u.id = "user-full";
+    u.username = "admin_user";
+    u.password_hash = "$2b$12$somebcrypt_hash_value_here";
+    u.role = "admin";
+    u.created_at = "2025-01-01T00:00:00Z";
+    u.updated_at = "2025-06-20T10:00:00Z";
+
+    auto j = u.toJson();
+    REQUIRE(j["id"] == "user-full");
+    REQUIRE(j["username"] == "admin_user");
+    REQUIRE(j["password_hash"] == "$2b$12$somebcrypt_hash_value_here");
+    REQUIRE(j["role"] == "admin");
+    REQUIRE(j["created_at"] == "2025-01-01T00:00:00Z");
+    REQUIRE(j["updated_at"] == "2025-06-20T10:00:00Z");
+
+    // toJson 应包含 6 个字段（含 password_hash）
+    REQUIRE(j.size() == 6);
+    REQUIRE(j.contains("password_hash"));
+}
+
+TEST_CASE("User: toSafeJson excludes password_hash", "[model_user_safe]") {
+    // Fix #256: 验证 toSafeJson 不包含 password_hash 字段
+    User u;
+    u.id = "user-safe";
+    u.username = "safe_user";
+    u.password_hash = "$2b$12$secret_hash_should_not_leak";
+    u.role = "viewer";
+    u.created_at = "2025-01-01T00:00:00Z";
+    u.updated_at = "2025-06-20T10:00:00Z";
+
+    auto j = u.toSafeJson();
+    REQUIRE(j["id"] == "user-safe");
+    REQUIRE(j["username"] == "safe_user");
+    REQUIRE(j["role"] == "viewer");
+    REQUIRE(j["created_at"] == "2025-01-01T00:00:00Z");
+    REQUIRE(j["updated_at"] == "2025-06-20T10:00:00Z");
+
+    // toSafeJson 应不包含 password_hash
+    REQUIRE_FALSE(j.contains("password_hash"));
+
+    // toSafeJson 应包含 5 个字段（不含 password_hash）
+    REQUIRE(j.size() == 5);
+}
+
+TEST_CASE("User: toJson vs toSafeJson difference", "[model_user_safe]") {
+    // Fix #256: 对比 toJson 和 toSafeJson，唯一区别是 password_hash
+    User u;
+    u.id = "user-diff";
+    u.username = "diff_user";
+    u.password_hash = "$pbkdf2-sha256$i=10000$abc$def";
+    u.role = "operator";
+    u.created_at = "2025-01-01T00:00:00Z";
+    u.updated_at = "2025-06-20T10:00:00Z";
+
+    auto full = u.toJson();
+    auto safe = u.toSafeJson();
+
+    // safe 比 full 少一个字段
+    REQUIRE(full.size() == safe.size() + 1);
+    // full 有 password_hash，safe 没有
+    REQUIRE(full.contains("password_hash"));
+    REQUIRE_FALSE(safe.contains("password_hash"));
+    // 其他字段相同
+    REQUIRE(full["id"] == safe["id"]);
+    REQUIRE(full["username"] == safe["username"]);
+    REQUIRE(full["role"] == safe["role"]);
+    REQUIRE(full["created_at"] == safe["created_at"]);
+    REQUIRE(full["updated_at"] == safe["updated_at"]);
+}
+
+TEST_CASE("TaskInstance: toJson includes all 14 fields", "[model_task_instance_full]") {
+    // Fix #256: 验证 TaskInstance toJson 输出全部 14 个字段
+    TaskInstance ti;
+    ti.id = "ti-full";
+    ti.workflow_instance_id = "wi-full";
+    ti.task_id = "task-full";
+    ti.node_id = "node-1";
+    ti.task_version = 5;
+    ti.task_name = "full-task-name";
+    ti.status = "FAILED";
+    ti.worker_id = "worker-001";
+    ti.retry_count = 3;
+    ti.started_at = "2025-06-20T10:00:00Z";
+    ti.finished_at = "2025-06-20T10:05:30Z";
+    ti.exit_code = 1;
+    ti.error_message = "Task failed due to timeout";
+    ti.created_at = "2025-06-20T09:59:00Z";
+
+    auto j = ti.toJson();
+
+    // 验证全部 14 个字段
+    REQUIRE(j["id"] == "ti-full");
+    REQUIRE(j["workflow_instance_id"] == "wi-full");
+    REQUIRE(j["task_id"] == "task-full");
+    REQUIRE(j["node_id"] == "node-1");
+    REQUIRE(j["task_version"] == 5);
+    REQUIRE(j["task_name"] == "full-task-name");
+    REQUIRE(j["status"] == "FAILED");
+    REQUIRE(j["worker_id"] == "worker-001");
+    REQUIRE(j["retry_count"] == 3);
+    REQUIRE(j["started_at"] == "2025-06-20T10:00:00Z");
+    REQUIRE(j["finished_at"] == "2025-06-20T10:05:30Z");
+    REQUIRE(j["exit_code"] == 1);
+    REQUIRE(j["error_message"] == "Task failed due to timeout");
+    REQUIRE(j["created_at"] == "2025-06-20T09:59:00Z");
+
+    // 确保恰好 14 个字段
+    REQUIRE(j.size() == 14);
+}
+
+TEST_CASE("TaskInstance: toJson with empty time fields", "[model_task_instance_full]") {
+    // Fix #256: 验证 started_at/finished_at/error_message/created_at 默认空值正确输出
+    TaskInstance ti;
+    ti.id = "ti-empty-times";
+    ti.status = "PENDING";
+
+    auto j = ti.toJson();
+    REQUIRE(j["started_at"] == "");
+    REQUIRE(j["finished_at"] == "");
+    REQUIRE(j["error_message"] == "");
+    REQUIRE(j["created_at"] == "");
+    REQUIRE(j["worker_id"] == "");
+    REQUIRE(j["node_id"] == "");
+    REQUIRE(j["exit_code"] == 0);
+    REQUIRE(j["retry_count"] == 0);
+    REQUIRE(j["task_version"] == 0);
+}

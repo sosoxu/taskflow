@@ -355,3 +355,119 @@ TEST_CASE("SqlExecutor: db_port as float returns FAILED", "[sql_executor]") {
     auto result = executor.execute("sql-float-port", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "FAILED");
 }
+
+// ============================================================================
+// Fix #254: SqlExecutor 各字段缺失和超时测试
+// 验收指标：
+//   1. 缺少 db_port 返回 FAILED
+//   2. 缺少 db_name 返回 FAILED
+//   3. 缺少 db_user 返回 FAILED
+//   4. 缺少 db_password 返回 FAILED
+//   5. 超时返回 TIMEOUT（连接不可达主机）
+// ============================================================================
+
+TEST_CASE("SqlExecutor: missing db_port returns FAILED", "[sql_executor_fields]") {
+    // Fix #254: 验证缺少 db_port 字段返回 FAILED
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "localhost";
+    // db_port 缺失
+    config["db_name"] = "test";
+    config["db_user"] = "test";
+    config["db_password"] = "test";
+    config["db_type"] = "postgresql";
+    config["sql_statement"] = "SELECT 1";
+
+    auto result = executor.execute("sql-missing-port", config, 10, TEST_LOG_DIR);
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.error_message.find("db_port") != std::string::npos);
+}
+
+TEST_CASE("SqlExecutor: missing db_name returns FAILED", "[sql_executor_fields]") {
+    // Fix #254: 验证缺少 db_name 字段返回 FAILED
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "localhost";
+    config["db_port"] = 5432;
+    // db_name 缺失
+    config["db_user"] = "test";
+    config["db_password"] = "test";
+    config["db_type"] = "postgresql";
+    config["sql_statement"] = "SELECT 1";
+
+    auto result = executor.execute("sql-missing-name", config, 10, TEST_LOG_DIR);
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.error_message.find("db_name") != std::string::npos);
+}
+
+TEST_CASE("SqlExecutor: missing db_user returns FAILED", "[sql_executor_fields]") {
+    // Fix #254: 验证缺少 db_user 字段返回 FAILED
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "localhost";
+    config["db_port"] = 5432;
+    config["db_name"] = "test";
+    // db_user 缺失
+    config["db_password"] = "test";
+    config["db_type"] = "postgresql";
+    config["sql_statement"] = "SELECT 1";
+
+    auto result = executor.execute("sql-missing-user", config, 10, TEST_LOG_DIR);
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.error_message.find("db_user") != std::string::npos);
+}
+
+TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_fields]") {
+    // Fix #254: 验证缺少 db_password 字段返回 FAILED
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "localhost";
+    config["db_port"] = 5432;
+    config["db_name"] = "test";
+    config["db_user"] = "test";
+    // db_password 缺失
+    config["db_type"] = "postgresql";
+    config["sql_statement"] = "SELECT 1";
+
+    auto result = executor.execute("sql-missing-password", config, 10, TEST_LOG_DIR);
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.error_message.find("db_password") != std::string::npos);
+}
+
+TEST_CASE("SqlExecutor: all fields missing returns FAILED on first check", "[sql_executor_fields]") {
+    // Fix #254: 验证所有字段缺失时在第一个字段（db_host）检查就返回 FAILED
+    SqlExecutor executor;
+    nlohmann::json config;
+    // 所有字段缺失
+    config["db_type"] = "postgresql";
+
+    auto result = executor.execute("sql-missing-all", config, 10, TEST_LOG_DIR);
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.error_message.find("db_host") != std::string::npos);
+}
+
+TEST_CASE("SqlExecutor: timeout on unreachable host returns TIMEOUT", "[sql_executor_timeout]") {
+    // Fix #254: 验证连接不可达主机时超时返回 TIMEOUT
+    // 使用 TEST-NET-1 (192.0.2.0/24) 保留地址，保证不可达
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "192.0.2.1";  // RFC 5737 TEST-NET-1, 不可路由
+    config["db_port"] = 5432;
+    config["db_name"] = "test";
+    config["db_user"] = "test";
+    config["db_password"] = "test";
+    config["db_type"] = "postgresql";
+    config["sql_statement"] = "SELECT 1";
+
+    // 超时 3 秒，子进程连接不可达主机会卡住，父进程超时后 SIGKILL
+    auto start = std::chrono::steady_clock::now();
+    auto result = executor.execute("sql-timeout", config, 3, TEST_LOG_DIR);
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    REQUIRE(result.status == "TIMEOUT");
+    REQUIRE(result.exit_code == -1);
+    REQUIRE(result.error_message.find("timed out") != std::string::npos);
+    // 验证确实在超时时间附近返回（不超过 10 秒）
+    REQUIRE(elapsed < 10);
+}
