@@ -139,9 +139,11 @@ common::result::Result<void> InstanceService::cancelInstance(
 
     for (const auto& task_instance : tasks_result.value()) {
         if (task_instance.status == "PENDING") {
-            // Fix #159: Use markFinished (sets finished_at/exit_code) for consistency.
-            auto task_update = task_instance_dao_.markFinished(
-                task_instance.id, "CANCELLED", -1, "Cancelled by user");
+            // Fix #184: markFinished now requires DISPATCHED/RUNNING to prevent
+            // late worker reports from overwriting PENDING (set by resetForRetry).
+            // For PENDING tasks, use updateStatus to set CANCELLED directly.
+            auto task_update = task_instance_dao_.updateStatus(
+                task_instance.id, "CANCELLED");
             if (!task_update.ok()) {
                 spdlog::warn("InstanceService: failed to cancel task instance {}: {}",
                              task_instance.id, task_update.error());

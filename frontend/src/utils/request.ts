@@ -30,10 +30,18 @@ request.interceptors.request.use(
 // 是否正在刷新token
 let isRefreshing = false
 // 等待token刷新的请求队列
-let refreshSubscribers: Array<(token: string) => void> = []
+// Fix #190: 回调签名改为 (token: string | null) => void，null 表示刷新失败
+let refreshSubscribers: Array<(token: string | null) => void> = []
 
 function onTokenRefreshed(token: string) {
   refreshSubscribers.forEach((cb) => cb(token))
+  refreshSubscribers = []
+}
+
+// Fix #190: 刷新失败时通知所有排队请求（传 null 让它们 reject），
+// 否则队列中的 Promise 永远 pending，导致 UI 卡死。
+function onTokenRefreshFailed() {
+  refreshSubscribers.forEach((cb) => cb(null))
   refreshSubscribers = []
 }
 
@@ -68,8 +76,13 @@ request.interceptors.response.use(
 
       if (isRefreshing) {
         // 正在刷新token，将请求加入队列等待
-        return new Promise((resolve) => {
-          refreshSubscribers.push((token: string) => {
+        return new Promise((resolve, reject) => {
+          // Fix #190: subscriber 接收 token | null，null 表示刷新失败需 reject
+          refreshSubscribers.push((token: string | null) => {
+            if (!token) {
+              reject(new Error('token refresh failed'))
+              return
+            }
             originalRequest.headers.Authorization = `Bearer ${token}`
             resolve(request(originalRequest))
           })
@@ -98,11 +111,15 @@ request.interceptors.response.use(
           return request(originalRequest)
         } else {
           // 刷新失败，跳转登录
+          // Fix #190: 通知排队请求 reject，避免永远 pending
+          onTokenRefreshFailed()
           redirectToLogin()
           return Promise.reject(error)
         }
       } catch (refreshError) {
         // 刷新失败，跳转登录
+        // Fix #190: 通知排队请求 reject，避免永远 pending
+        onTokenRefreshFailed()
         redirectToLogin()
         return Promise.reject(refreshError)
       } finally {

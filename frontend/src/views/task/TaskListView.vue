@@ -443,6 +443,12 @@ async function handleSubmit() {
   } catch {
     return
   }
+  // Fix #196: 提交前检查是否存在未完成的环境变量名输入（占位符 key 仍存在），
+  // 避免用户输入 key 后未失焦直接提交导致该变量被静默丢弃。
+  if (form.config.env_vars && Object.keys(envKeyTemp.value).some((k) => k.startsWith('__new_'))) {
+    ElMessage.warning('请先完成环境变量名输入')
+    return
+  }
   // Fix #174: 按任务类型校验必填字段
   if (form.type === 'command') {
     if (!form.config.command?.trim()) {
@@ -533,6 +539,13 @@ async function handleDelete(row: TaskItem) {
 
 onMounted(() => {
   fetchList()
+})
+
+// Fix #193: 对话框关闭时销毁 CodeMirror 编辑器，避免 EditorView 引用泄漏
+watch(dialogVisible, (visible) => {
+  if (!visible) {
+    destroyEditors()
+  }
 })
 
 onBeforeUnmount(() => {

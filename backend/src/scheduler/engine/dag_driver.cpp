@@ -388,9 +388,12 @@ common::result::Result<void> DagDriver::dispatchTask(
 
     // Check if task has been deleted
     if (task.deleted) {
-        auto fail_result = task_instance_dao_.markFinished(
-            task_instance.id, "FAILED", -1,
-            "Task has been deleted: " + task_instance.task_id);
+        // Fix #184: markFinished now requires DISPATCHED/RUNNING. The task is
+        // still PENDING here (dispatch happens later), so use updateStatus to
+        // transition it to FAILED. Without this the task would stay PENDING and
+        // be retried indefinitely against a deleted task.
+        auto fail_result = task_instance_dao_.updateStatus(
+            task_instance.id, "FAILED");
         if (!fail_result.ok()) {
             spdlog::error("DagDriver: failed to mark task instance {} as FAILED for deleted task: {}",
                          task_instance.id, fail_result.error());
@@ -424,9 +427,10 @@ common::result::Result<void> DagDriver::dispatchTask(
     // on any worker (backward compatible).
     auto eligible_workers = filterByResourceTags(workers_result.value(), task.resource_tags);
     if (eligible_workers.empty()) {
-        auto fail_result = task_instance_dao_.markFinished(
-            task_instance.id, "FAILED", -1,
-            "No online worker with required resource_tags");
+        // Fix #184: Task is still PENDING here; use updateStatus (markFinished
+        // now requires DISPATCHED/RUNNING) to avoid leaving it PENDING forever.
+        auto fail_result = task_instance_dao_.updateStatus(
+            task_instance.id, "FAILED");
         if (!fail_result.ok()) {
             spdlog::error("DagDriver: failed to mark task instance {} as FAILED (no tagged worker): {}",
                          task_instance.id, fail_result.error());
@@ -439,9 +443,10 @@ common::result::Result<void> DagDriver::dispatchTask(
     if (!worker_result.ok()) {
         // Mark task as FAILED when no worker is available (e.g., specified worker offline).
         // Without this, the task stays PENDING and is retried indefinitely.
-        auto fail_result = task_instance_dao_.markFinished(
-            task_instance.id, "FAILED", -1,
-            "No available worker: " + worker_result.error());
+        // Fix #184: Task is still PENDING here; use updateStatus (markFinished
+        // now requires DISPATCHED/RUNNING) to avoid leaving it PENDING forever.
+        auto fail_result = task_instance_dao_.updateStatus(
+            task_instance.id, "FAILED");
         if (!fail_result.ok()) {
             spdlog::error("DagDriver: failed to mark task instance {} as FAILED: {}",
                          task_instance.id, fail_result.error());

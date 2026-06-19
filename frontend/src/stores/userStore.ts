@@ -39,6 +39,21 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('refresh_token')
   }
 
+  // Fix #198: 多标签页同步。监听 storage 事件，当其他标签页登出
+  // （access_token 被清除）时清除本标签页状态；当其他标签页更新 token 时
+  // 同步本标签页 token。storage 事件只在其他标签页触发，不会循环。
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'access_token') {
+        if (e.newValue === null) {
+          clearUser()
+        } else {
+          token.value = e.newValue
+        }
+      }
+    })
+  }
+
   return {
     userId,
     username,

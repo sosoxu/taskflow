@@ -88,12 +88,17 @@ common::result::Result<void> TaskInstanceDao::dispatch(const std::string& id,
 common::result::Result<void> TaskInstanceDao::markRunning(const std::string& id) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #183: Only allow transition to RUNNING from DISPATCHED. Without
+            // this guard, a racing cancelInstance (which sets CANCELLED) can be
+            // overwritten by a late markRunning, resurrecting a cancelled task.
             auto res = txn.exec_params(
-                "UPDATE task_instances SET status = 'RUNNING', started_at = NOW() WHERE id = $1",
+                "UPDATE task_instances SET status = 'RUNNING', started_at = NOW() "
+                "WHERE id = $1 AND status = 'DISPATCHED'",
                 id);
 
             if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("任务实例不存在，标记运行失败");
+                return common::result::Result<void>::failure(
+                    "任务状态已变更（非 DISPATCHED），标记运行失败");
             }
 
             return common::result::Result<void>();
@@ -106,15 +111,24 @@ common::result::Result<void> TaskInstanceDao::markFinished(const std::string& id
                                                             const std::string& error_message) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #184: Only allow finishing tasks in DISPATCHED or RUNNING
+            // state. This prevents a late worker ReportTaskResult from
+            // overwriting a PENDING status set by resetForRetry (which would
+            // clobber the retry with a stale SUCCESS). Callers that need to
+            // transition a PENDING task to a terminal state (e.g. cancelInstance
+            // cancelling a PENDING task, or DagDriver failing a PENDING task
+            // that cannot be dispatched) must use updateStatus instead.
             auto res = txn.exec_params(
                 "UPDATE task_instances SET status = $1, finished_at = NOW(), "
-                "exit_code = $2, error_message = $3 WHERE id = $4",
+                "exit_code = $2, error_message = $3 WHERE id = $4 "
+                "AND status IN ('DISPATCHED', 'RUNNING')",
                 status, exit_code,
                 error_message.empty() ? nullptr : error_message.c_str(),
                 id);
 
             if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("任务实例不存在，标记完成失败");
+                return common::result::Result<void>::failure(
+                    "任务状态已变更（非 DISPATCHED/RUNNING），标记完成失败");
             }
 
             return common::result::Result<void>();

@@ -1,5 +1,5 @@
 <template>
-  <div class="workflow-editor">
+  <div class="workflow-editor" v-loading="loading">
     <div class="page-header">
       <h2>{{ isEdit ? '编辑工作流' : '创建工作流' }}</h2>
       <div>
@@ -136,9 +136,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, reactive, computed, onMounted } from 'vue'
+import { ref, shallowRef, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import { VueFlow, Handle, Position, type Node, type Edge } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -203,6 +203,9 @@ const workflowId = computed(() => route.params.id as string)
 const isEdit = computed(() => !!workflowId.value)
 
 const saving = ref(false)
+// Fix #195: 跟踪未保存修改，取消时提示确认；loadWorkflow 加载状态
+const dirty = ref(false)
+const loading = ref(false)
 
 const form = reactive({
   name: '',
@@ -309,6 +312,8 @@ function addNode(task: TaskItem) {
       data: { label: task.name, taskType: task.type },
     },
   ]
+  // Fix #195: 标记未保存修改
+  dirty.value = true
 }
 
 function removeNode(nodeId: string) {
@@ -318,6 +323,8 @@ function removeNode(nodeId: string) {
   vfEdges.value = vfEdges.value.filter((e: { source: string; target: string }) => e.source !== nodeId && e.target !== nodeId)
   dagNodeDataMap.value.delete(nodeId)
   if (selectedNodeId.value === nodeId) selectedNodeId.value = null
+  // Fix #195: 标记未保存修改
+  dirty.value = true
 }
 
 function onNodeClick({ node }: { node: Node }) {
@@ -365,6 +372,8 @@ function onConnect(params: { source: string; target: string }) {
       animated: true,
     },
   ]
+  // Fix #195: 标记未保存修改
+  dirty.value = true
 }
 
 // Fix #163: Returns true if adding edge source->target would create a cycle.
@@ -443,9 +452,27 @@ function onDrop(event: DragEvent) {
   } catch { /* ignore */ }
 }
 
+// Fix #191a: 清空编辑器状态，切换工作流时避免显示上一个工作流的陈旧数据
+function resetEditorState() {
+  dagNodeDataMap.value.clear()
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  clearOverrides()
+  vfNodes.value = []
+  vfEdges.value = []
+  nodeCounter = 0
+}
+
 // Load workflow for editing
 async function loadWorkflow() {
   if (!workflowId.value) return
+  // Fix #191a: 加载前清空旧状态，避免显示上一个工作流的陈旧数据
+  dagNodeDataMap.value.clear()
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  clearOverrides()
+  // Fix #195: 加载状态
+  loading.value = true
   try {
     const { data: resp } = await getWorkflow(workflowId.value)
     const data = resp.data
@@ -494,6 +521,9 @@ async function loadWorkflow() {
     }
   } catch {
     ElMessage.error('加载工作流失败')
+  } finally {
+    // Fix #195: 加载完成
+    loading.value = false
   }
 }
 
@@ -556,6 +586,8 @@ async function handleSave() {
       await createWorkflow(payload)
       ElMessage.success('创建成功')
     }
+    // Fix #195: 保存成功后清除未保存标记
+    dirty.value = false
     router.push({ name: 'workflow-list' })
   } catch {
     ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
@@ -564,7 +596,15 @@ async function handleSave() {
   }
 }
 
-function handleCancel() {
+async function handleCancel() {
+  // Fix #195: 有未保存修改时确认离开
+  if (dirty.value) {
+    try {
+      await ElMessageBox.confirm('有未保存的修改，确定要离开吗？', '提示', { type: 'warning' })
+    } catch {
+      return
+    }
+  }
   router.push({ name: 'workflow-list' })
 }
 
@@ -572,6 +612,14 @@ onMounted(() => {
   fetchTasks()
   fetchWorkers()
   if (isEdit.value) {
+    loadWorkflow()
+  }
+})
+
+// Fix #191a: 切换工作流编辑页时重新加载，避免显示陈旧数据
+watch(workflowId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    resetEditorState()
     loadWorkflow()
   }
 })

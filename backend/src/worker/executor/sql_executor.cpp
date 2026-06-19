@@ -47,12 +47,24 @@ static int runSqlChild(const std::string& conn_str,
             pqxx::nontransaction txn(conn);
             pqxx::result res = txn.exec(sql_statement);
 
+            // Fix #188: Cap the number of rows written to the log to prevent
+            // disk exhaustion / OOM from unbounded SELECT results.
+            const pqxx::result::size_type max_rows = 10000;
+            pqxx::result::size_type row_count = 0;
             for (const auto& row : res) {
+                if (row_count >= max_rows) {
+                    break;
+                }
                 for (int i = 0; i < static_cast<int>(row.size()); ++i) {
                     if (i > 0) ofs << "\t";
                     ofs << (row[i].is_null() ? "" : row[i].c_str());
                 }
                 ofs << "\n";
+                row_count++;
+            }
+            if (res.size() > max_rows) {
+                ofs << "... (truncated at " << max_rows
+                    << " rows, total=" << res.size() << " rows)\n";
             }
         } else {
             pqxx::work txn(conn);

@@ -92,6 +92,14 @@ void HeartbeatChecker::checkLoop() {
 
                 worker_dao_.updateStatus(worker.id, "offline");
 
+                // Fix #186: Reset running_tasks to 0 when the worker goes
+                // offline. The worker can no longer report heartbeats (which
+                // carry the running_tasks count), so without this reset the
+                // counter stays at its last value forever, inflating the load
+                // seen by LoadBalanceDispatcher and preventing new tasks from
+                // being dispatched to other workers.
+                worker_dao_.updateRunningTasks(worker.id, 0);
+
                 // Mark running task instances as NODE_OFFLINE
                 auto instances_result =
                     task_instance_dao_.listByWorkerId(

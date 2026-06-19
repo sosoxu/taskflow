@@ -132,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
@@ -144,7 +144,8 @@ import { formatTime } from '../../utils/format'
 
 const route = useRoute()
 const router = useRouter()
-const taskId = route.params.id as string
+// Fix #191b: taskId 改为 computed，切换任务时响应式更新
+const taskId = computed(() => route.params.id as string)
 
 const typeTagMap: Record<string, { type: string; label: string }> = {
   command: { type: 'primary', label: 'Command' },
@@ -182,8 +183,15 @@ async function fetchInstances() {
       page_size: instancePageSize.value,
     })
     const data = res.data?.data
-    instances.value = data?.items || []
-    instanceTotal.value = data?.total || 0
+    // Fix #191b: getAllInstances 返回全系统实例，需在客户端按当前 task_id 过滤，
+    // 仅保留包含当前任务的实例。
+    const currentTaskId = taskId.value
+    const allItems: WorkflowInstance[] = data?.items || []
+    const filtered = allItems.filter((inst) =>
+      inst.tasks?.some((t) => t.task_id === currentTaskId),
+    )
+    instances.value = filtered
+    instanceTotal.value = filtered.length
   } catch {
     ElMessage.error('获取执行历史失败')
   } finally {
@@ -204,7 +212,8 @@ function viewInstance(row: WorkflowInstance) {
 async function fetchTask() {
   loading.value = true
   try {
-    const { data: resp } = await getTask(taskId)
+    // Fix #191b: 使用 taskId.value 响应式获取当前任务
+    const { data: resp } = await getTask(taskId.value)
     const data = resp.data
     task.value = data
   } catch {
@@ -221,6 +230,14 @@ function goBack() {
 onMounted(() => {
   fetchTask()
   fetchInstances()
+})
+
+// Fix #191b: 切换任务时重新拉取任务详情和执行历史
+watch(taskId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    fetchTask()
+    fetchInstances()
+  }
 })
 </script>
 

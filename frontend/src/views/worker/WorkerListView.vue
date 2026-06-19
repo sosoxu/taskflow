@@ -95,13 +95,39 @@ async function fetchWorkers(silent = false) {
   }
 }
 
+// Fix #197: 启停轮询辅助函数
+function startRefresh() {
+  if (refreshTimer) return
+  refreshTimer = setInterval(() => fetchWorkers(true), 10000)
+}
+
+function stopRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+// Fix #197: 标签页隐藏时停止轮询，可见时恢复
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopRefresh()
+  } else {
+    startRefresh()
+  }
+}
+
 onMounted(() => {
   fetchWorkers()
-  refreshTimer = setInterval(() => fetchWorkers(true), 10000)
+  startRefresh()
+  // Fix #197: 监听标签页可见性变化
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  stopRefresh()
+  // Fix #197: 移除可见性监听
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 

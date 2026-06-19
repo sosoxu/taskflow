@@ -142,7 +142,7 @@ common::result::Result<nlohmann::json> AuthService::refreshToken(
             return common::result::Result<nlohmann::json>::failure(
                 "Refresh token has already been used");
         }
-        common::util::TokenBlacklist::instance().add(payload.jti);
+        common::util::TokenBlacklist::instance().add(payload.jti, payload.exp);
     }
 
     // Generate new tokens (only access token is returned in response)
@@ -193,7 +193,7 @@ common::result::Result<void> AuthService::logout(const std::string& access_token
     }
     // Add jti to blacklist
     if (!payload.jti.empty()) {
-        common::util::TokenBlacklist::instance().add(payload.jti);
+        common::util::TokenBlacklist::instance().add(payload.jti, payload.exp);
     }
     return common::result::Result<void>();
 }

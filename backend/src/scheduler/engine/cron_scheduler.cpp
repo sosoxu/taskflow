@@ -108,6 +108,21 @@ void CronScheduler::cronLoop() {
 }
 
 void CronScheduler::triggerCronJob(const common::models::CronJob& cron_job) {
+    // Fix #185: Advance next_trigger_time BEFORE creating the instance. If this
+    // were done at the end (as before), a failure in instance creation would
+    // leave next_trigger_time unchanged, causing the job to fire again on the
+    // next tick (duplicate triggers). Advancing first guarantees at-most-once
+    // triggering even when subsequent steps fail.
+    std::string next_time = computeNextTriggerTime(cron_job.cron_expression);
+    auto update_result = cron_job_dao_.updateNextTriggerTime(cron_job.id, next_time);
+    if (!update_result.ok()) {
+        spdlog::error(
+            "CronScheduler: failed to update next trigger time for cron job "
+            "{}: {}",
+            cron_job.id, update_result.error());
+        return;
+    }
+
     // Find the workflow
     auto workflow_result = workflow_dao_.findById(cron_job.workflow_id);
     if (!workflow_result.ok()) {
@@ -162,16 +177,6 @@ void CronScheduler::triggerCronJob(const common::models::CronJob& cron_job) {
                     batch_result.error());
             }
         }
-    }
-
-    // Update cron_job next_trigger_time
-    std::string next_time = computeNextTriggerTime(cron_job.cron_expression);
-    auto update_result = cron_job_dao_.updateNextTriggerTime(cron_job.id, next_time);
-    if (!update_result.ok()) {
-        spdlog::error(
-            "CronScheduler: failed to update next trigger time for cron job "
-            "{}: {}",
-            cron_job.id, update_result.error());
     }
 }
 

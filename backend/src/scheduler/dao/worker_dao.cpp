@@ -21,10 +21,17 @@ common::result::Result<std::string> WorkerDao::create(
 
             if (!check.empty()) {
                 // 名称已存在，更新现有记录
+                // Fix #189: Reset running_tasks to 0 on re-registration. A worker
+                // that restarts with the same name inherits the old record's
+                // running_tasks counter, which is now stale (the restarted
+                // worker has no running tasks). Without this reset,
+                // LoadBalanceDispatcher sees inflated load and may starve the
+                // worker.
                 auto res = txn.exec_params(
                     "UPDATE workers SET address = $1, max_tasks = $2, "
                     "resource_tags = $3::jsonb, status = 'online', "
-                    "last_heartbeat = NOW() WHERE name = $4 RETURNING id",
+                    "running_tasks = 0, last_heartbeat = NOW() "
+                    "WHERE name = $4 RETURNING id",
                     address, max_tasks, resource_tags.dump(), name);
 
                 if (res.empty()) {

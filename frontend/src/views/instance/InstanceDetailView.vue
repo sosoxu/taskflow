@@ -211,6 +211,11 @@ const autoScroll = ref(true)
 const logStreaming = ref(false)
 const logContainerRef = ref<HTMLElement | null>(null)
 let eventSource: EventSource | null = null
+// Fix #192: SSE 重连计数器，最多重连 3 次（间隔 2s/4s/6s）
+let sseReconnectCount = 0
+const SSE_MAX_RECONNECT = 3
+// Fix #194: logContent 最大长度限制（约 100KB），避免无限增长导致卡顿
+const LOG_MAX_LENGTH = 100000
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -488,24 +493,63 @@ async function fetchLog() {
 function startLogStream() {
   if (!instance.value || !currentLogTask.value) return
   stopLogStream()
+  // Fix #192: 重置重连计数器
+  sseReconnectCount = 0
+  createEventSource()
+}
 
+// Fix #192: 抽取 EventSource 创建逻辑，支持错误后手动重连（2s/4s/6s 递增），
+// 最多重连 3 次，超限则停止并提示用户。手动关闭当前连接以避免原生自动重连
+// 与 setTimeout 重连堆叠产生多个连接。
+function createEventSource() {
+  if (!instance.value || !currentLogTask.value) return
   const url = getTaskLogStreamUrl(instance.value.id, currentLogTask.value.id)
   eventSource = new EventSource(url)
   logStreaming.value = true
 
   eventSource.onmessage = (event) => {
-    logContent.value += event.data + '\n'
+    // Fix #194: 通过 appendLog 限制日志长度，避免无限增长
+    appendLog(event.data)
     if (autoScroll.value) {
       nextTick(() => scrollToBottom())
     }
   }
 
   eventSource.addEventListener('done', () => {
+    // 正常结束，标记不再重连
+    sseReconnectCount = SSE_MAX_RECONNECT
     stopLogStream()
   })
 
   eventSource.onerror = () => {
-    stopLogStream()
+    // Fix #192: 不立即放弃，先关闭当前连接再按递增间隔重连
+    if (eventSource) {
+      eventSource.close()
+      eventSource = null
+    }
+    sseReconnectCount++
+    if (sseReconnectCount > SSE_MAX_RECONNECT) {
+      ElMessage.warning('日志实时跟踪连接失败，已停止重连，请点击"实时跟踪"重试')
+      stopLogStream()
+      return
+    }
+    const delay = sseReconnectCount * 2000 // 2s, 4s, 6s
+    setTimeout(() => {
+      // 仅在用户未主动停止时重连，避免死循环
+      if (logStreaming.value) {
+        createEventSource()
+      }
+    }, delay)
+  }
+}
+
+// Fix #194: 限制 logContent 最大长度为 100KB，超过则截断保留后半部分并加提示
+function appendLog(chunk: string) {
+  const next = logContent.value + chunk + '\n'
+  if (next.length > LOG_MAX_LENGTH) {
+    logContent.value = '... (log truncated, showing last 100KB) ...\n' + next.slice(-LOG_MAX_LENGTH)
+  } else {
+    logContent.value = next
   }
 }
 
@@ -541,13 +585,21 @@ function goBack() {
 }
 
 // Auto-poll for running instances
+// Fix #192/#197: 停止轮询辅助函数
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
 function startPolling() {
   pollTimer = setInterval(async () => {
     if (!instance.value) return
     const status = instance.value.status
     // Stop polling if instance reached a terminal state
     if (status !== 'RUNNING' && status !== 'PENDING' && status !== 'PAUSED') {
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+      stopPolling()
       return
     }
     // Poll without loading spinner
@@ -560,24 +612,43 @@ function startPolling() {
   }, 5000)
 }
 
+// Fix #197: 标签页隐藏时停止轮询，可见时若实例运行中则恢复轮询
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopPolling()
+  } else {
+    if (instance.value && (instance.value.status === 'RUNNING' || instance.value.status === 'PENDING' || instance.value.status === 'PAUSED')) {
+      if (!pollTimer) startPolling()
+    }
+  }
+}
+
 onMounted(() => {
   fetchInstance()
   startPolling()
+  // Fix #197: 监听标签页可见性变化
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
-// Fix #161: Re-fetch when the route param changes (e.g. navigating from one
-// instance detail to another without unmounting). Without this watch the page
-// shows stale data from the previous instance.
-watch(() => route.params.id, (newId, oldId) => {
+// Fix #161/#192: Re-fetch when the route param changes (e.g. navigating from one
+// instance detail to another without unmounting). 切换实例时先停止旧轮询与日志流，
+// 拉取新实例后根据其状态决定是否重启轮询（从已结束实例导航到运行中实例时轮询需重启）。
+watch(() => route.params.id, async (newId, oldId) => {
   if (newId && newId !== oldId) {
     stopLogStream()
-    fetchInstance()
+    stopPolling()
+    await fetchInstance()
+    if (instance.value && (instance.value.status === 'RUNNING' || instance.value.status === 'PENDING' || instance.value.status === 'PAUSED')) {
+      startPolling()
+    }
   }
 })
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  stopPolling()
   stopLogStream()
+  // Fix #197: 移除可见性监听
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 

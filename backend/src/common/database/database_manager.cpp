@@ -33,6 +33,13 @@ void DatabaseManager::init(const std::string& connection_string, int min_conn, i
     for (int i = 0; i < minConn_; ++i) {
         try {
             auto conn = std::make_unique<pqxx::connection>(connectionString_);
+            // Fix #186: Force UTC session timezone so TIMESTAMPTZ values are
+            // always returned as UTC strings. Without this, HeartbeatChecker's
+            // sscanf-based time parsing (which ignores the timezone offset)
+            // would skew on non-UTC database deployments, breaking timeout
+            // detection.
+            pqxx::nontransaction tz_txn(*conn);
+            tz_txn.exec("SET TIME ZONE 'UTC'");
             pool_.push(std::move(conn));
         } catch (const std::exception& e) {
             spdlog::error("创建数据库连接失败: {}", e.what());
@@ -70,6 +77,9 @@ std::unique_ptr<pqxx::connection> DatabaseManager::getConnection() {
     // 池中无可用连接但未达上限，创建新连接
     try {
         auto conn = std::make_unique<pqxx::connection>(connectionString_);
+        // Fix #186: Force UTC session timezone (see init() for rationale).
+        pqxx::nontransaction tz_txn(*conn);
+        tz_txn.exec("SET TIME ZONE 'UTC'");
         activeCount_++;
         return conn;
     } catch (const std::exception& e) {
