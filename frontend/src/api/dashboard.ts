@@ -15,7 +15,9 @@ export interface DashboardStats {
     id: string
     workflow_name: string
     status: string
-    started_at: string
+    // Fix #226: backend recent_instances SQL selects wi.created_at (not started_at);
+    // align the type so the DashboardView binding `row.created_at` type-checks.
+    created_at: string
   }>
 }
 

@@ -46,7 +46,9 @@
           <el-descriptions-item label="触发类型">
             <el-tag size="small">{{ instance.trigger_type }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{ formatTime(instance.started_at) }}</el-descriptions-item>
+          <!-- Fix #231: "创建时间" should bind to created_at, not started_at
+               (which is null until the instance transitions to RUNNING). -->
+          <el-descriptions-item label="创建时间">{{ formatTime(instance.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ formatTime(instance.finished_at) }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
@@ -101,7 +103,7 @@
         <template #header>
           <span>任务实例</span>
         </template>
-        <el-table :data="instance.tasks" border stripe>
+        <el-table :data="instance.task_instances" border stripe>
           <el-table-column prop="node_id" label="节点 ID" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.node_id || '-' }}</template>
           </el-table-column>
@@ -327,7 +329,7 @@ function getNodeName(nodeId: string): string {
   if (!dag.value || !instance.value) return nodeId
   const node = dag.value.nodes.find((n) => n.id === nodeId)
   if (!node) return nodeId
-  const task = instance.value.tasks.find((t) => t.task_id === node.task_id)
+  const task = instance.value.task_instances.find((t) => t.task_id === node.task_id)
   return task?.task_name || node.task_id
 }
 
@@ -335,7 +337,7 @@ function nodeFill(nodeId: string): string {
   if (!instance.value) return '#f5f7fa'
   const node = dag.value?.nodes.find((n) => n.id === nodeId)
   if (!node) return '#f5f7fa'
-  const task = instance.value.tasks.find((t) => t.task_id === node.task_id)
+  const task = instance.value.task_instances.find((t) => t.task_id === node.task_id)
   if (!task) return '#f5f7fa'
   // Fix #143: Colors per completed-features.md section 9.8:
   // PENDING-灰色, RUNNING-蓝色, SUCCESS-绿色, FAILED-红色, UPSTREAM_FAILED-橙色
@@ -357,6 +359,13 @@ async function fetchInstance() {
   const id = route.params.id as string
   if (!id) return
   loading.value = true
+  // Fix #232: Clear stale workflow name and DAG at the start of each fetch.
+  // Without this, navigating from instance A (workflow X) to instance B
+  // (workflow Y) briefly shows A's workflow name and DAG until B's workflow
+  // fetch completes; if B has no workflow_id or the fetch fails, A's stale
+  // data persists indefinitely.
+  workflowName.value = ''
+  dag.value = null
   try {
     const res = await getInstance(id)
     instance.value = res.data.data
@@ -428,7 +437,7 @@ async function handleCancel() {
 async function handleRetryInstance() {
   if (!instance.value) return
   // Retry the first failed/timed-out/upstream-failed task
-  const failedTask = instance.value.tasks.find(
+  const failedTask = instance.value.task_instances.find(
     (t) => t.status === 'FAILED' || t.status === 'TIMEOUT' || t.status === 'UPSTREAM_FAILED'
   )
   if (failedTask) {
@@ -446,7 +455,20 @@ async function handleRetryTask(task: TaskInstance) {
   try {
     await retryTask(instance.value.id, task.id)
     ElMessage.success('已提交重试')
-    fetchInstance()
+    await fetchInstance()
+    // Fix #228: After a successful retry the instance transitions from a
+    // terminal state (FAILED/etc.) back to RUNNING/PENDING. Polling was
+    // stopped when the terminal state was reached, so it must be restarted
+    // here; otherwise the UI will never refresh to show progress.
+    if (
+      instance.value &&
+      (instance.value.status === 'RUNNING' ||
+        instance.value.status === 'PENDING' ||
+        instance.value.status === 'PAUSED') &&
+      !pollTimer
+    ) {
+      startPolling()
+    }
   } catch {
     ElMessage.error('重试失败')
   }

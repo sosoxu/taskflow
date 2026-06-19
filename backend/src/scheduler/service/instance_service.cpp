@@ -138,25 +138,29 @@ common::result::Result<void> InstanceService::cancelInstance(
     }
 
     for (const auto& task_instance : tasks_result.value()) {
-        if (task_instance.status == "PENDING") {
-            // Fix #184: markFinished now requires DISPATCHED/RUNNING to prevent
-            // late worker reports from overwriting PENDING (set by resetForRetry).
-            // For PENDING tasks, use updateStatus to set CANCELLED directly.
-            auto task_update = task_instance_dao_.updateStatus(
-                task_instance.id, "CANCELLED");
-            if (!task_update.ok()) {
-                spdlog::warn("InstanceService: failed to cancel task instance {}: {}",
-                             task_instance.id, task_update.error());
+        // Fix #219: Use cancelIfActive for ALL active tasks (PENDING/DISPATCHED/
+        // RUNNING) instead of branching on the snapshot status. The old code
+        // used updateStatus (no guard) for PENDING and markFinished for
+        // DISPATCHED/RUNNING — but the snapshot could be stale: a PENDING task
+        // might have been dispatched between the listByWorkflowInstance call
+        // and here, causing updateStatus to overwrite DISPATCHED without
+        // sending CancelTask, leaking the running_tasks counter.
+        //
+        // cancelIfActive atomically transitions any active state to CANCELLED.
+        // For DISPATCHED/RUNNING tasks we also send CancelTask so the worker
+        // stops execution.
+        if (task_instance.status == "PENDING" ||
+            task_instance.status == "DISPATCHED" ||
+            task_instance.status == "RUNNING") {
+            // Send CancelTask for DISPATCHED/RUNNING (task may be executing)
+            if (task_instance.status == "DISPATCHED" ||
+                task_instance.status == "RUNNING") {
+                sendCancelTask(task_instance.id, task_instance.worker_id);
             }
-        } else if (task_instance.status == "DISPATCHED" || task_instance.status == "RUNNING") {
-            // Fix #151: Send CancelTask for DISPATCHED tasks too — the task has
-            // already been sent to the worker and may have started executing.
-            sendCancelTask(task_instance.id, task_instance.worker_id);
-            auto task_update = task_instance_dao_.markFinished(
-                task_instance.id, "CANCELLED", -1, "Cancelled by user");
-            if (!task_update.ok()) {
+            auto cancel_result = task_instance_dao_.cancelIfActive(task_instance.id);
+            if (!cancel_result.ok()) {
                 spdlog::warn("InstanceService: failed to cancel task instance {}: {}",
-                             task_instance.id, task_update.error());
+                             task_instance.id, cancel_result.error());
             }
         }
     }
@@ -512,6 +516,44 @@ common::result::Result<nlohmann::json> InstanceService::listAllInstances(
     for (const auto& inst : instances) {
         items.push_back(inst.toJson());
     }
+
+    return nlohmann::json{
+        {"items", items},
+        {"page", page},
+        {"page_size", page_size},
+        {"total", total}
+    };
+}
+
+common::result::Result<nlohmann::json> InstanceService::listInstancesByTaskId(
+    const std::string& task_id, int page, int page_size,
+    const std::string& user_id, const std::string& role) {
+    // Fix #225: Server-side filtering by task_id with correct pagination.
+    if (page < 1) page = 1;
+    if (page_size < 1) page_size = 10;
+    if (page_size > 100) page_size = 100;
+
+    int offset = (page - 1) * page_size;
+
+    // Fix #225b: Apply the same access control as listAllInstances —
+    // non-admin users only see their own instances.
+    bool filter_by_creator = !user_id.empty() && role != "admin";
+    std::string creator_filter = filter_by_creator ? user_id : "";
+
+    auto list_result = workflow_instance_dao_.listByTaskId(task_id, offset, page_size, creator_filter);
+    if (!list_result.ok()) {
+        return common::result::Result<nlohmann::json>::failure(
+            "Failed to list instances by task: " + list_result.error());
+    }
+
+    const auto& instances = list_result.value();
+    nlohmann::json items = nlohmann::json::array();
+    for (const auto& inst : instances) {
+        items.push_back(inst.toJson());
+    }
+
+    auto countResult = workflow_instance_dao_.countByTaskId(task_id, creator_filter);
+    int total = countResult.ok() ? countResult.value() : static_cast<int>(instances.size());
 
     return nlohmann::json{
         {"items", items},

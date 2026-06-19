@@ -26,7 +26,14 @@ export interface WorkflowInstance {
   started_at: string | null
   finished_at: string | null
   creator_id: string
-  tasks: TaskInstance[]
+  // Fix #231: Backend WorkflowInstance model (workflow_instance.h) includes
+  // created_at and toJson() returns it. The "创建时间" columns in list views
+  // should bind to created_at (not started_at, which is null until RUNNING).
+  created_at: string | null
+  // Fix #224: Backend returns "task_instances" (instance_service.cpp:423),
+  // not "tasks". The old field name caused instance.tasks to be undefined at
+  // runtime, breaking the task table, DAG visualization, and retry button.
+  task_instances: TaskInstance[]
 }
 
 export interface TaskInstance {

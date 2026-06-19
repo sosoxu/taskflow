@@ -9,7 +9,7 @@
 #include <vector>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/daily_file_sink.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/async.h>
 #include <drogon/drogon.h>
 #include <drogon/HttpRequest.h>
@@ -55,7 +55,16 @@ inline std::string fromRequest<std::string>(const HttpRequest&) {
 static void initLogger(const taskflow::common::config::LogConfig& log_config) {
     try {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        auto file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(log_config.file_path, 0, 0, false, 30);
+        // Fix #221: Use rotating_file_sink_mt instead of daily_file_sink_mt to
+        // limit individual file size. daily_file_sink_mt has no size cap — a
+        // log storm (error loop, DEBUG level, high-frequency heartbeat) could
+        // grow a single day's file to tens of GB and exhaust the disk.
+        // rotating_file_sink_mt caps each file at max_size and keeps max_files
+        // copies, bounding total disk usage.
+        constexpr size_t kMaxLogFileSize = 100 * 1024 * 1024;  // 100 MB per file
+        constexpr size_t kMaxLogFiles = 10;                     // 10 rotated files
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            log_config.file_path, kMaxLogFileSize, kMaxLogFiles);
 
         spdlog::init_thread_pool(8192, 1);
         auto logger = std::make_shared<spdlog::async_logger>(

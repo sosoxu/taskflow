@@ -323,6 +323,13 @@ function removeNode(nodeId: string) {
   vfEdges.value = vfEdges.value.filter((e: { source: string; target: string }) => e.source !== nodeId && e.target !== nodeId)
   dagNodeDataMap.value.delete(nodeId)
   if (selectedNodeId.value === nodeId) selectedNodeId.value = null
+  // Fix #233: Removing a node also removes its incident edges. If the
+  // selected edge was one of them, selectedEdgeId now points to a deleted
+  // edge — clear it so the "删除选中连线" button doesn't try to remove a
+  // non-existent edge and stays disabled correctly.
+  if (selectedEdgeId.value && !vfEdges.value.some((e: { id: string }) => e.id === selectedEdgeId.value)) {
+    selectedEdgeId.value = null
+  }
   // Fix #195: 标记未保存修改
   dirty.value = true
 }
@@ -406,6 +413,9 @@ function removeSelectedEdge() {
   if (selectedEdgeId.value) {
     vfEdges.value = vfEdges.value.filter((e: { id: string }) => e.id !== selectedEdgeId.value)
     selectedEdgeId.value = null
+    // Fix #227: removing an edge modifies the DAG, mark as dirty so the
+    // leave-without-saving guard prompts the user.
+    dirty.value = true
   }
 }
 
@@ -418,6 +428,8 @@ function applyOverrides() {
   if (nodeOverrides.max_retries !== undefined) overrides.max_retries = nodeOverrides.max_retries
   if (nodeOverrides.retry_interval !== undefined) overrides.retry_interval = nodeOverrides.retry_interval
   data.param_overrides = Object.keys(overrides).length > 0 ? overrides : undefined
+  // Fix #227: applying overrides modifies node data, mark as dirty.
+  dirty.value = true
   ElMessage.success('参数覆盖已应用')
 }
 
@@ -427,7 +439,13 @@ function clearOverrides() {
   nodeOverrides.retry_interval = undefined
   if (selectedNodeId.value) {
     const data = dagNodeDataMap.value.get(selectedNodeId.value)
-    if (data) data.param_overrides = undefined
+    // Fix #227: only mark dirty if there were actual overrides to clear.
+    // clearOverrides() is also called from onNodeClick() when a node has no
+    // overrides, in which case nothing changes and dirty should stay false.
+    if (data && data.param_overrides !== undefined) {
+      data.param_overrides = undefined
+      dirty.value = true
+    }
   }
 }
 
@@ -463,9 +481,18 @@ function resetEditorState() {
   nodeCounter = 0
 }
 
+// Fix #235: Generation counter to guard against out-of-order loadWorkflow
+// completions. If the user navigates between workflows quickly (or the
+// workflowId watch fires while a previous load is still in-flight), an
+// earlier fetch may resolve AFTER a later one, clobbering fresh data with
+// stale data. Each load captures a generation; results are applied only if
+// the generation is still current.
+let loadGeneration = 0
+
 // Load workflow for editing
 async function loadWorkflow() {
   if (!workflowId.value) return
+  const gen = ++loadGeneration
   // Fix #191a: 加载前清空旧状态，避免显示上一个工作流的陈旧数据
   dagNodeDataMap.value.clear()
   selectedNodeId.value = null
@@ -475,6 +502,9 @@ async function loadWorkflow() {
   loading.value = true
   try {
     const { data: resp } = await getWorkflow(workflowId.value)
+    // Fix #235: A newer load was initiated while this fetch was in-flight;
+    // discard this stale result to avoid clobbering the newer data.
+    if (gen !== loadGeneration) return
     const data = resp.data
     form.name = data.name || ''
     form.description = data.description || ''
@@ -520,10 +550,15 @@ async function loadWorkflow() {
       nodeCounter = apiNodes.length + 1
     }
   } catch {
+    // Fix #235: Don't show error if a newer load superseded this one.
+    if (gen !== loadGeneration) return
     ElMessage.error('加载工作流失败')
   } finally {
-    // Fix #195: 加载完成
-    loading.value = false
+    // Fix #235: Only clear loading if this is still the latest load;
+    // otherwise a newer load owns the loading state.
+    if (gen === loadGeneration) {
+      loading.value = false
+    }
   }
 }
 

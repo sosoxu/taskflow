@@ -68,12 +68,19 @@ common::result::Result<void> WorkflowInstanceDao::updateStatus(const std::string
 common::result::Result<void> WorkflowInstanceDao::markRunning(const std::string& id) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #218: Add status guard to prevent overwriting a CANCELLED
+            // instance. Without this, if cancelInstance sets the instance to
+            // CANCELLED while DagDriver is still processing it, DagDriver's
+            // markRunning/markFinished would overwrite CANCELLED, making the
+            // cancel ineffective.
             auto res = txn.exec_params(
-                "UPDATE workflow_instances SET status = 'RUNNING', started_at = NOW() WHERE id = $1",
+                "UPDATE workflow_instances SET status = 'RUNNING', started_at = NOW() "
+                "WHERE id = $1 AND status = 'PENDING'",
                 id);
 
             if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("工作流实例不存在，标记运行失败");
+                return common::result::Result<void>::failure(
+                    "工作流实例不存在或当前状态不允许标记为运行中");
             }
 
             return common::result::Result<void>();
@@ -84,12 +91,17 @@ common::result::Result<void> WorkflowInstanceDao::markFinished(const std::string
                                                                 const std::string& status) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #218: Only allow transition from active states. This prevents
+            // a late markFinished(SUCCESS) from overwriting a CANCELLED status
+            // set by cancelInstance.
             auto res = txn.exec_params(
-                "UPDATE workflow_instances SET status = $1, finished_at = NOW() WHERE id = $2",
+                "UPDATE workflow_instances SET status = $1, finished_at = NOW() "
+                "WHERE id = $2 AND status IN ('PENDING', 'RUNNING', 'PAUSED')",
                 status, id);
 
             if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("工作流实例不存在，标记完成失败");
+                return common::result::Result<void>::failure(
+                    "工作流实例不存在或当前状态不允许标记为完成");
             }
 
             return common::result::Result<void>();
@@ -138,6 +150,71 @@ common::result::Result<int> WorkflowInstanceDao::countActiveByWorkflow(const std
                 workflow_id);
             int total = row[0][0].as<int>();
             return total;
+        });
+}
+
+common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowInstanceDao::listByTaskId(
+    const std::string& task_id, int offset, int limit,
+    const std::string& creator_id) {
+    // Fix #225: JOIN task_instances to find workflow instances that contain
+    // the given task. DISTINCT because a workflow instance has exactly one
+    // row per task node, but we JOIN to filter.
+    // Fix #225b: Optional creator_id filter for access control.
+    return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::WorkflowInstance>>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::WorkflowInstance>> {
+            std::vector<common::models::WorkflowInstance> instances;
+            if (creator_id.empty()) {
+                auto res = txn.exec_params(
+                    "SELECT DISTINCT wi.id, wi.workflow_id, wi.workflow_version, "
+                    "wi.status, wi.trigger_type, wi.param_overrides, "
+                    "wi.started_at, wi.finished_at, wi.creator_id, wi.created_at "
+                    "FROM workflow_instances wi "
+                    "JOIN task_instances ti ON ti.workflow_instance_id = wi.id "
+                    "WHERE ti.task_id = $1 "
+                    "ORDER BY wi.created_at DESC "
+                    "LIMIT $2 OFFSET $3",
+                    task_id, limit, offset);
+                for (const auto& row : res) {
+                    instances.push_back(common::models::WorkflowInstance::fromRow(row));
+                }
+            } else {
+                auto res = txn.exec_params(
+                    "SELECT DISTINCT wi.id, wi.workflow_id, wi.workflow_version, "
+                    "wi.status, wi.trigger_type, wi.param_overrides, "
+                    "wi.started_at, wi.finished_at, wi.creator_id, wi.created_at "
+                    "FROM workflow_instances wi "
+                    "JOIN task_instances ti ON ti.workflow_instance_id = wi.id "
+                    "WHERE ti.task_id = $1 AND wi.creator_id = $2 "
+                    "ORDER BY wi.created_at DESC "
+                    "LIMIT $3 OFFSET $4",
+                    task_id, creator_id, limit, offset);
+                for (const auto& row : res) {
+                    instances.push_back(common::models::WorkflowInstance::fromRow(row));
+                }
+            }
+            return instances;
+        });
+}
+
+common::result::Result<int> WorkflowInstanceDao::countByTaskId(
+    const std::string& task_id, const std::string& creator_id) {
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            if (creator_id.empty()) {
+                auto row = txn.exec_params(
+                    "SELECT COUNT(DISTINCT wi.id) FROM workflow_instances wi "
+                    "JOIN task_instances ti ON ti.workflow_instance_id = wi.id "
+                    "WHERE ti.task_id = $1",
+                    task_id);
+                return row[0][0].as<int>();
+            } else {
+                auto row = txn.exec_params(
+                    "SELECT COUNT(DISTINCT wi.id) FROM workflow_instances wi "
+                    "JOIN task_instances ti ON ti.workflow_instance_id = wi.id "
+                    "WHERE ti.task_id = $1 AND wi.creator_id = $2",
+                    task_id, creator_id);
+                return row[0][0].as<int>();
+            }
         });
 }
 

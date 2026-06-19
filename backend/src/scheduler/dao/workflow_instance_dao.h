@@ -45,6 +45,20 @@ public:
 
     common::result::Result<int> countByCreator(const std::string& creator_id);
 
+    // Fix #225: List/count workflow instances that contain a specific task,
+    // by JOINing task_instances. Used by TaskDetailView's execution history
+    // to do server-side filtering and pagination instead of client-side
+    // filtering on a single page (which was always empty because
+    // listAllInstances doesn't return the tasks subarray).
+    // Fix #225b: Optional creator_id for access control — non-admin users
+    // only see their own instances, consistent with listAllInstances.
+    common::result::Result<std::vector<common::models::WorkflowInstance>> listByTaskId(
+        const std::string& task_id, int offset, int limit,
+        const std::string& creator_id = "");
+    common::result::Result<int> countByTaskId(
+        const std::string& task_id,
+        const std::string& creator_id = "");
+
     common::result::Result<std::vector<common::models::WorkflowInstance>> listActive();
 };
 

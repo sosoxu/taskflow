@@ -33,6 +33,14 @@ public:
 
     common::result::Result<void> resetForRetry(const std::string& id);
 
+    // Fix #219: Atomically cancel a task instance only if it is in an active
+    // (non-terminal) state. Returns failure if the task was already terminal
+    // or doesn't exist. This prevents the race where cancelInstance reads a
+    // PENDING snapshot but the task has since been dispatched (DISPATCHED),
+    // which would cause updateStatus to overwrite DISPATCHED without sending
+    // CancelTask and leak the running_tasks counter.
+    common::result::Result<bool> cancelIfActive(const std::string& id);
+
     common::result::Result<std::vector<common::models::TaskInstance>> listByWorkflowInstance(
         const std::string& workflow_instance_id);
 

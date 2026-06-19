@@ -61,18 +61,29 @@ common::result::Result<T> DatabaseManager::withTransaction(
         return common::result::Result<T>::failure("无法获取数据库连接");
     }
 
+    // Fix #215: Ensure txn is destroyed (sending ROLLBACK if not committed)
+    // BEFORE the connection is returned to the pool. Previously,
+    // returnConnection was called while txn was still alive — if the
+    // callback returned a failure Result (no commit), txn's destructor
+    // would send ROLLBACK AFTER the connection was already reusable by
+    // another thread, potentially aborting that thread's transaction.
+    common::result::Result<T> result =
+        common::result::Result<T>::failure("internal error");
     try {
         pqxx::work txn(*conn);
-        auto result = fn(txn);
+        result = fn(txn);
         if (result.ok()) {
             txn.commit();
         }
-        returnConnection(std::move(conn));
-        return result;
+        // txn destructs at end of try block (normal path)
     } catch (const std::exception& e) {
+        // txn already destructed during stack unwinding
         returnConnection(std::move(conn));
         return common::result::Result<T>::failure(std::string("事务执行失败: ") + e.what());
     }
+    // txn is now destroyed; safe to return the connection
+    returnConnection(std::move(conn));
+    return result;
 }
 
 template<typename T>
@@ -83,15 +94,19 @@ common::result::Result<T> DatabaseManager::withReadTransaction(
         return common::result::Result<T>::failure("无法获取数据库连接");
     }
 
+    // Fix #215: Same pattern — destroy txn before returning connection.
+    common::result::Result<T> result =
+        common::result::Result<T>::failure("internal error");
     try {
         pqxx::nontransaction txn(*conn);
-        auto result = fn(txn);
-        returnConnection(std::move(conn));
-        return result;
+        result = fn(txn);
+        // nontransaction has no ROLLBACK, but keep the pattern consistent
     } catch (const std::exception& e) {
         returnConnection(std::move(conn));
         return common::result::Result<T>::failure(std::string("查询执行失败: ") + e.what());
     }
+    returnConnection(std::move(conn));
+    return result;
 }
 
 }  // namespace taskflow::common::database

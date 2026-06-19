@@ -282,6 +282,14 @@ function updateEnvKey(oldKey: string) {
   const newKey = envKeyTemp.value[oldKey]?.trim()
   if (!newKey || newKey === oldKey) return
   if (!form.config.env_vars) return
+  // Fix #229: Reject duplicate env var keys — otherwise renaming would
+  // silently overwrite the value of an existing variable with the same name.
+  if (Object.prototype.hasOwnProperty.call(form.config.env_vars, newKey)) {
+    ElMessage.warning(`环境变量 "${newKey}" 已存在，请使用其他名称`)
+    // Restore the input to the old key so the user can correct it
+    envKeyTemp.value[oldKey] = oldKey
+    return
+  }
   const value: string = form.config.env_vars[oldKey] ?? ''
   delete form.config.env_vars[oldKey]
   form.config.env_vars[newKey] = value
@@ -321,6 +329,11 @@ function resetForm() {
 
 function handleTypeChange() {
   form.config = defaultConfig()
+  // Fix #236: Clear envKeyTemp when the task type changes. Otherwise stale
+  // placeholder keys (e.g. __new_1) from the previous type's env editor
+  // persist and would block submission via the "请先完成环境变量名输入"
+  // guard in handleSubmit, even though the new config has no env vars.
+  envKeyTemp.value = {}
   destroyEditors()
   nextTick(() => {
     initEditorForType()

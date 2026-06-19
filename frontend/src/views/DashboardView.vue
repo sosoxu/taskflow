@@ -97,7 +97,7 @@
               </template>
             </el-table-column>
             <el-table-column label="开始时间" width="180">
-              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
           </el-table>
           <el-empty v-if="recentInstances.length === 0" description="暂无实例数据" />
@@ -128,7 +128,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, onMounted, onUnmounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Document, Share, VideoPlay, Monitor, Plus, TrendCharts, CircleCheck } from '@element-plus/icons-vue'
 import { getDashboardStats } from '../api/dashboard'
 import { formatTime } from '../utils/format'
@@ -147,11 +148,12 @@ const stats = reactive({
 })
 
 // Fix #176: InstanceItem matches the DashboardStats recent_instances shape
+// Fix #226: backend returns created_at (not started_at) for recent_instances
 interface InstanceItem {
   id: string
   workflow_name: string
   status: string
-  started_at: string
+  created_at: string
 }
 
 const recentInstances = ref<InstanceItem[]>([])
@@ -168,6 +170,13 @@ function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 
   return map[status] || 'info'
 }
 
+// Fix #234: Track first load so we only surface an error toast once (on
+// initial mount). Subsequent auto-refresh failures stay silent to avoid
+// spamming the user every 30s when the backend is briefly unavailable;
+// the last successfully-loaded stats are kept on screen.
+let isFirstLoad = true
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
 async function loadDashboardData() {
   try {
     const res = await getDashboardStats()
@@ -181,12 +190,28 @@ async function loadDashboardData() {
     stats.successRate = Number(data.success_rate?.toFixed(2) || 0)
     recentInstances.value = data.recent_instances || []
   } catch {
-    // Silently fail - dashboard shows zeros
+    // Fix #234: Surface first-load failures so the user understands why the
+    // dashboard shows zeros. Silent on refresh to avoid toast spam.
+    if (isFirstLoad) {
+      ElMessage.error('加载仪表盘数据失败')
+    }
+  } finally {
+    isFirstLoad = false
   }
 }
 
 onMounted(() => {
   loadDashboardData()
+  // Fix #234: Auto-refresh every 30s so running instance count, online
+  // workers, and recent instances stay current without manual reload.
+  refreshTimer = setInterval(loadDashboardData, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 </script>
 

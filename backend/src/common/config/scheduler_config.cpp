@@ -116,6 +116,21 @@ void SchedulerConfig::validate() const {
     if (database.max_connections < database.min_connections) {
         throw std::runtime_error("配置错误: database.max_connections 不能小于 min_connections");
     }
+    // Fix #222: Validate schedule parameters. A value of 0 causes tight-loop
+    // spinning (sleep_for(0)), and negative values are undefined behavior.
+    // heartbeat_timeout=0 would mark all workers offline immediately.
+    if (schedule.dag_drive_interval <= 0) {
+        throw std::runtime_error("配置错误: schedule.dag_drive_interval 必须大于 0");
+    }
+    if (schedule.heartbeat_check_interval <= 0) {
+        throw std::runtime_error("配置错误: schedule.heartbeat_check_interval 必须大于 0");
+    }
+    if (schedule.heartbeat_timeout <= 0) {
+        throw std::runtime_error("配置错误: schedule.heartbeat_timeout 必须大于 0");
+    }
+    if (schedule.leader_lease_interval <= 0) {
+        throw std::runtime_error("配置错误: schedule.leader_lease_interval 必须大于 0");
+    }
 }
 
 }  // namespace taskflow::common::config

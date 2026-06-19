@@ -9,7 +9,7 @@
 #include <csignal>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/daily_file_sink.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/async.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/security/server_credentials.h>
@@ -36,7 +36,11 @@ std::atomic<bool> g_shutdown_flag{false};
 static void initLogger(const taskflow::common::config::WorkerLogConfig& log_config) {
     try {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        auto file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(log_config.file_path, 0, 0, false, 30);
+        // Fix #221: Use rotating_file_sink_mt to cap file size (same as scheduler).
+        constexpr size_t kMaxLogFileSize = 100 * 1024 * 1024;  // 100 MB per file
+        constexpr size_t kMaxLogFiles = 10;
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            log_config.file_path, kMaxLogFileSize, kMaxLogFiles);
 
         spdlog::init_thread_pool(8192, 1);
         auto logger = std::make_shared<spdlog::async_logger>(

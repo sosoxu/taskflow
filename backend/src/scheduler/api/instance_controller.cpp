@@ -328,6 +328,7 @@ void InstanceController::listAllInstances(
     std::string page_str = std::string(req->getParameter("page"));
     std::string page_size_str = std::string(req->getParameter("page_size"));
     std::string workflow_id = std::string(req->getParameter("workflow_id"));
+    std::string task_id = std::string(req->getParameter("task_id"));  // Fix #225
 
     if (!page_str.empty()) {
         try { page = std::stoi(page_str); } catch (...) {}
@@ -338,6 +339,25 @@ void InstanceController::listAllInstances(
 
     std::string user_id = req->getAttributes()->get<std::string>("user_id");
     std::string role = req->getAttributes()->get<std::string>("role");
+
+    // Fix #225: If task_id is provided, filter instances by task_id (server-side
+    // JOIN). This replaces the broken client-side filtering in TaskDetailView
+    // that always returned an empty list because listAllInstances doesn't
+    // include the tasks subarray.
+    if (!task_id.empty()) {
+        if (!isValidUUID(task_id)) {
+            sendError(std::move(callback), 400, 40001, "Invalid task_id format: must be a valid UUID");
+            return;
+        }
+        auto result = instance_service_->listInstancesByTaskId(
+            task_id, page, page_size, user_id, role);
+        if (!result.ok()) {
+            sendError(std::move(callback), 400, 50001, result.error());
+            return;
+        }
+        sendSuccess(std::move(callback), result.value());
+        return;
+    }
 
     // If workflow_id is provided, filter by it
     if (!workflow_id.empty()) {

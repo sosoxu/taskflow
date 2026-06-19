@@ -53,28 +53,41 @@ void DatabaseManager::init(const std::string& connection_string, int min_conn, i
 std::unique_ptr<pqxx::connection> DatabaseManager::getConnection() {
     std::unique_lock<std::mutex> lock(mutex_);
 
-    while (pool_.empty() && activeCount_ >= maxConn_) {
+    // Fix #217: Previously, when the pool contained a dead connection, we
+    // popped it and fell through to create a new connection WITHOUT checking
+    // activeCount_ < maxConn_. This could cause the connection count to exceed
+    // maxConn_, eventually exhausting PostgreSQL's max_connections. Now we use
+    // a loop that re-checks the wait condition after discarding dead conns.
+    while (true) {
+        if (shutdown_) {
+            return nullptr;
+        }
+
+        // If there are connections in the pool, try to use one
+        if (!pool_.empty()) {
+            auto conn = std::move(pool_.front());
+            pool_.pop();
+            if (conn->is_open()) {
+                activeCount_++;
+                return conn;
+            }
+            // Dead connection discarded; loop back to re-check conditions
+            continue;
+        }
+
+        // Pool is empty — can we create a new connection?
+        if (activeCount_ < maxConn_) {
+            break;  // Yes, proceed to create below
+        }
+
+        // Pool empty and at capacity — wait for a connection to be returned
         if (cv_.wait_for(lock, std::chrono::seconds(30)) == std::cv_status::timeout) {
             spdlog::error("获取数据库连接超时");
             return nullptr;
         }
     }
 
-    if (shutdown_) {
-        return nullptr;
-    }
-
-    if (!pool_.empty()) {
-        auto conn = std::move(pool_.front());
-        pool_.pop();
-        if (conn->is_open()) {
-            activeCount_++;
-            return conn;
-        }
-        // 连接已断开，创建新连接
-    }
-
-    // 池中无可用连接但未达上限，创建新连接
+    // Create a new connection (activeCount_ < maxConn_ guaranteed here)
     try {
         auto conn = std::make_unique<pqxx::connection>(connectionString_);
         // Fix #186: Force UTC session timezone (see init() for rationale).

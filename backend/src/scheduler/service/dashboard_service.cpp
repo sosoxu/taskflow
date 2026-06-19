@@ -73,15 +73,21 @@ common::result::Result<nlohmann::json> DashboardService::getStats() {
                     agg["success_rate"] = success_rate;
 
                     // Recent 10 instances
+                    // Fix #226: JOIN workflows to get workflow_name so the
+                    // frontend can display it. Previously only workflow_id was
+                    // returned, but the frontend used workflow_name (always empty).
                     auto recent_res = txn.exec_params(
-                        "SELECT id, workflow_id, status, trigger_type, created_at "
-                        "FROM workflow_instances "
-                        "ORDER BY created_at DESC LIMIT 10");
+                        "SELECT wi.id, wi.workflow_id, wi.status, wi.trigger_type, "
+                        "wi.created_at, w.name AS workflow_name "
+                        "FROM workflow_instances wi "
+                        "LEFT JOIN workflows w ON w.id = wi.workflow_id "
+                        "ORDER BY wi.created_at DESC LIMIT 10");
                     nlohmann::json recent_items = nlohmann::json::array();
                     for (const auto& row : recent_res) {
                         nlohmann::json item;
                         item["id"] = row["id"].as<std::string>();
                         item["workflow_id"] = row["workflow_id"].as<std::string>();
+                        item["workflow_name"] = row["workflow_name"].as<std::string>();
                         item["status"] = row["status"].as<std::string>();
                         item["trigger_type"] = row["trigger_type"].as<std::string>();
                         item["created_at"] = row["created_at"].as<std::string>();

@@ -206,17 +206,24 @@ common::result::Result<std::vector<std::string>> TaskInstanceDao::batchCreate(
 common::result::Result<void> TaskInstanceDao::resetForRetry(const std::string& id) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
-            // Fix #201: Only allow retry reset from a terminal/failed state.
-            // Without this guard, a RUNNING task could be reset to PENDING,
-            // causing DagDriver to dispatch it again while the original
-            // execution is still in progress (double execution / data corruption).
+            // Fix #201/#216: Only allow retry reset from a terminal/failed
+            // state OR from DISPATCHED. DISPATCHED is included because
+            // DagDriver::dispatchTask calls resetForRetry to roll back a task
+            // when gRPC DispatchTask fails or the worker rejects it — at that
+            // point the task has already been moved from PENDING to DISPATCHED
+            // by dispatch(). Without DISPATCHED in the allowed list, the
+            // rollback silently fails (0 rows affected) and the task is stuck
+            // in DISPATCHED forever (findReadyTasks only picks PENDING, timeout
+            // check only covers RUNNING). DISPATCHED is safe to reset because
+            // the task has not actually started executing yet.
             auto res = txn.exec_params(
                 "UPDATE task_instances SET status = 'PENDING', "
                 "retry_count = retry_count + 1, "
                 "worker_id = NULL, started_at = NULL, finished_at = NULL, "
                 "exit_code = NULL, error_message = NULL "
                 "WHERE id = $1 AND status IN "
-                "('FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_OFFLINE', 'UPSTREAM_FAILED')",
+                "('DISPATCHED', 'FAILED', 'TIMEOUT', 'CANCELLED', "
+                "'NODE_OFFLINE', 'UPSTREAM_FAILED')",
                 id);
 
             if (res.affected_rows() == 0) {
@@ -225,6 +232,26 @@ common::result::Result<void> TaskInstanceDao::resetForRetry(const std::string& i
             }
 
             return common::result::Result<void>();
+        });
+}
+
+common::result::Result<bool> TaskInstanceDao::cancelIfActive(const std::string& id) {
+    return common::database::DatabaseManager::instance().withTransaction<bool>(
+        [&](pqxx::work& txn) -> common::result::Result<bool> {
+            // Fix #219: Atomically transition PENDING/DISPATCHED/RUNNING to
+            // CANCELLED. Returns true if the task was cancelled, false if it
+            // was already terminal (no-op). This eliminates the check-then-act
+            // race in cancelInstance where a PENDING snapshot could become
+            // DISPATCHED between the read and the unconditional updateStatus.
+            auto res = txn.exec_params(
+                "UPDATE task_instances SET status = 'CANCELLED', "
+                "finished_at = NOW(), exit_code = -1, error_message = 'Cancelled by user' "
+                "WHERE id = $1 AND status IN ('PENDING', 'DISPATCHED', 'RUNNING')",
+                id);
+
+            // affected_rows == 0 means the task was already terminal or doesn't
+            // exist — either way, no cancellation needed.
+            return res.affected_rows() > 0;
         });
 }
 

@@ -12,7 +12,7 @@ export function getInstance(id: string): Promise<AxiosResponse<ApiResponse<Workf
   return request.get(`/api/v1/instances/${id}`)
 }
 
-export function getAllInstances(params?: { page?: number; page_size?: number }): Promise<AxiosResponse<ApiResponse<PaginatedData<WorkflowInstance>>>> {
+export function getAllInstances(params?: { page?: number; page_size?: number; task_id?: string }): Promise<AxiosResponse<ApiResponse<PaginatedData<WorkflowInstance>>>> {
   return request.get('/api/v1/instances', { params })
 }
 

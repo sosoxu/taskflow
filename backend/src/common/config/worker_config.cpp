@@ -88,6 +88,12 @@ void WorkerConfig::validate() const {
     if (worker.max_tasks <= 0) {
         throw std::runtime_error("配置错误: worker.max_tasks 必须大于 0");
     }
+    // Fix #223: retention_days <= 0 causes FileLogSink::cleanup to compute
+    // retention = 24 * retention_days <= 0, which makes ALL task logs eligible
+    // for immediate deletion (now - last_modified > 0 is always true).
+    if (task_log.retention_days <= 0) {
+        throw std::runtime_error("配置错误: task_log.retention_days 必须大于 0");
+    }
 }
 
 }  // namespace taskflow::common::config

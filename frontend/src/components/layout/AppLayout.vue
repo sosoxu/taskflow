@@ -47,7 +47,18 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const activeMenu = computed(() => {
-  return route.path
+  const path = route.path
+  // Fix #230: Use prefix matching so that detail/sub routes (e.g.
+  // /tasks/123, /workflows/create) keep their parent menu item highlighted.
+  // '/' is matched exactly so it doesn't shadow every other route.
+  if (path === '/') return '/'
+  const menuIndices = ['/tasks', '/workflows', '/workers', '/users']
+  for (const idx of menuIndices) {
+    if (path === idx || path.startsWith(idx + '/')) {
+      return idx
+    }
+  }
+  return path
 })
 
 const username = computed(() => {

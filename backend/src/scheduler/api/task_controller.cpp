@@ -77,6 +77,25 @@ void TaskController::createTask(
     int retry_interval = (*json).get("retry_interval", 60).asInt();
     std::string creator_id = req->getAttributes()->get<std::string>("user_id");
 
+    // Fix #220: Validate numeric inputs. Without this, timeout=0 or negative
+    // makes tasks never time out, max_retries<0 disables retries, and extreme
+    // values can overflow DB integer columns.
+    if (timeout <= 0 || timeout > 86400) {
+        sendError(std::move(callback), 400, 40002,
+                  "timeout must be between 1 and 86400 seconds");
+        return;
+    }
+    if (max_retries < 0 || max_retries > 100) {
+        sendError(std::move(callback), 400, 40002,
+                  "max_retries must be between 0 and 100");
+        return;
+    }
+    if (retry_interval < 0 || retry_interval > 3600) {
+        sendError(std::move(callback), 400, 40002,
+                  "retry_interval must be between 0 and 3600 seconds");
+        return;
+    }
+
     nlohmann::json config_json;
     if ((*json).isMember("config")) {
         config_json = jsoncppToNlohmann((*json)["config"]);
@@ -195,6 +214,23 @@ void TaskController::updateTask(
     int retry_interval = (*json).get("retry_interval", 60).asInt();
     std::string user_id = req->getAttributes()->get<std::string>("user_id");
     std::string role = req->getAttributes()->get<std::string>("role");
+
+    // Fix #220: Same numeric validation as createTask
+    if (timeout <= 0 || timeout > 86400) {
+        sendError(std::move(callback), 400, 40002,
+                  "timeout must be between 1 and 86400 seconds");
+        return;
+    }
+    if (max_retries < 0 || max_retries > 100) {
+        sendError(std::move(callback), 400, 40002,
+                  "max_retries must be between 0 and 100");
+        return;
+    }
+    if (retry_interval < 0 || retry_interval > 3600) {
+        sendError(std::move(callback), 400, 40002,
+                  "retry_interval must be between 0 and 3600 seconds");
+        return;
+    }
 
     nlohmann::json config_json;
     if ((*json).isMember("config")) {

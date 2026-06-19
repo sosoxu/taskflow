@@ -178,20 +178,20 @@ function instanceStatusType(status: WorkflowInstanceStatus): string {
 async function fetchInstances() {
   instancesLoading.value = true
   try {
+    // Fix #225: Use server-side filtering by task_id instead of client-side
+    // filtering. The old code called getAllInstances (which doesn't return
+    // the tasks subarray) and then filtered with inst.tasks?.some(...),
+    // which was always undefined — making the execution history always empty.
+    // It also did client-side pagination on a single server page, so the
+    // total was wrong and other pages were inaccessible.
     const res = await getAllInstances({
       page: instancePage.value,
       page_size: instancePageSize.value,
+      task_id: taskId.value,
     })
     const data = res.data?.data
-    // Fix #191b: getAllInstances 返回全系统实例，需在客户端按当前 task_id 过滤，
-    // 仅保留包含当前任务的实例。
-    const currentTaskId = taskId.value
-    const allItems: WorkflowInstance[] = data?.items || []
-    const filtered = allItems.filter((inst) =>
-      inst.tasks?.some((t) => t.task_id === currentTaskId),
-    )
-    instances.value = filtered
-    instanceTotal.value = filtered.length
+    instances.value = data?.items || []
+    instanceTotal.value = data?.total || 0
   } catch {
     ElMessage.error('获取执行历史失败')
   } finally {

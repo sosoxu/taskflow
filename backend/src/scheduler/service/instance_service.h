@@ -59,6 +59,13 @@ public:
                                                             const std::string& user_id = "",
                                                             const std::string& role = "");
 
+    // Fix #225: List instances that contain a specific task (for TaskDetailView
+    // execution history). Server-side JOIN + pagination replaces the broken
+    // client-side filtering.
+    common::result::Result<nlohmann::json> listInstancesByTaskId(
+        const std::string& task_id, int page, int page_size,
+        const std::string& user_id = "", const std::string& role = "");
+
     // Get task log content (read from Worker via gRPC)
     common::result::Result<std::string> getTaskLog(
         const std::string& instance_id, const std::string& task_instance_id,
