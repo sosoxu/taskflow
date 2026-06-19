@@ -2,7 +2,8 @@
   <div class="user-list">
     <div class="page-header">
       <h2>用户管理</h2>
-      <el-button type="primary" @click="openCreateDialog">创建用户</el-button>
+      <!-- Fix #172: 仅管理员可创建用户 -->
+      <el-button v-if="userStore.isAdmin" type="primary" @click="openCreateDialog">创建用户</el-button>
     </div>
 
     <el-card class="table-card">
@@ -31,7 +32,7 @@
           :total="total"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
-          @size-change="fetchUsers"
+          @size-change="handleSizeChange"
           @current-change="fetchUsers"
         />
       </div>
@@ -39,11 +40,11 @@
 
     <!-- Create User Dialog -->
     <el-dialog v-model="createDialogVisible" title="创建用户" width="450px" destroy-on-close>
-      <el-form :model="createForm" label-width="80px">
-        <el-form-item label="用户名">
+      <el-form ref="formRef" :model="createForm" :rules="formRules" label-width="80px">
+        <el-form-item label="用户名" prop="username">
           <el-input v-model="createForm.username" placeholder="请输入用户名" />
         </el-form-item>
-        <el-form-item label="密码">
+        <el-form-item label="密码" prop="password">
           <el-input v-model="createForm.password" type="password" placeholder="请输入密码" show-password />
         </el-form-item>
         <el-form-item label="角色">
@@ -87,6 +88,10 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUsers, createUser, updateUserRole, deleteUser } from '../../api/user'
 import { formatTime } from '../../utils/format'
+import { useUserStore } from '../../stores/userStore'
+
+// Fix #172: 仅管理员可创建用户
+const userStore = useUserStore()
 
 interface UserItem {
   id: string
@@ -105,11 +110,23 @@ const submitting = ref(false)
 
 // Create dialog
 const createDialogVisible = ref(false)
+const formRef = ref()
 const createForm = reactive({
   username: '',
   password: '',
   role: 'viewer',
 })
+// Fix #174: 用户表单校验规则
+const formRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 32, message: '用户名长度为 3-32 个字符', trigger: 'blur' },
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 8, max: 64, message: '密码长度为 8-64 个字符', trigger: 'blur' },
+  ],
+}
 
 // Role dialog
 const roleDialogVisible = ref(false)
@@ -147,6 +164,12 @@ async function fetchUsers() {
   }
 }
 
+// Fix #175: 分页 size-change 未重置 page=1
+function handleSizeChange() {
+  page.value = 1
+  fetchUsers()
+}
+
 function openCreateDialog() {
   createForm.username = ''
   createForm.password = ''
@@ -155,8 +178,10 @@ function openCreateDialog() {
 }
 
 async function handleCreate() {
-  if (!createForm.username || !createForm.password) {
-    ElMessage.warning('请填写用户名和密码')
+  // Fix #174: 提交前调用表单校验
+  try {
+    await formRef.value?.validate()
+  } catch {
     return
   }
   submitting.value = true
@@ -197,6 +222,7 @@ async function handleChangeRole() {
   }
 }
 
+// Fix #179: 分离 ElMessageBox 取消与 API 错误，避免错误处理混淆
 async function handleDelete(user: UserItem) {
   try {
     await ElMessageBox.confirm(
@@ -204,10 +230,16 @@ async function handleDelete(user: UserItem) {
       '警告',
       { type: 'warning' }
     )
+  } catch {
+    return  // 用户取消
+  }
+  try {
     await deleteUser(user.id)
-    ElMessage.success('已删除')
+    ElMessage.success('删除成功')
     fetchUsers()
-  } catch { /* cancelled */ }
+  } catch {
+    ElMessage.error('删除失败')
+  }
 }
 
 onMounted(() => {

@@ -55,6 +55,10 @@ struct ServerConfig {
     int http_port = 8080;
     int grpc_port = 50051;
     TlsConfig tls;
+    // Fix #182: Comma-separated list of allowed CORS origins. When non-empty
+    // and the request Origin matches an entry, that Origin is echoed back;
+    // otherwise the default "*" is used (dev-friendly).
+    std::string cors_origins;
 };
 
 // Fix #126: TLS config for scheduler→worker gRPC calls (DispatchTask, CancelTask, GetTaskLog).

@@ -78,21 +78,26 @@ function memColor(value: number): string {
   return '#67c23a'
 }
 
-async function fetchWorkers() {
-  loading.value = true
+// Fix #180: 轮询调用时传 silent=true 跳过 loading 设置，避免每 10 秒闪烁
+async function fetchWorkers(silent = false) {
+  if (!silent) {
+    loading.value = true
+  }
   try {
     const res = await getWorkers()
     workers.value = res.data?.data?.items || res.data?.data || []
   } catch {
     ElMessage.error('获取 Worker 列表失败')
   } finally {
-    loading.value = false
+    if (!silent) {
+      loading.value = false
+    }
   }
 }
 
 onMounted(() => {
   fetchWorkers()
-  refreshTimer = setInterval(fetchWorkers, 10000)
+  refreshTimer = setInterval(() => fetchWorkers(true), 10000)
 })
 
 onUnmounted(() => {

@@ -83,6 +83,47 @@
             <pre class="config-json">{{ JSON.stringify(task.config_json, null, 2) }}</pre>
           </template>
         </el-card>
+
+        <!-- Fix #177: 执行历史列表 -->
+        <el-card class="config-card" shadow="never">
+          <template #header>
+            <span class="card-title">执行历史</span>
+          </template>
+          <el-table :data="instances" v-loading="instancesLoading" stripe>
+            <el-table-column prop="id" label="实例 ID" min-width="180" show-overflow-tooltip />
+            <el-table-column label="状态" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag :type="instanceStatusType(row.status)" size="small">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="触发类型" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.trigger_type === 'manual' ? '' : 'success'" size="small">
+                  {{ row.trigger_type === 'manual' ? '手动' : '定时' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="开始时间" width="180">
+              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="120">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="viewInstance(row)">查看详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="pagination-wrapper">
+            <el-pagination
+              v-model:current-page="instancePage"
+              v-model:page-size="instancePageSize"
+              :total="instanceTotal"
+              :page-sizes="[10, 20, 50]"
+              layout="total, sizes, prev, pager, next"
+              @size-change="handleSizeChange"
+              @current-change="fetchInstances"
+            />
+          </div>
+        </el-card>
       </template>
 
       <el-empty v-else-if="!loading" description="任务不存在" />
@@ -96,7 +137,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { getTask } from '../../api/task'
+import { getAllInstances } from '../../api/instance'
 import type { TaskItem } from '../../types/task'
+import type { WorkflowInstance, WorkflowInstanceStatus } from '../../types/instance'
 import { formatTime } from '../../utils/format'
 
 const route = useRoute()
@@ -111,6 +154,52 @@ const typeTagMap: Record<string, { type: string; label: string }> = {
 
 const loading = ref(false)
 const task = ref<TaskItem | null>(null)
+
+// Fix #177: 执行历史列表状态
+const instances = ref<WorkflowInstance[]>([])
+const instancesLoading = ref(false)
+const instancePage = ref(1)
+const instancePageSize = ref(10)
+const instanceTotal = ref(0)
+
+function instanceStatusType(status: WorkflowInstanceStatus): string {
+  const map: Record<string, string> = {
+    PENDING: 'info',
+    RUNNING: '',
+    PAUSED: 'warning',
+    SUCCESS: 'success',
+    FAILED: 'danger',
+    CANCELLED: 'info',
+  }
+  return map[status] || 'info'
+}
+
+async function fetchInstances() {
+  instancesLoading.value = true
+  try {
+    const res = await getAllInstances({
+      page: instancePage.value,
+      page_size: instancePageSize.value,
+    })
+    const data = res.data?.data
+    instances.value = data?.items || []
+    instanceTotal.value = data?.total || 0
+  } catch {
+    ElMessage.error('获取执行历史失败')
+  } finally {
+    instancesLoading.value = false
+  }
+}
+
+// Fix #175: 分页 size-change 未重置 page=1
+function handleSizeChange() {
+  instancePage.value = 1
+  fetchInstances()
+}
+
+function viewInstance(row: WorkflowInstance) {
+  router.push({ name: 'instance-detail', params: { id: row.id } })
+}
 
 async function fetchTask() {
   loading.value = true
@@ -131,6 +220,7 @@ function goBack() {
 
 onMounted(() => {
   fetchTask()
+  fetchInstances()
 })
 </script>
 
@@ -196,5 +286,11 @@ onMounted(() => {
 .env-key {
   font-weight: 600;
   color: #409eff;
+}
+
+.pagination-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 </style>

@@ -31,9 +31,6 @@ public:
     // 统计未删除用户总数（用于分页 total 字段）
     common::result::Result<int> count();
 
-    // 删除
-    common::result::Result<void> remove(const std::string& id);
-
     // 软删除
     common::result::Result<void> softDelete(const std::string& id);
 };

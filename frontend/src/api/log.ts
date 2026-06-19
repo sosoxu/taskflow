@@ -1,6 +1,9 @@
 import request from '../utils/request'
+import type { AxiosResponse } from 'axios'
+// Fix #176: typed API responses
+import type { ApiResponse } from '../types/api'
 
-export function getTaskLogs(instanceId: string, taskInstanceId: string) {
+export function getTaskLogs(instanceId: string, taskInstanceId: string): Promise<AxiosResponse<ApiResponse<{ log: string }>>> {
   return request.get(`/api/v1/instances/${instanceId}/tasks/${taskInstanceId}/logs`)
 }
 

@@ -10,6 +10,8 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => role.value === 'admin')
   const isOperator = computed(() => role.value === 'operator' || role.value === 'admin')
+  // Fix #172: isViewer for hiding write-operation buttons
+  const isViewer = computed(() => role.value === 'viewer')
 
   function setUser(data: { userId: string; username: string; role: string; token: string; refreshToken: string }) {
     userId.value = data.userId
@@ -45,6 +47,7 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     isAdmin,
     isOperator,
+    isViewer,
     setUser,
     clearUser,
   }

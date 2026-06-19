@@ -22,6 +22,8 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         auto s = root["server"];
         if (s["http_port"]) config.server.http_port = s["http_port"].as<int>();
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
+        // Fix #182: allowed CORS origins (comma-separated)
+        if (s["cors_origins"]) config.server.cors_origins = s["cors_origins"].as<std::string>();
     }
 
     // server.tls

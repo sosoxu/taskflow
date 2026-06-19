@@ -12,6 +12,7 @@ UserService::UserService() = default;
 common::result::Result<nlohmann::json> UserService::listUsers(int page, int page_size) {
     if (page < 1) page = 1;
     if (page_size < 1) page_size = 10;
+    if (page_size > 100) page_size = 100;  // Fix #169: page_size 上限 100（约束 §3.3）
 
     int offset = (page - 1) * page_size;
 

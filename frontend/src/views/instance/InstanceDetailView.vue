@@ -8,7 +8,8 @@
         <template #header>
           <div class="card-header">
             <span>实例信息</span>
-            <div class="control-buttons">
+            <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
+            <div v-if="userStore.isOperator" class="control-buttons">
               <el-button
                 v-if="instance.status === 'RUNNING'"
                 type="warning"
@@ -129,15 +130,16 @@
                 size="small"
                 @click="openLogDialog(row)"
               >查看日志</el-button>
+              <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
               <el-button
-                v-if="row.status === 'FAILED' || row.status === 'TIMEOUT' || row.status === 'UPSTREAM_FAILED'"
+                v-if="userStore.isOperator && (row.status === 'FAILED' || row.status === 'TIMEOUT' || row.status === 'UPSTREAM_FAILED')"
                 type="warning"
                 link
                 size="small"
                 @click="handleRetryTask(row)"
               >重试</el-button>
               <el-button
-                v-if="row.status === 'RUNNING'"
+                v-if="userStore.isOperator && row.status === 'RUNNING'"
                 type="danger"
                 link
                 size="small"
@@ -190,9 +192,12 @@ import { getWorkflow } from '../../api/workflow'
 import { formatTime } from '../../utils/format'
 import type { WorkflowInstance, TaskInstance, WorkflowInstanceStatus, TaskInstanceStatus } from '../../types/instance'
 import type { DagGraph } from '../../types/workflow'
+import { useUserStore } from '../../stores/userStore'
 
 const route = useRoute()
 const router = useRouter()
+// Fix #172: viewer 角色隐藏写操作按钮
+const userStore = useUserStore()
 
 const loading = ref(false)
 const instance = ref<WorkflowInstance | null>(null)

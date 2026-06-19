@@ -116,6 +116,9 @@ std::unique_ptr<LogSink> createLogSink(const std::string& sink_type,
     if (sink_type == "file" || sink_type.empty()) {
         return std::make_unique<FileLogSink>(base_dir);
     } else if (sink_type == "elasticsearch") {
+        // Fix #170: Elasticsearch sink is not yet implemented (all methods fall
+        // back to file storage). Warn so operators know logs are not going to ES.
+        spdlog::warn("Elasticsearch log sink is not yet implemented, falling back to file storage");
         return std::make_unique<ElasticLogSink>(base_dir, es_url, es_index);
     }
     spdlog::warn("createLogSink: unknown sink type '{}', falling back to file", sink_type);

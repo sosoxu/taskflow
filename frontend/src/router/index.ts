@@ -65,6 +65,13 @@ const router = createRouter({
         },
       ],
     },
+    // Fix #173: 缺少 404 页面和 catch-all 路由
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFoundView.vue'),
+      meta: { title: '页面不存在' },
+    },
   ],
 })
 

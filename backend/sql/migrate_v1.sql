@@ -1,6 +1,8 @@
 -- TaskFlow 数据库迁移脚本 V1
 -- 用于从零初始化数据库
 -- 版本: 1.0.0
+-- Fix #167: 与 schema.sql 完全对齐（补齐 deleted_at/parameters_json/param_overrides/node_id
+--           列、workers.address UNIQUE 约束、统一 bcrypt 管理员密码）
 
 -- 迁移版本跟踪表
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -26,6 +28,8 @@ BEGIN
         password_hash   VARCHAR(128) NOT NULL,
         role            VARCHAR(16) NOT NULL DEFAULT 'operator'
                             CHECK (role IN ('admin', 'operator', 'viewer')),
+        -- Fix #167: deleted_at 列（schema.sql 有，UserDao 查询 WHERE deleted_at IS NULL）
+        deleted_at      TIMESTAMPTZ,
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -43,6 +47,8 @@ BEGIN
         max_retries     INTEGER NOT NULL DEFAULT 0,
         retry_interval  INTEGER NOT NULL DEFAULT 60,
         resource_tags   JSONB NOT NULL DEFAULT '[]',
+        -- Fix #167: parameters_json 列（TaskDao::create 插入该字段）
+        parameters_json JSONB NOT NULL DEFAULT '{}',
         creator_id      UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         version         INTEGER NOT NULL DEFAULT 1,
         deleted         BOOLEAN NOT NULL DEFAULT FALSE,
@@ -86,6 +92,8 @@ BEGIN
                                 CHECK (trigger_type IN ('manual', 'cron')),
         started_at          TIMESTAMPTZ,
         finished_at         TIMESTAMPTZ,
+        -- Fix #167: param_overrides 列（WorkflowInstanceDao::create 插入，fromRow 读取）
+        param_overrides     JSONB NOT NULL DEFAULT '{}',
         creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -94,35 +102,12 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_wf_instances_status ON workflow_instances(status);
     CREATE INDEX IF NOT EXISTS idx_wf_instances_created ON workflow_instances(created_at DESC);
 
-    -- 5. 任务执行实例表
-    CREATE TABLE IF NOT EXISTS task_instances (
-        id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        workflow_instance_id    UUID NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
-        task_id                 UUID NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-        task_version            INTEGER NOT NULL,
-        task_name               VARCHAR(128) NOT NULL,
-        status                  VARCHAR(16) NOT NULL DEFAULT 'PENDING'
-                                    CHECK (status IN ('PENDING', 'DISPATCHED', 'RUNNING', 'SUCCESS',
-                                                      'FAILED', 'UPSTREAM_FAILED', 'TIMEOUT',
-                                                      'CANCELLED', 'NODE_OFFLINE')),
-        worker_id               UUID,
-        retry_count             INTEGER NOT NULL DEFAULT 0,
-        started_at              TIMESTAMPTZ,
-        finished_at             TIMESTAMPTZ,
-        exit_code               INTEGER,
-        error_message           TEXT,
-        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_task_instances_wf_instance ON task_instances(workflow_instance_id);
-    CREATE INDEX IF NOT EXISTS idx_task_instances_status ON task_instances(status);
-    CREATE INDEX IF NOT EXISTS idx_task_instances_worker ON task_instances(worker_id);
-
-    -- 6. 执行节点表
+    -- 5. 执行节点表（必须在 task_instances 之前，因为 FK 引用）
     CREATE TABLE IF NOT EXISTS workers (
         id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name            VARCHAR(64) NOT NULL,
-        address         VARCHAR(256) NOT NULL,
+        -- Fix #167: address UNIQUE 约束（schema.sql 有，migrate 缺失）
+        address         VARCHAR(256) NOT NULL UNIQUE,
         status          VARCHAR(8) NOT NULL DEFAULT 'online'
                             CHECK (status IN ('online', 'offline')),
         cpu_usage       DOUBLE PRECISION NOT NULL DEFAULT 0.0,
@@ -136,6 +121,32 @@ BEGIN
 
     CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_name ON workers(name);
+
+    -- 6. 任务执行实例表
+    CREATE TABLE IF NOT EXISTS task_instances (
+        id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        workflow_instance_id    UUID NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+        task_id                 UUID NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+        task_version            INTEGER NOT NULL,
+        task_name               VARCHAR(128) NOT NULL,
+        status                  VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+                                    CHECK (status IN ('PENDING', 'DISPATCHED', 'RUNNING', 'SUCCESS',
+                                                      'FAILED', 'UPSTREAM_FAILED', 'TIMEOUT',
+                                                      'CANCELLED', 'NODE_OFFLINE')),
+        worker_id               UUID REFERENCES workers(id) ON DELETE SET NULL,
+        -- Fix #167: node_id 列（TaskInstanceDao::create/batchCreate 插入该字段）
+        node_id                 VARCHAR(64) NOT NULL DEFAULT '',
+        retry_count             INTEGER NOT NULL DEFAULT 0,
+        started_at              TIMESTAMPTZ,
+        finished_at             TIMESTAMPTZ,
+        exit_code               INTEGER,
+        error_message           TEXT,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_instances_wf_instance ON task_instances(workflow_instance_id);
+    CREATE INDEX IF NOT EXISTS idx_task_instances_status ON task_instances(status);
+    CREATE INDEX IF NOT EXISTS idx_task_instances_worker ON task_instances(worker_id);
 
     -- 7. 定时任务表
     CREATE TABLE IF NOT EXISTS cron_jobs (
@@ -151,10 +162,9 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 
-    -- 初始管理员用户（密码: admin123，PBKDF2-SHA256 hash）
-    -- 注意：实际部署时应使用 PasswordUtil 生成，此处为占位
+    -- Fix #167: 初始管理员用户（密码: admin123，bcrypt hash，与 schema.sql 一致）
     INSERT INTO users (username, password_hash, role)
-    VALUES ('admin', '$pbkdf2-sha256$i=10000$salt_placeholder$hash_placeholder', 'admin')
+    VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin')
     ON CONFLICT (username) DO NOTHING;
 
     -- 记录迁移版本

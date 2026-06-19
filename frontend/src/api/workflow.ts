@@ -1,21 +1,11 @@
 import request from '../utils/request'
 import type { AxiosResponse } from 'axios'
 import type { WorkflowItem, WorkflowCreateRequest } from '../types/workflow'
+// Fix #176: import shared API response types from types/api.ts
+import type { ApiResponse, PaginatedData } from '../types/api'
 
-// Fix #166: Add typed response wrappers so callers get proper typing instead
-// of untyped `unknown` payloads.
-export interface ApiResponse<T> {
-  code: number
-  message: string
-  data: T
-}
-
-export interface PaginatedData<T> {
-  items: T[]
-  total: number
-  page: number
-  page_size: number
-}
+// Re-export for backward compatibility (callers that imported from workflow.ts)
+export type { ApiResponse, PaginatedData }
 
 export function getWorkflows(params?: { page?: number; page_size?: number; keyword?: string }) {
   return request.get('/api/v1/workflows', { params })

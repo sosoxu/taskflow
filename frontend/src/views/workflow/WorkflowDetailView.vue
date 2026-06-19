@@ -4,6 +4,8 @@
       <h2>工作流详情</h2>
       <div>
         <el-button @click="goBack">返回</el-button>
+        <!-- Fix #178: WorkflowDetailView 缺少编辑入口 -->
+        <el-button type="warning" @click="handleEdit">编辑</el-button>
         <el-button type="primary" :loading="triggering" @click="handleTrigger">触发</el-button>
       </div>
     </div>
@@ -106,7 +108,7 @@
           :total="instanceTotal"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
-          @size-change="fetchInstances"
+          @size-change="handleSizeChange"
           @current-change="fetchInstances"
         />
       </div>
@@ -262,6 +264,12 @@ async function fetchInstances() {
   }
 }
 
+// Fix #175: 分页 size-change 未重置 page=1
+function handleSizeChange() {
+  instancePage.value = 1
+  fetchInstances()
+}
+
 async function handleTrigger() {
   try {
     await ElMessageBox.confirm('确定要手动触发此工作流吗？', '确认触发', {
@@ -291,6 +299,11 @@ function viewInstance(row: WorkflowInstance) {
 
 function goBack() {
   router.push({ name: 'workflow-list' })
+}
+
+// Fix #178: WorkflowDetailView 缺少编辑入口
+function handleEdit() {
+  router.push({ name: 'workflow-edit', params: { id: workflowId.value } })
 }
 
 onMounted(() => {

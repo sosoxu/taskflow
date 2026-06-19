@@ -120,6 +120,24 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
         }
     }
 
+    // Fix #168: Batch-cache Task lookups to avoid N+1 queries. Previously each
+    // drive cycle issued 3N task_dao_.findById() calls (one per iteration in
+    // the timeout/retry/final-state loops). Now we collect unique task_ids
+    // once and query each only once, reusing the cache across all three loops.
+    std::map<std::string, common::models::Task> task_cache;
+    {
+        std::set<std::string> unique_task_ids;
+        for (const auto& ti : task_instances) {
+            unique_task_ids.insert(ti.task_id);
+        }
+        for (const auto& task_id : unique_task_ids) {
+            auto task_result = task_dao_.findById(task_id);
+            if (task_result.ok()) {
+                task_cache[task_id] = task_result.value();
+            }
+        }
+    }
+
     // 4. 检查超时的 RUNNING 任务
     for (const auto& ti : task_instances) {
         if (ti.status == "RUNNING" && !ti.started_at.empty()) {
@@ -133,11 +151,11 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
                     auto now_tp = std::chrono::system_clock::now();
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - started_tp).count();
 
-                    // 获取任务超时时间
-                    auto task_info_result = task_dao_.findById(ti.task_id);
+                    // 获取任务超时时间 (Fix #168: read from cache instead of N+1 DB query)
                     int timeout = 3600;  // 默认超时
-                    if (task_info_result.ok()) {
-                        timeout = task_info_result.value().timeout;
+                    auto cache_it = task_cache.find(ti.task_id);
+                    if (cache_it != task_cache.end()) {
+                        timeout = cache_it->second.timeout;
                     }
                     // Fix #155: Apply node-level timeout override from param_overrides.
                     auto npo_it = node_param_overrides.find(ti.node_id);
@@ -169,12 +187,12 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     // 5. Check for FAILED/TIMEOUT tasks that can be retried
     for (const auto& ti : task_instances) {
         if (ti.status == "FAILED" || ti.status == "TIMEOUT") {
-            // Get task info for max_retries and retry_interval
-            auto task_info_result = task_dao_.findById(ti.task_id);
-            if (!task_info_result.ok()) {
+            // Get task info for max_retries and retry_interval (Fix #168: cache)
+            auto cache_it = task_cache.find(ti.task_id);
+            if (cache_it == task_cache.end()) {
                 continue;
             }
-            const auto& task_info = task_info_result.value();
+            const auto& task_info = cache_it->second;
             int max_retries = task_info.max_retries;
             int retry_interval = task_info.retry_interval;
 
@@ -315,8 +333,9 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
         updated_statuses[ti.node_id] = ti.status;
         // Check if any failed task still has retries remaining
         if ((ti.status == "FAILED" || ti.status == "TIMEOUT")) {
-            auto task_info_result = task_dao_.findById(ti.task_id);
-            if (task_info_result.ok() && ti.retry_count < task_info_result.value().max_retries) {
+            // Fix #168: read from cache instead of N+1 DB query
+            auto cache_it = task_cache.find(ti.task_id);
+            if (cache_it != task_cache.end() && ti.retry_count < cache_it->second.max_retries) {
                 has_pending_retry = true;
             }
         }
@@ -484,11 +503,14 @@ common::result::Result<void> DagDriver::dispatchTask(
         spdlog::warn("DagDriver: failed to merge param_overrides: {}", e.what());
     }
 
+    // Fix #168: Cache the WorkflowInstance lookup; it was fetched twice
+    // (once for config overrides, once for params overrides).
+    auto wf_instance_result = workflow_instance_dao_.findById(task_instance.workflow_instance_id);
+
     // Merge param_overrides from WorkflowInstance (runtime overrides)
     try {
-        auto instance_result = workflow_instance_dao_.findById(task_instance.workflow_instance_id);
-        if (instance_result.ok() && instance_result.value().param_overrides.is_object()) {
-            for (auto& [key, value] : instance_result.value().param_overrides.items()) {
+        if (wf_instance_result.ok() && wf_instance_result.value().param_overrides.is_object()) {
+            for (auto& [key, value] : wf_instance_result.value().param_overrides.items()) {
                 config[key] = value;
             }
         }
@@ -524,10 +546,10 @@ common::result::Result<void> DagDriver::dispatchTask(
         }
 
         // Merge WorkflowInstance param_overrides into params (highest priority, runtime overrides)
+        // Fix #168: reuse the cached wf_instance_result instead of querying again.
         try {
-            auto instance_result = workflow_instance_dao_.findById(task_instance.workflow_instance_id);
-            if (instance_result.ok() && instance_result.value().param_overrides.is_object()) {
-                for (auto& [key, value] : instance_result.value().param_overrides.items()) {
+            if (wf_instance_result.ok() && wf_instance_result.value().param_overrides.is_object()) {
+                for (auto& [key, value] : wf_instance_result.value().param_overrides.items()) {
                     params[key] = value;
                 }
             }

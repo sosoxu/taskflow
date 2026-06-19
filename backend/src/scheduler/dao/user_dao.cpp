@@ -115,21 +115,6 @@ common::result::Result<int> UserDao::count() {
         });
 }
 
-common::result::Result<void> UserDao::remove(const std::string& id) {
-    return common::database::DatabaseManager::instance().withTransaction<void>(
-        [&](pqxx::work& txn) -> common::result::Result<void> {
-            auto res = txn.exec_params(
-                "DELETE FROM users WHERE id = $1",
-                id);
-
-            if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("用户不存在，删除失败");
-            }
-
-            return common::result::Result<void>();
-        });
-}
-
 common::result::Result<void> UserDao::softDelete(const std::string& id) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {

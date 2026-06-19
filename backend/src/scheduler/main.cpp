@@ -5,6 +5,8 @@
 #include <fstream>
 #include <csignal>
 #include <atomic>
+#include <sstream>
+#include <vector>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/daily_file_sink.h>
@@ -192,15 +194,45 @@ int main(int argc, char* argv[]) {
         .addListener("0.0.0.0", config.server.http_port)
         .setThreadNum(4);
 
+    // Fix #182: Parse allowed CORS origins from config (comma-separated).
+    // If the list is non-empty and the request Origin is in it, echo that
+    // Origin; otherwise default to "*" (dev-friendly). Replaces the previous
+    // hardcoded "Access-Control-Allow-Origin: *" that allowed any origin.
+    std::vector<std::string> allowed_cors_origins;
+    {
+        std::stringstream ss(config.server.cors_origins);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            auto first = item.find_first_not_of(" \t");
+            auto last = item.find_last_not_of(" \t");
+            if (first != std::string::npos && last != std::string::npos) {
+                allowed_cors_origins.push_back(item.substr(first, last - first + 1));
+            }
+        }
+    }
+    auto resolve_cors_origin = [&allowed_cors_origins](const drogon::HttpRequestPtr& req) -> std::string {
+        if (!allowed_cors_origins.empty()) {
+            auto req_origin = req->getHeader("Origin");
+            if (!req_origin.empty()) {
+                for (const auto& o : allowed_cors_origins) {
+                    if (o == req_origin) {
+                        return req_origin;
+                    }
+                }
+            }
+        }
+        return "*";
+    };
+
     // CORS: 在路由之前拦截 OPTIONS 预检请求，返回 204
     drogon::app().registerPreRoutingAdvice(
-        [](const drogon::HttpRequestPtr& req,
+        [&resolve_cors_origin](const drogon::HttpRequestPtr& req,
            drogon::AdviceCallback&& acb,
            drogon::AdviceChainCallback&& accb) {
             if (req->method() == drogon::Options) {
                 auto resp = drogon::HttpResponse::newHttpResponse();
                 resp->setStatusCode(drogon::k204NoContent);
-                resp->addHeader("Access-Control-Allow-Origin", "*");
+                resp->addHeader("Access-Control-Allow-Origin", resolve_cors_origin(req));
                 resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
                 resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
                 resp->addHeader("Access-Control-Max-Age", "86400");
@@ -219,8 +251,8 @@ int main(int argc, char* argv[]) {
 
     // 为所有响应添加 CORS 头
     drogon::app().registerPostHandlingAdvice(
-        [](const drogon::HttpRequestPtr&, const drogon::HttpResponsePtr& resp) {
-            resp->addHeader("Access-Control-Allow-Origin", "*");
+        [&resolve_cors_origin](const drogon::HttpRequestPtr& req, const drogon::HttpResponsePtr& resp) {
+            resp->addHeader("Access-Control-Allow-Origin", resolve_cors_origin(req));
             resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
             resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
         });

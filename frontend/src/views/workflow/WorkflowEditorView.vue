@@ -502,6 +502,19 @@ async function handleSave() {
     ElMessage.warning('请输入工作流名称')
     return
   }
+  // Fix #174: 工作流表单校验不完整
+  if (form.cron_enabled && !form.cron_expression?.trim()) {
+    ElMessage.error('启用 Cron 时请输入 Cron 表达式')
+    return
+  }
+  if (form.schedule_strategy === 'specified' && !form.target_worker_id?.trim()) {
+    ElMessage.error('调度策略为指定节点时请选择目标 Worker')
+    return
+  }
+  if (vfNodes.value.length === 0) {
+    ElMessage.error('DAG 节点不能为空，请至少添加一个任务节点')
+    return
+  }
 
   saving.value = true
   try {

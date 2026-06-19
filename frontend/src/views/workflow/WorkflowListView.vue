@@ -2,7 +2,8 @@
   <div class="workflow-list">
     <div class="page-header">
       <h2>工作流管理</h2>
-      <el-button type="primary" @click="handleCreate">创建工作流</el-button>
+      <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
+      <el-button v-if="userStore.isOperator" type="primary" @click="handleCreate">创建工作流</el-button>
     </div>
 
     <div class="search-bar">
@@ -50,9 +51,10 @@
       <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="handleView(row)">查看</el-button>
-          <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-          <el-button link type="success" size="small" @click="handleTrigger(row)">触发</el-button>
+          <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
+          <el-button v-if="userStore.isOperator" link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button v-if="userStore.isOperator" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          <el-button v-if="userStore.isOperator" link type="success" size="small" @click="handleTrigger(row)">触发</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -64,7 +66,7 @@
         :total="total"
         :page-sizes="[10, 20, 50]"
         layout="total, sizes, prev, pager, next, jumper"
-        @size-change="fetchList"
+        @size-change="handleSizeChange"
         @current-change="fetchList"
       />
     </div>
@@ -94,8 +96,11 @@ import { ElMessage } from 'element-plus'
 import { getWorkflows, deleteWorkflow, triggerWorkflow } from '../../api/workflow'
 import { formatTime } from '../../utils/format'
 import type { WorkflowItem } from '../../types/workflow'
+import { useUserStore } from '../../stores/userStore'
 
 const router = useRouter()
+// Fix #172: viewer 角色隐藏写操作按钮
+const userStore = useUserStore()
 
 const loading = ref(false)
 const workflows = ref<WorkflowItem[]>([])
@@ -149,6 +154,12 @@ async function fetchList() {
 }
 
 function handleSearch() {
+  page.value = 1
+  fetchList()
+}
+
+// Fix #175: 分页 size-change 未重置 page=1
+function handleSizeChange() {
   page.value = 1
   fetchList()
 }

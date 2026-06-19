@@ -88,7 +88,7 @@
                 <router-link :to="`/instances/${row.id}`" class="link">{{ row.id.substring(0, 8) }}...</router-link>
               </template>
             </el-table-column>
-            <el-table-column prop="workflow_id" label="工作流" />
+            <el-table-column prop="workflow_name" label="工作流" />
             <el-table-column prop="status" label="状态" width="120">
               <template #default="{ row }">
                 <el-tag :type="statusTagType(row.status)" size="small">
@@ -96,9 +96,8 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="trigger_type" label="触发类型" width="100" />
-            <el-table-column label="创建时间" width="180">
-              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            <el-table-column label="开始时间" width="180">
+              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
             </el-table-column>
           </el-table>
           <el-empty v-if="recentInstances.length === 0" description="暂无实例数据" />
@@ -112,11 +111,12 @@
             </div>
           </template>
           <div class="quick-actions">
-            <el-button type="primary" size="large" @click="$router.push('/tasks')">
+            <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
+            <el-button v-if="userStore.isOperator" type="primary" size="large" @click="$router.push('/tasks')">
               <el-icon><Plus /></el-icon>
               创建任务
             </el-button>
-            <el-button type="success" size="large" @click="$router.push('/workflows/create')">
+            <el-button v-if="userStore.isOperator" type="success" size="large" @click="$router.push('/workflows/create')">
               <el-icon><Plus /></el-icon>
               创建工作流
             </el-button>
@@ -132,6 +132,10 @@ import { reactive, ref, onMounted } from 'vue'
 import { Document, Share, VideoPlay, Monitor, Plus, TrendCharts, CircleCheck } from '@element-plus/icons-vue'
 import { getDashboardStats } from '../api/dashboard'
 import { formatTime } from '../utils/format'
+import { useUserStore } from '../stores/userStore'
+
+// Fix #172: viewer 角色隐藏写操作按钮
+const userStore = useUserStore()
 
 const stats = reactive({
   totalTasks: 0,
@@ -142,12 +146,12 @@ const stats = reactive({
   successRate: 0,
 })
 
+// Fix #176: InstanceItem matches the DashboardStats recent_instances shape
 interface InstanceItem {
   id: string
-  workflow_id: string
+  workflow_name: string
   status: string
-  trigger_type: string
-  created_at: string
+  started_at: string
 }
 
 const recentInstances = ref<InstanceItem[]>([])

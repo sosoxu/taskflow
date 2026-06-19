@@ -21,7 +21,7 @@
         </el-select>
         <el-button type="primary" :icon="Search" style="margin-left: 12px" @click="handleSearch">搜索</el-button>
       </div>
-      <el-button type="primary" :icon="Plus" @click="handleCreate">创建任务</el-button>
+      <el-button v-if="userStore.isOperator" type="primary" :icon="Plus" @click="handleCreate">创建任务</el-button>
     </div>
 
     <el-table :data="taskList" v-loading="loading" stripe style="width: 100%">
@@ -43,8 +43,9 @@
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="handleView(row)">查看</el-button>
-          <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-popconfirm title="确认删除该任务？" @confirm="handleDelete(row)">
+          <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
+          <el-button v-if="userStore.isOperator" link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-popconfirm v-if="userStore.isOperator" title="确认删除该任务？" @confirm="handleDelete(row)">
             <template #reference>
               <el-button link type="danger" size="small">删除</el-button>
             </template>
@@ -60,7 +61,7 @@
         :total="total"
         :page-sizes="[10, 20, 50]"
         layout="total, sizes, prev, pager, next, jumper"
-        @size-change="fetchList"
+        @size-change="handleSizeChange"
         @current-change="fetchList"
       />
     </div>
@@ -184,6 +185,7 @@ import { Search, Plus, Delete } from '@element-plus/icons-vue'
 import { getTasks, getTask, createTask, updateTask, deleteTask } from '../../api/task'
 import type { TaskItem, TaskConfig } from '../../types/task'
 import { formatTime } from '../../utils/format'
+import { useUserStore } from '../../stores/userStore'
 import { basicSetup } from 'codemirror'
 import { EditorView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
@@ -192,6 +194,8 @@ import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 
 const router = useRouter()
+// Fix #172: viewer 角色隐藏写操作按钮
+const userStore = useUserStore()
 
 const typeTagMap: Record<string, { type: string; label: string }> = {
   command: { type: 'primary', label: 'Command' },
@@ -229,6 +233,12 @@ async function fetchList() {
 }
 
 function handleSearch() {
+  page.value = 1
+  fetchList()
+}
+
+// Fix #175: 分页 size-change 未重置 page=1
+function handleSizeChange() {
   page.value = 1
   fetchList()
 }
@@ -432,6 +442,39 @@ async function handleSubmit() {
     await formRef.value?.validate()
   } catch {
     return
+  }
+  // Fix #174: 按任务类型校验必填字段
+  if (form.type === 'command') {
+    if (!form.config.command?.trim()) {
+      ElMessage.error('请输入命令')
+      return
+    }
+  } else if (form.type === 'script') {
+    if (!form.config.script_content?.trim()) {
+      ElMessage.error('请输入脚本内容')
+      return
+    }
+  } else if (form.type === 'sql') {
+    if (!form.config.db_host?.trim()) {
+      ElMessage.error('请输入数据库地址')
+      return
+    }
+    if (!form.config.db_name?.trim()) {
+      ElMessage.error('请输入数据库名')
+      return
+    }
+    if (!form.config.db_user?.trim()) {
+      ElMessage.error('请输入用户名')
+      return
+    }
+    if (!form.config.db_password?.trim()) {
+      ElMessage.error('请输入密码')
+      return
+    }
+    if (!form.config.sql_statement?.trim()) {
+      ElMessage.error('请输入 SQL 语句')
+      return
+    }
   }
   submitting.value = true
   try {
