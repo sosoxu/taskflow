@@ -150,6 +150,9 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
 
     if (pid == 0) {
         // Child process
+        // Fix #206: Create a new process group so timeout/cancel can kill the
+        // whole group, cleaning up any subprocesses pqxx/libpq may spawn.
+        setpgid(0, 0);
         int rc = runSqlChild(conn_str, sql_statement, log_path);
         _exit(rc);
     }
@@ -177,7 +180,8 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - start).count();
         if (timeout > 0 && elapsed >= timeout) {
-            kill(pid, SIGKILL);
+            // Fix #206: Kill the whole process group (negative pid).
+            kill(-pid, SIGKILL);
             waitpid(pid, &status, 0);
             result.status = "TIMEOUT";
             result.exit_code = -1;

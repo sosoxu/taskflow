@@ -202,23 +202,12 @@ async function handleRegister() {
 
   registerLoading.value = true
   try {
+    // Fix #209/#210: Separate the registration call from the auto-login call.
+    // Previously both were inside one try/catch, so an auto-login failure
+    // (e.g. transient network error) reported "注册失败" even though
+    // registration had succeeded — leaving the user unable to register again
+    // (username now exists) but thinking registration failed.
     await register(registerForm.username, registerForm.password)
-    ElMessage.success('注册成功，正在自动登录...')
-    showRegisterDialog.value = false
-
-    // Auto-login after registration (direct API call, skip form validation)
-    const { data: resp } = await login(registerForm.username, registerForm.password)
-    const data = resp.data
-    userStore.setUser({
-      userId: data.user_id,
-      username: data.username,
-      role: data.role,
-      token: data.access_token,
-      refreshToken: data.refresh_token,
-    })
-    setToken(data.access_token)
-    ElMessage.success('登录成功')
-    router.push('/')
   } catch (err: unknown) {
     const errData = (err as { response?: { data?: { message?: string; code?: number } } })?.response?.data
     let message = '注册失败，请稍后重试'
@@ -232,6 +221,32 @@ async function handleRegister() {
       }
     }
     ElMessage.error(message)
+    registerLoading.value = false
+    return
+  }
+
+  // Registration succeeded — attempt auto-login in its own try/catch so a
+  // login failure does not masquerade as a registration failure.
+  try {
+    const { data: resp } = await login(registerForm.username, registerForm.password)
+    const data = resp.data
+    userStore.setUser({
+      userId: data.user_id,
+      username: data.username,
+      role: data.role,
+      token: data.access_token,
+      refreshToken: data.refresh_token,
+    })
+    setToken(data.access_token)
+    ElMessage.success('登录成功')
+    showRegisterDialog.value = false
+    // Fix #210: Respect the redirect query param (same as handleLogin) instead
+    // of always pushing to '/'.
+    const redirect = route.query.redirect as string
+    router.push(redirect || '/')
+  } catch {
+    ElMessage.warning('注册成功，但自动登录失败，请手动登录')
+    showRegisterDialog.value = false
   } finally {
     registerLoading.value = false
   }

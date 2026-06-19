@@ -57,6 +57,13 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
 
     if (pid == 0) {
         // Child process
+        // Fix #206: Create a new process group so that on timeout/cancel we can
+        // kill the entire group (kill(-pgid)) and reap any grandchildren the
+        // shell may have spawned (pipelines, background jobs, etc.). Without
+        // this, kill(pid) only terminates the direct /bin/sh child, leaving
+        // grandchildren orphaned and still running.
+        setpgid(0, 0);
+
         int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd < 0) {
             _exit(127);
@@ -110,7 +117,9 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - start).count();
         if (timeout > 0 && elapsed >= timeout) {
-            kill(pid, SIGKILL);
+            // Fix #206: Kill the whole process group (negative pid) to clean up
+            // any grandchildren spawned by the shell, not just /bin/sh itself.
+            kill(-pid, SIGKILL);
             waitpid(pid, &status, 0);
             result.status = "TIMEOUT";
             result.exit_code = -1;

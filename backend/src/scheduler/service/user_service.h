@@ -22,7 +22,12 @@ public:
         const std::string& username, const std::string& password, const std::string& role);
 
     // Update user role
-    common::result::Result<nlohmann::json> updateUserRole(const std::string& id, const std::string& role);
+    // Fix #205: current_user_id is used to prevent a user from changing their
+    // own role (which could lock them out of admin, leaving the system without
+    // an administrator).
+    common::result::Result<nlohmann::json> updateUserRole(const std::string& id,
+                                                           const std::string& role,
+                                                           const std::string& current_user_id);
 
     // Delete user
     common::result::Result<void> deleteUser(const std::string& id, const std::string& current_user_id);

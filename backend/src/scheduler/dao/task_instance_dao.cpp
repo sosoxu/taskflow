@@ -206,16 +206,22 @@ common::result::Result<std::vector<std::string>> TaskInstanceDao::batchCreate(
 common::result::Result<void> TaskInstanceDao::resetForRetry(const std::string& id) {
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #201: Only allow retry reset from a terminal/failed state.
+            // Without this guard, a RUNNING task could be reset to PENDING,
+            // causing DagDriver to dispatch it again while the original
+            // execution is still in progress (double execution / data corruption).
             auto res = txn.exec_params(
                 "UPDATE task_instances SET status = 'PENDING', "
                 "retry_count = retry_count + 1, "
                 "worker_id = NULL, started_at = NULL, finished_at = NULL, "
                 "exit_code = NULL, error_message = NULL "
-                "WHERE id = $1",
+                "WHERE id = $1 AND status IN "
+                "('FAILED', 'TIMEOUT', 'CANCELLED', 'NODE_OFFLINE', 'UPSTREAM_FAILED')",
                 id);
 
             if (res.affected_rows() == 0) {
-                return common::result::Result<void>::failure("任务实例不存在，重置重试失败");
+                return common::result::Result<void>::failure(
+                    "任务实例不存在或当前状态不允许重试（仅失败/取消/超时等终态可重试）");
             }
 
             return common::result::Result<void>();

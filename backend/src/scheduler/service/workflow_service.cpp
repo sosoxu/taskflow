@@ -2,6 +2,8 @@
 
 #include "scheduler/service/dag_validator.h"
 #include "scheduler/engine/cron_parser.h"
+#include "common/database/database_manager.h"
+#include "common/util/uuid.h"
 
 #include <chrono>
 #include <ctime>
@@ -332,14 +334,13 @@ common::result::Result<void> WorkflowService::deleteWorkflow(
     }
 
     // Check if there are running instances
-    auto runningInstances = workflow_instance_dao_.listByWorkflow(id, 0, 100);
-    if (runningInstances.ok()) {
-        for (const auto& inst : runningInstances.value()) {
-            if (inst.status == "PENDING" || inst.status == "RUNNING" || inst.status == "PAUSED") {
-                return common::result::Result<void>::failure(
-                    "工作流有正在运行的实例，无法删除。请先取消或等待实例完成。");
-            }
-        }
+    // Fix #203: Use a COUNT query instead of fetching a limited page (formerly
+    // limit=100) and iterating. A page-based check could miss running instances
+    // beyond the page boundary, allowing deletion of a workflow with active runs.
+    auto activeCount = workflow_instance_dao_.countActiveByWorkflow(id);
+    if (activeCount.ok() && activeCount.value() > 0) {
+        return common::result::Result<void>::failure(
+            "工作流有正在运行的实例，无法删除。请先取消或等待实例完成。");
     }
 
     // Soft delete the workflow
@@ -387,22 +388,21 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
         return common::result::Result<nlohmann::json>::failure("权限不足，只能触发自己创建的工作流");
     }
 
-    // 2. Create WorkflowInstance (status=PENDING, trigger_type="manual")
-    auto instanceResult = workflow_instance_dao_.create(
-        workflow_id, workflow.version, "manual", creator_id, param_overrides);
-    if (!instanceResult.ok()) {
-        return common::result::Result<nlohmann::json>::failure(
-            "Failed to create workflow instance: " + instanceResult.error());
-    }
-    const auto& instance_id = instanceResult.value();
-
-    // 3. Parse dag_json to get all nodes
+    // 2. Parse dag_json to get all nodes
     const auto& dag = workflow.dag_json;
     if (!dag.contains("nodes") || !dag["nodes"].is_array()) {
         return common::result::Result<nlohmann::json>::failure("Invalid DAG: missing nodes array");
     }
 
-    // 4. For each node, get task info and create TaskInstance
+    // 3. Pre-fetch all task info (reads can happen outside the write transaction).
+    // Collect (task_id, task_version, task_name, node_id) for each node.
+    struct NodeTaskInfo {
+        std::string task_id;
+        int task_version;
+        std::string task_name;
+        std::string node_id;
+    };
+    std::vector<NodeTaskInfo> node_tasks;
     for (const auto& node : dag["nodes"]) {
         std::string task_id = node["task_id"].get<std::string>();
 
@@ -413,17 +413,60 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
         }
         const auto& task = taskResult.value();
 
-        // 5. Create TaskInstance for each node
-        std::string node_id = node.value("id", "");
-        auto taskInstanceResult = task_instance_dao_.create(
-            instance_id, task_id, task.version, task.name, node_id);
-        if (!taskInstanceResult.ok()) {
-            return common::result::Result<nlohmann::json>::failure(
-                "Failed to create task instance: " + taskInstanceResult.error());
-        }
+        NodeTaskInfo info;
+        info.task_id = task_id;
+        info.task_version = task.version;
+        info.task_name = task.name;
+        info.node_id = node.value("id", "");
+        node_tasks.push_back(std::move(info));
     }
 
-    // 6. Return {"instance_id": id, "workflow_instance": instance.toJson()}
+    // 4. Fix #202: Create the WorkflowInstance AND all TaskInstances in a
+    // SINGLE transaction. Previously these were separate transactions: if a
+    // TaskInstance insert failed mid-loop, the WorkflowInstance was left
+    // orphaned in PENDING with no tasks, which DagDriver could never advance.
+    std::string instance_id;
+    auto txnResult = common::database::DatabaseManager::instance().withTransaction<std::string>(
+        [&](pqxx::work& txn) -> common::result::Result<std::string> {
+            instance_id = common::util::generateUuid();
+
+            auto instRes = txn.exec_params(
+                "INSERT INTO workflow_instances "
+                "(id, workflow_id, workflow_version, status, trigger_type, param_overrides, creator_id) "
+                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6) "
+                "RETURNING id",
+                instance_id, workflow_id, workflow.version, "manual",
+                param_overrides.dump(), creator_id);
+
+            if (instRes.empty()) {
+                return common::result::Result<std::string>::failure("创建工作流实例失败");
+            }
+
+            for (const auto& info : node_tasks) {
+                auto task_inst_id = common::util::generateUuid();
+                auto taskInstRes = txn.exec_params(
+                    "INSERT INTO task_instances "
+                    "(id, workflow_instance_id, task_id, task_version, task_name, node_id, status) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, 'PENDING') "
+                    "RETURNING id",
+                    task_inst_id, instance_id, info.task_id, info.task_version,
+                    info.task_name, info.node_id);
+
+                if (taskInstRes.empty()) {
+                    return common::result::Result<std::string>::failure(
+                        "创建任务实例失败（节点: " + info.node_id + "）");
+                }
+            }
+
+            return std::string(instance_id);
+        });
+
+    if (!txnResult.ok()) {
+        return common::result::Result<nlohmann::json>::failure(
+            "Failed to trigger workflow: " + txnResult.error());
+    }
+
+    // 5. Return {"instance_id": id, "workflow_instance": instance.toJson()}
     auto fetchInstance = workflow_instance_dao_.findById(instance_id);
     if (!fetchInstance.ok()) {
         return common::result::Result<nlohmann::json>::failure(

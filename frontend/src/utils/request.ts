@@ -106,6 +106,12 @@ request.interceptors.response.use(
             localStorage.setItem('refresh_token', response.data.data.refresh_token)
           }
 
+          // Fix #212: Sync the new token into the Pinia userStore. The storage
+          // event only fires in OTHER tabs, so without this the current tab's
+          // userStore.token stays stale (holding the old, now-invalid token).
+          const userStore = useUserStore()
+          userStore.token = newAccessToken
+
           onTokenRefreshed(newAccessToken)
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`
           return request(originalRequest)

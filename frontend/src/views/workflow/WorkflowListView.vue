@@ -35,10 +35,10 @@
           {{ row.cron_enabled ? row.cron_expression : '-' }}
         </template>
       </el-table-column>
-      <el-table-column prop="status" label="状态" width="100" align="center">
+      <el-table-column label="定时调度" width="100" align="center">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-            {{ row.status === 'active' ? '启用' : '停用' }}
+          <el-tag :type="row.cron_enabled ? 'success' : 'info'" size="small">
+            {{ row.cron_enabled ? '启用' : '停用' }}
           </el-tag>
         </template>
       </el-table-column>

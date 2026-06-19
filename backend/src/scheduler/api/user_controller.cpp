@@ -127,7 +127,10 @@ void UserController::updateUserRole(
         return;
     }
 
-    auto result = user_service_->updateUserRole(id, role);
+    // Fix #205: Pass current user id so the service can reject self-role-change.
+    std::string current_user_id = req->getAttributes()->get<std::string>("user_id");
+
+    auto result = user_service_->updateUserRole(id, role, current_user_id);
     if (!result.ok()) {
         sendError(std::move(callback), 400, 40405, result.error());
         return;

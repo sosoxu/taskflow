@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <random>
 #include <string>
 #include <vector>
@@ -71,8 +72,11 @@ public:
             return common::result::Result<common::models::WorkerInfo>::failure(
                 "没有在线 Worker");
         }
-        std::random_device rd;
-        std::mt19937 gen(rd());
+        // Fix #214: Reuse a thread-local mt19937 instead of constructing a
+        // std::random_device (which opens /dev/urandom) on every dispatch.
+        static thread_local std::mt19937 gen{
+            static_cast<unsigned int>(
+                std::chrono::steady_clock::now().time_since_epoch().count())};
         std::uniform_int_distribution<size_t> dist(0, online_workers.size() - 1);
         return online_workers[dist(gen)];
     }
@@ -86,13 +90,29 @@ public:
             return common::result::Result<common::models::WorkerInfo>::failure(
                 "没有在线 Worker");
         }
+        // Fix #200: Compare load RATIO (running_tasks / max_tasks) instead of
+        // absolute running_tasks. A worker with max_tasks=100 running 10 tasks
+        // (10% load) should be preferred over one with max_tasks=2 running 3
+        // tasks (150% load). Comparing absolute values unfairly favored
+        // high-capacity workers even when they were more loaded.
         size_t min_idx = 0;
+        double min_ratio = loadRatio(online_workers[0]);
         for (size_t i = 1; i < online_workers.size(); ++i) {
-            if (online_workers[i].running_tasks < online_workers[min_idx].running_tasks) {
+            double ratio = loadRatio(online_workers[i]);
+            if (ratio < min_ratio) {
+                min_ratio = ratio;
                 min_idx = i;
             }
         }
         return online_workers[min_idx];
+    }
+
+private:
+    static double loadRatio(const common::models::WorkerInfo& w) {
+        // max_tasks <= 0 means the worker cannot accept tasks; treat as fully
+        // loaded so it is never selected over a usable worker.
+        if (w.max_tasks <= 0) return 1e9;
+        return static_cast<double>(w.running_tasks) / static_cast<double>(w.max_tasks);
     }
 };
 

@@ -75,6 +75,10 @@ common::result::Result<nlohmann::json> UserService::createUser(
     }
 
     // Check username uniqueness
+    // Fix #204: The check-then-create below is inherently racy — two concurrent
+    // requests can both pass findByUsername and both proceed to create. We rely
+    // on the DB unique constraint as the source of truth and translate the
+    // duplicate-key error into a friendly message (same pattern as createWorkflow).
     auto existingResult = user_dao_.findByUsername(username);
     if (existingResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -91,8 +95,15 @@ common::result::Result<nlohmann::json> UserService::createUser(
     // Create user
     auto createResult = user_dao_.create(username, hashResult.value(), role);
     if (!createResult.ok()) {
+        std::string error = createResult.error();
+        // Fix #204: Catch the race-condition duplicate key and return the same
+        // friendly message as the explicit check above.
+        if (error.find("duplicate key") != std::string::npos) {
+            return common::result::Result<nlohmann::json>::failure(
+                "Username already exists");
+        }
         return common::result::Result<nlohmann::json>::failure(
-            "Failed to create user: " + createResult.error());
+            "Failed to create user: " + error);
     }
 
     // Fetch the created user
@@ -105,11 +116,21 @@ common::result::Result<nlohmann::json> UserService::createUser(
     return userResult.value().toSafeJson();
 }
 
-common::result::Result<nlohmann::json> UserService::updateUserRole(const std::string& id, const std::string& role) {
+common::result::Result<nlohmann::json> UserService::updateUserRole(const std::string& id,
+                                                                    const std::string& role,
+                                                                    const std::string& current_user_id) {
     // Validate role
     if (role != "admin" && role != "operator" && role != "viewer") {
         return common::result::Result<nlohmann::json>::failure(
             "Invalid role: must be one of admin, operator, viewer");
+    }
+
+    // Fix #205: Prevent a user from changing their own role. An admin
+    // downgrading themselves to viewer/operator would immediately lose the
+    // ability to manage users, potentially leaving the system with no admin.
+    if (id == current_user_id) {
+        return common::result::Result<nlohmann::json>::failure(
+            "Cannot change your own role");
     }
 
     auto result = user_dao_.updateRole(id, role);

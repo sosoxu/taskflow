@@ -102,10 +102,11 @@ SchedulerServiceImpl::SchedulerServiceImpl() = default;
             spdlog::info("ReportTaskResult: ignoring late report for task instance {} "
                          "(current status={}, reported status={})",
                          ti_id, ti.status, status);
-            // Still decrement running_tasks if the worker had a task assigned.
-            if (!ti.worker_id.empty()) {
-                worker_dao_.decrementRunningTasks(ti.worker_id);
-            }
+            // Fix #199: Do NOT decrement running_tasks here. The task is already
+            // terminal, which means running_tasks was already decremented when it
+            // first finished (below), or reset to 0 by heartbeat_checker when the
+            // worker went offline. Decrementing again would double-count and could
+            // drive the counter negative, misleading LoadBalanceDispatcher.
             response->set_acknowledged(true);
             return ::grpc::Status::OK;
         }

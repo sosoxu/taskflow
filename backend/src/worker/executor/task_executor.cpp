@@ -168,8 +168,10 @@ common::result::Result<void> TaskExecutor::cancel(
         }
     }
 
-    // Send SIGTERM first for graceful termination
-    if (kill(pid, SIGTERM) != 0) {
+    // Send SIGTERM first for graceful termination.
+    // Fix #206: Use negative pid to signal the whole process group, so that
+    // grandchildren spawned by the shell / pqxx are also terminated.
+    if (kill(-pid, SIGTERM) != 0) {
         // Process may have already exited; check if it's still alive
         if (kill(pid, 0) != 0) {
             return common::result::Result<void>();
@@ -190,8 +192,8 @@ common::result::Result<void> TaskExecutor::cancel(
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    // Still running after grace period, send SIGKILL
-    if (kill(pid, SIGKILL) != 0 && kill(pid, 0) != 0) {
+    // Still running after grace period, send SIGKILL to the whole group
+    if (kill(-pid, SIGKILL) != 0 && kill(pid, 0) != 0) {
         return common::result::Result<void>::failure(
             "Failed to send SIGKILL to process " + std::to_string(pid));
     }

@@ -39,9 +39,12 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('refresh_token')
   }
 
-  // Fix #198: 多标签页同步。监听 storage 事件，当其他标签页登出
+  // Fix #198/#213: 多标签页同步。监听 storage 事件，当其他标签页登出
   // （access_token 被清除）时清除本标签页状态；当其他标签页更新 token 时
   // 同步本标签页 token。storage 事件只在其他标签页触发，不会循环。
+  // Fix #213: Also sync user_id/username/role so that when another tab logs in
+  // as a different user, this tab's role-based UI (isAdmin/isOperator) updates
+  // correctly instead of showing the previous user's permissions.
   if (typeof window !== 'undefined') {
     window.addEventListener('storage', (e) => {
       if (e.key === 'access_token') {
@@ -50,6 +53,12 @@ export const useUserStore = defineStore('user', () => {
         } else {
           token.value = e.newValue
         }
+      } else if (e.key === 'user_id') {
+        userId.value = e.newValue || ''
+      } else if (e.key === 'username') {
+        username.value = e.newValue || ''
+      } else if (e.key === 'role') {
+        role.value = e.newValue || ''
       }
     })
   }

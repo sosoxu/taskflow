@@ -19,8 +19,22 @@
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openRoleDialog(row)">修改角色</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button
+              type="primary"
+              link
+              size="small"
+              :disabled="row.id === userStore.userId"
+              :title="row.id === userStore.userId ? '不能修改自己的角色' : ''"
+              @click="openRoleDialog(row)"
+            >修改角色</el-button>
+            <el-button
+              type="danger"
+              link
+              size="small"
+              :disabled="row.id === userStore.userId"
+              :title="row.id === userStore.userId ? '不能删除自己' : ''"
+              @click="handleDelete(row)"
+            >删除</el-button>
           </template>
         </el-table-column>
       </el-table>

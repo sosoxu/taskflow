@@ -126,6 +126,21 @@ common::result::Result<int> WorkflowInstanceDao::countByWorkflow(const std::stri
         });
 }
 
+common::result::Result<int> WorkflowInstanceDao::countActiveByWorkflow(const std::string& workflow_id) {
+    // Fix #203: Count active instances with a single SQL query instead of
+    // fetching a limited page and iterating. This avoids missing running
+    // instances that fall beyond the page size (previously limit=100).
+    return common::database::DatabaseManager::instance().withReadTransaction<int>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<int> {
+            auto row = txn.exec_params(
+                "SELECT COUNT(*) FROM workflow_instances "
+                "WHERE workflow_id = $1 AND status IN ('PENDING', 'RUNNING', 'PAUSED')",
+                workflow_id);
+            int total = row[0][0].as<int>();
+            return total;
+        });
+}
+
 common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowInstanceDao::listActive() {
     return common::database::DatabaseManager::instance().withReadTransaction<std::vector<common::models::WorkflowInstance>>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<std::vector<common::models::WorkflowInstance>> {

@@ -30,6 +30,11 @@ public:
 
     common::result::Result<int> countByWorkflow(const std::string& workflow_id);
 
+    // Fix #203: Count active (PENDING/RUNNING/PAUSED) instances for a workflow.
+    // Used by deleteWorkflow to check for running instances without fetching
+    // a limited page (which could miss instances beyond the page size).
+    common::result::Result<int> countActiveByWorkflow(const std::string& workflow_id);
+
     common::result::Result<std::vector<common::models::WorkflowInstance>> listAll(int offset, int limit);
 
     common::result::Result<int> countAll();

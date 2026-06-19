@@ -37,6 +37,10 @@ const router = createRouter({
           path: 'workflows/create',
           name: 'workflow-create',
           component: () => import('../views/workflow/WorkflowEditorView.vue'),
+          // Fix #211: Write-operation routes require operator+ role. Without
+          // this, a viewer could navigate directly to the editor URL even
+          // though the list-view buttons are hidden.
+          meta: { requireOperator: true },
         },
         {
           path: 'workflows/:id',
@@ -47,6 +51,8 @@ const router = createRouter({
           path: 'workflows/:id/edit',
           name: 'workflow-edit',
           component: () => import('../views/workflow/WorkflowEditorView.vue'),
+          // Fix #211: Same as workflow-create — editing requires operator+.
+          meta: { requireOperator: true },
         },
         {
           path: 'instances/:id',
@@ -88,6 +94,11 @@ router.beforeEach((to, from, next) => {
       next({ path: '/login', query: { redirect: to.fullPath } })
     } else if (to.path === '/users' && !userStore.isAdmin) {
       // Only admin can access user management page
+      next('/')
+    } else if ((to.meta as { requireOperator?: boolean })?.requireOperator && !userStore.isOperator) {
+      // Fix #211: Block viewers from write-operation routes (create/edit).
+      // The list-view buttons are already hidden, but without this guard a
+      // viewer could type the URL directly.
       next('/')
     } else {
       next()
