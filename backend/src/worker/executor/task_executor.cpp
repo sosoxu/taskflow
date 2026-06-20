@@ -74,6 +74,12 @@ common::result::Result<void> TaskExecutor::submit(
             return common::result::Result<void>::failure(
                 "TaskExecutor is shutting down");
         }
+        // Fix #272: 拒绝重复的 task_instance_id，防止覆盖旧任务导致无法 cancel
+        if (running_processes_.find(task_instance_id) != running_processes_.end()) {
+            running_count_.fetch_sub(1);
+            return common::result::Result<void>::failure(
+                "Duplicate task instance id already running: " + task_instance_id);
+        }
         // Register a placeholder entry (pid=0) so cancel() can find the task
         // even before the executor thread reports the actual PID.
         running_processes_[task_instance_id] = 0;
@@ -105,10 +111,27 @@ common::result::Result<void> TaskExecutor::submit(
                  callback = std::move(callback),
                  pid_callback = std::move(pid_callback),
                  raw_log_sink, log_sink_ref = std::move(log_sink_ref)]() mutable {
-        TaskResult result = executor->execute(task_instance_id, config,
-                                              timeout, log_dir,
-                                              std::move(pid_callback),
-                                              raw_log_sink);
+        TaskResult result;
+        // Fix #272: 用 try-catch 包裹 execute 和 callback，防止异常导致 std::terminate
+        // 以及 active_threads_ 不递减导致析构永久阻塞
+        try {
+            result = executor->execute(task_instance_id, config,
+                                       timeout, log_dir,
+                                       std::move(pid_callback),
+                                       raw_log_sink);
+        } catch (const std::exception& e) {
+            result.status = "FAILED";
+            result.exit_code = -1;
+            result.error_message = std::string("Executor threw exception: ") + e.what();
+            spdlog::error("TaskExecutor: executor threw exception for task {}: {}",
+                          task_instance_id, e.what());
+        } catch (...) {
+            result.status = "FAILED";
+            result.exit_code = -1;
+            result.error_message = "Executor threw unknown exception";
+            spdlog::error("TaskExecutor: executor threw unknown exception for task {}",
+                          task_instance_id);
+        }
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -121,8 +144,17 @@ common::result::Result<void> TaskExecutor::submit(
         running_count_.fetch_sub(1);
         cv_.notify_all();
 
+        // Fix #272: 用 try-catch 包裹 callback，防止回调抛异常导致 std::terminate
         if (callback) {
-            callback(result);
+            try {
+                callback(result);
+            } catch (const std::exception& e) {
+                spdlog::error("TaskExecutor: callback threw exception for task {}: {}",
+                              task_instance_id, e.what());
+            } catch (...) {
+                spdlog::error("TaskExecutor: callback threw unknown exception for task {}",
+                              task_instance_id);
+            }
         }
 
         // Decrement active_threads_ LAST so the destructor doesn't return

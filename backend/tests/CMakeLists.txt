@@ -12,6 +12,9 @@ add_executable(taskflow_tests
     test_dag_cron_extended.cpp
     test_cron_long_task.cpp
     test_config.cpp
+    test_api_response.cpp
+    test_resource_collector.cpp
+    test_dag_driver.cpp
     ${CMAKE_SOURCE_DIR}/src/scheduler/engine/dag_engine.cpp
     ${CMAKE_SOURCE_DIR}/src/common/util/crypto_util.cpp
     ${CMAKE_SOURCE_DIR}/src/worker/executor/task_executor.cpp

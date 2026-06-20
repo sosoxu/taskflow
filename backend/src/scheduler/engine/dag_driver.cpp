@@ -634,51 +634,7 @@ common::result::Result<void> DagDriver::dispatchTask(
     return common::result::Result<void>();
 }
 
-std::string DagDriver::resolveString(const std::string& input, const nlohmann::json& params) {
-    std::string result;
-    size_t i = 0;
-    while (i < input.size()) {
-        if (i + 1 < input.size() && input[i] == '$' && input[i + 1] == '{') {
-            // Find closing brace
-            size_t end = input.find('}', i + 2);
-            if (end != std::string::npos) {
-                std::string var_name = input.substr(i + 2, end - i - 2);
-                if (params.contains(var_name)) {
-                    if (params[var_name].is_string()) {
-                        result += params[var_name].get<std::string>();
-                    } else {
-                        result += params[var_name].dump();
-                    }
-                } else {
-                    // Variable not found, keep placeholder as-is
-                    result += input.substr(i, end - i + 1);
-                }
-                i = end + 1;
-            } else {
-                result += input[i];
-                i++;
-            }
-        } else {
-            result += input[i];
-            i++;
-        }
-    }
-    return result;
-}
-
-void DagDriver::resolvePlaceholders(nlohmann::json& config, const nlohmann::json& params) {
-    if (config.is_string()) {
-        std::string str_val = config.get<std::string>();
-        config = resolveString(str_val, params);
-    } else if (config.is_object()) {
-        for (auto& [key, value] : config.items()) {
-            resolvePlaceholders(value, params);
-        }
-    } else if (config.is_array()) {
-        for (auto& item : config) {
-            resolvePlaceholders(item, params);
-        }
-    }
-}
+// Fix #275: resolveString 和 resolvePlaceholders 的实现已移至 dag_driver.h（inline）
+// 以便单元测试无需编译 dag_driver.cpp（避免 gRPC/DAO 依赖）
 
 }  // namespace taskflow::scheduler::engine

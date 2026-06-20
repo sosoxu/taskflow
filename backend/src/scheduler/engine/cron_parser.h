@@ -113,14 +113,9 @@ public:
             bool day_match = false;
             bool wday_match = false;
             {
-                bool dw = false;
-                findNext(day_vals, tm_search.tm_mday, dw);
-                day_match = (tm_search.tm_mday >= day_vals.front() &&
-                             tm_search.tm_mday <= day_vals.back() &&
-                             std::binary_search(day_vals.begin(), day_vals.end(), tm_search.tm_mday));
-
-                bool ww = false;
-                findNext(wday_vals, tm_search.tm_wday, ww);
+                // Fix #276: 删除无用的 findNext 调用（返回值和 wrapped 参数均未使用）
+                // 以及冗余的 front()/back() 范围检查（binary_search 已足够判断成员关系）
+                day_match = std::binary_search(day_vals.begin(), day_vals.end(), tm_search.tm_mday);
                 wday_match = std::binary_search(wday_vals.begin(), wday_vals.end(), tm_search.tm_wday);
             }
 

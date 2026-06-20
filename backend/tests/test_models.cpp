@@ -6,6 +6,7 @@
 #include "common/models/worker_info.h"
 #include "common/models/user.h"
 #include "common/models/workflow_instance.h"
+#include "common/models/cron_job.h"
 
 using namespace taskflow::common::models;
 
@@ -511,4 +512,80 @@ TEST_CASE("TaskInstance: toJson with empty time fields", "[model_task_instance_f
     REQUIRE(j["exit_code"] == 0);
     REQUIRE(j["retry_count"] == 0);
     REQUIRE(j["task_version"] == 0);
+}
+
+// ============================================================================
+// Fix #268: CronJob 模型完全未测试（fromRow/toJson 零覆盖）
+// 验收指标：
+//   1. 默认值正确（enabled = true）
+//   2. toJson 包含所有 7 个字段
+//   3. toJson 字段值正确序列化
+//   4. next_trigger_time 空值正确输出
+// ============================================================================
+
+TEST_CASE("CronJob: default values", "[model_cron_job]") {
+    CronJob job;
+    REQUIRE(job.enabled == true);  // 默认 true
+    REQUIRE(job.id.empty());
+    REQUIRE(job.workflow_id.empty());
+    REQUIRE(job.cron_expression.empty());
+    REQUIRE(job.next_trigger_time.empty());
+    REQUIRE(job.created_at.empty());
+    REQUIRE(job.updated_at.empty());
+}
+
+TEST_CASE("CronJob: toJson contains all fields", "[model_cron_job]") {
+    CronJob job;
+    job.id = "cron-1";
+    job.workflow_id = "wf-1";
+    job.cron_expression = "0 * * * * *";
+    job.enabled = true;
+    job.next_trigger_time = "2025-01-01 00:01:00";
+    job.created_at = "2025-01-01 00:00:00";
+    job.updated_at = "2025-01-01 00:00:00";
+
+    auto j = job.toJson();
+    REQUIRE(j["id"] == "cron-1");
+    REQUIRE(j["workflow_id"] == "wf-1");
+    REQUIRE(j["cron_expression"] == "0 * * * * *");
+    REQUIRE(j["enabled"] == true);
+    REQUIRE(j["next_trigger_time"] == "2025-01-01 00:01:00");
+    REQUIRE(j["created_at"] == "2025-01-01 00:00:00");
+    REQUIRE(j["updated_at"] == "2025-01-01 00:00:00");
+    // 恰好 7 个字段
+    REQUIRE(j.size() == 7);
+}
+
+TEST_CASE("CronJob: toJson with disabled job", "[model_cron_job]") {
+    CronJob job;
+    job.id = "cron-disabled";
+    job.enabled = false;
+
+    auto j = job.toJson();
+    REQUIRE(j["enabled"] == false);
+}
+
+TEST_CASE("CronJob: toJson with empty next_trigger_time", "[model_cron_job]") {
+    // 验证 next_trigger_time 为空时（尚未计算下次触发时间）正确输出空字符串
+    CronJob job;
+    job.id = "cron-no-trigger";
+    job.next_trigger_time = "";
+
+    auto j = job.toJson();
+    REQUIRE(j["next_trigger_time"] == "");
+}
+
+TEST_CASE("CronJob: toJson field types are correct", "[model_cron_job]") {
+    CronJob job;
+    job.id = "type-test";
+    job.enabled = true;
+
+    auto j = job.toJson();
+    REQUIRE(j["id"].is_string());
+    REQUIRE(j["workflow_id"].is_string());
+    REQUIRE(j["cron_expression"].is_string());
+    REQUIRE(j["enabled"].is_boolean());
+    REQUIRE(j["next_trigger_time"].is_string());
+    REQUIRE(j["created_at"].is_string());
+    REQUIRE(j["updated_at"].is_string());
 }

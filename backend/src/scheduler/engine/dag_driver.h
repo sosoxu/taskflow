@@ -5,6 +5,8 @@
 #include <string>
 #include <thread>
 
+#include <nlohmann/json.hpp>
+
 #include "common/config/scheduler_config.h"
 #include "scheduler/dao/task_dao.h"
 #include "scheduler/dao/task_instance_dao.h"
@@ -26,16 +28,61 @@ public:
     void start();
     void stop();
 
+    // Fix #275: 将 resolveString/resolvePlaceholders 改为 public inline 以便单元测试
+    // 且无需编译 dag_driver.cpp（避免 gRPC/DAO 依赖）
+    // Resolve ${var} placeholders in string using parameter values
+    static std::string resolveString(const std::string& input, const nlohmann::json& params) {
+        std::string result;
+        size_t i = 0;
+        while (i < input.size()) {
+            if (i + 1 < input.size() && input[i] == '$' && input[i + 1] == '{') {
+                size_t end = input.find('}', i + 2);
+                if (end != std::string::npos) {
+                    std::string var_name = input.substr(i + 2, end - i - 2);
+                    if (params.contains(var_name)) {
+                        if (params[var_name].is_string()) {
+                            result += params[var_name].get<std::string>();
+                        } else {
+                            result += params[var_name].dump();
+                        }
+                    } else {
+                        result += input.substr(i, end - i + 1);
+                    }
+                    i = end + 1;
+                } else {
+                    result += input[i];
+                    i++;
+                }
+            } else {
+                result += input[i];
+                i++;
+            }
+        }
+        return result;
+    }
+
+    // Resolve ${var} placeholders in JSON config using parameter values
+    static void resolvePlaceholders(nlohmann::json& config, const nlohmann::json& params) {
+        if (config.is_string()) {
+            std::string str_val = config.get<std::string>();
+            config = resolveString(str_val, params);
+        } else if (config.is_object()) {
+            for (auto& [key, value] : config.items()) {
+                resolvePlaceholders(value, params);
+            }
+        } else if (config.is_array()) {
+            for (auto& item : config) {
+                resolvePlaceholders(item, params);
+            }
+        }
+    }
+
 private:
     void driveLoop();
     void driveInstance(const common::models::WorkflowInstance& instance);
     common::result::Result<void> dispatchTask(
         const common::models::TaskInstance& task_instance,
         const common::models::Workflow& workflow);
-
-    // Resolve ${var} placeholders in JSON config using parameter values
-    static void resolvePlaceholders(nlohmann::json& config, const nlohmann::json& params);
-    static std::string resolveString(const std::string& input, const nlohmann::json& params);
 
     int drive_interval_;
     std::string aes_key_;

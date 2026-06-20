@@ -7,6 +7,18 @@
 
 namespace taskflow::worker::executor {
 
+// Fix #271: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
+static bool isValidInstanceId(const std::string& id) {
+    if (id.empty()) return false;
+    // 拒绝含路径分隔符、点号（防止 ".."）、空字节的 ID
+    for (char c : id) {
+        if (c == '/' || c == '\\' || c == '\0') return false;
+    }
+    // 拒绝 ".." 序列
+    if (id.find("..") != std::string::npos) return false;
+    return true;
+}
+
 FileLogSink::FileLogSink(const std::string& base_dir) : base_dir_(base_dir) {
     std::filesystem::create_directories(base_dir_);
 }
@@ -23,6 +35,12 @@ std::string FileLogSink::makeLogPath(const std::string& workflow_instance_id,
 bool FileLogSink::write(const std::string& workflow_instance_id,
                          const std::string& task_instance_id,
                          const std::string& data) {
+    // Fix #271: 校验实例 ID 防止路径穿越
+    if (!isValidInstanceId(workflow_instance_id) || !isValidInstanceId(task_instance_id)) {
+        spdlog::error("FileLogSink: invalid instance id contains path separators or traversal");
+        return false;
+    }
+
     auto dir = makeLogDir(workflow_instance_id);
     std::filesystem::create_directories(dir);
 
@@ -33,11 +51,20 @@ bool FileLogSink::write(const std::string& workflow_instance_id,
         return false;
     }
     ofs << data;
+    // Fix #271: 检查写入是否真正成功（磁盘满等场景）
+    if (ofs.fail()) {
+        spdlog::error("FileLogSink: failed to write log data to: {}", path);
+        return false;
+    }
     return true;
 }
 
 std::string FileLogSink::read(const std::string& workflow_instance_id,
                                const std::string& task_instance_id) {
+    // Fix #271: 校验实例 ID 防止路径穿越
+    if (!isValidInstanceId(workflow_instance_id) || !isValidInstanceId(task_instance_id)) {
+        return "";
+    }
     auto path = makeLogPath(workflow_instance_id, task_instance_id);
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs.is_open()) {
@@ -49,6 +76,10 @@ std::string FileLogSink::read(const std::string& workflow_instance_id,
 
 bool FileLogSink::exists(const std::string& workflow_instance_id,
                           const std::string& task_instance_id) {
+    // Fix #271: 校验实例 ID 防止路径穿越
+    if (!isValidInstanceId(workflow_instance_id) || !isValidInstanceId(task_instance_id)) {
+        return false;
+    }
     return std::filesystem::exists(makeLogPath(workflow_instance_id, task_instance_id));
 }
 
@@ -60,10 +91,15 @@ void FileLogSink::cleanup(int retention_days) {
 
     for (const auto& entry : std::filesystem::directory_iterator(base_dir_)) {
         if (!entry.is_directory()) continue;
-        auto last_modified = std::filesystem::last_write_time(entry);
-        if (now - last_modified > retention) {
-            std::filesystem::remove_all(entry.path());
-            spdlog::info("FileLogSink: cleaned up expired log directory {}", entry.path().string());
+        // Fix #271: 用 try-catch 包裹文件系统操作，防止单个条目异常导致整体清理失败
+        try {
+            auto last_modified = std::filesystem::last_write_time(entry);
+            if (now - last_modified > retention) {
+                std::filesystem::remove_all(entry.path());
+                spdlog::info("FileLogSink: cleaned up expired log directory {}", entry.path().string());
+            }
+        } catch (const std::exception& e) {
+            spdlog::warn("FileLogSink: failed to process entry {}: {}", entry.path().string(), e.what());
         }
     }
 }

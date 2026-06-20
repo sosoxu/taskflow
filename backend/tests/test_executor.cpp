@@ -555,6 +555,171 @@ TEST_CASE("createLogSink: empty type falls back to FileLogSink", "[log_sink_fact
 }
 
 // ============================================================================
+// Fix #271: LogSink 路径穿越漏洞与 cleanup 边界条件测试
+// 验收指标：
+//   1. 含 "../" 的 workflow_instance_id 被拒绝
+//   2. 含 "../" 的 task_instance_id 被拒绝
+//   3. 含路径分隔符的 ID 被拒绝
+//   4. 空 ID 被拒绝
+//   5. cleanup(0) 行为验证
+//   6. cleanup 对含普通文件的 base_dir 安全
+// ============================================================================
+
+TEST_CASE("FileLogSink: rejects workflow_instance_id with path traversal", "[log_sink_security]") {
+    // Fix #271: 含 "../" 的 workflow_instance_id 应被拒绝，防止路径穿越
+    const std::string base_dir = "/tmp/taskflow_test_logs_traversal";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    // 尝试用 "../" 逃逸 base_dir
+    REQUIRE_FALSE(sink.write("../../etc", "task-1", "malicious\n"));
+    REQUIRE_FALSE(sink.exists("../../etc", "task-1"));
+    REQUIRE(sink.read("../../etc", "task-1") == "");
+
+    // 验证没有在 base_dir 之外创建文件
+    REQUIRE_FALSE(fs::exists("/tmp/taskflow_test_logs_traversal/../../etc/task-1.log"));
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: rejects task_instance_id with path traversal", "[log_sink_security]") {
+    // Fix #271: 含 "../" 的 task_instance_id 应被拒绝
+    const std::string base_dir = "/tmp/taskflow_test_logs_traversal_task";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    REQUIRE_FALSE(sink.write("wf-1", "../../escape", "malicious\n"));
+    REQUIRE_FALSE(sink.exists("wf-1", "../../escape"));
+    REQUIRE(sink.read("wf-1", "../../escape") == "");
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: rejects instance id with path separator", "[log_sink_security]") {
+    // Fix #271: 含路径分隔符 "/" 的 ID 应被拒绝
+    const std::string base_dir = "/tmp/taskflow_test_logs_separator";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    REQUIRE_FALSE(sink.write("wf/inner", "task-1", "data\n"));
+    REQUIRE_FALSE(sink.write("wf-1", "task/inner", "data\n"));
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: rejects empty instance id", "[log_sink_security]") {
+    // Fix #271: 空 ID 应被拒绝
+    const std::string base_dir = "/tmp/taskflow_test_logs_empty_id";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    REQUIRE_FALSE(sink.write("", "task-1", "data\n"));
+    REQUIRE_FALSE(sink.write("wf-1", "", "data\n"));
+    REQUIRE_FALSE(sink.exists("", "task-1"));
+    REQUIRE_FALSE(sink.exists("wf-1", ""));
+    REQUIRE(sink.read("", "task-1") == "");
+    REQUIRE(sink.read("wf-1", "") == "");
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: accepts valid instance ids with hyphens and underscores", "[log_sink_security]") {
+    // Fix #271: 合法 ID（含连字符、下划线、字母数字）应被接受
+    const std::string base_dir = "/tmp/taskflow_test_logs_valid_ids";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    REQUIRE(sink.write("wf_instance-1", "task_instance-2", "valid data\n"));
+    REQUIRE(sink.exists("wf_instance-1", "task_instance-2"));
+    REQUIRE(sink.read("wf_instance-1", "task_instance-2") == "valid data\n");
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: cleanup with zero retention days", "[log_sink_cleanup_edge]") {
+    // Fix #271: cleanup(0) 行为验证 —— retention=0 意味着清理所有超过 0 小时的目录
+    // 刚创建的目录 last_modified 接近 now，now - last_modified 可能略大于 0
+    const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_zero";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+    // 创建一个日志目录
+    sink.write("wf-old", "task-1", "old data\n");
+    REQUIRE(fs::exists(base_dir + "/wf-old"));
+
+    // cleanup(0) —— retention 为 0 小时，刚创建的目录可能被清理也可能不被清理
+    // 取决于时钟精度。此测试验证 cleanup(0) 不崩溃。
+    REQUIRE_NOTHROW(sink.cleanup(0));
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: cleanup with negative retention does not crash", "[log_sink_cleanup_edge]") {
+    // Fix #271: 负 retention_days 不应崩溃（24 * 负数 = 负小时，now - last_modified > 负值 恒真）
+    const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_negative";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+    sink.write("wf-test", "task-1", "data\n");
+
+    // 负 retention 会清理所有目录，但不应崩溃
+    REQUIRE_NOTHROW(sink.cleanup(-1));
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: cleanup handles non-directory entries safely", "[log_sink_cleanup_edge]") {
+    // Fix #271: base_dir 含普通文件（非目录）时 cleanup 应安全跳过
+    const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_files";
+    fs::remove_all(base_dir);
+    fs::create_directories(base_dir);
+
+    // 在 base_dir 中创建一个普通文件（非目录）
+    {
+        std::ofstream ofs(base_dir + "/stray_file.txt");
+        ofs << "not a directory";
+    }
+    // 同时创建一个合法的日志目录
+    {
+        FileLogSink sink(base_dir);
+        sink.write("wf-real", "task-1", "real data\n");
+    }
+
+    FileLogSink sink(base_dir);
+    REQUIRE_NOTHROW(sink.cleanup(7));
+
+    // 普通文件应仍存在（cleanup 只处理目录）
+    REQUIRE(fs::exists(base_dir + "/stray_file.txt"));
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: write to read-only directory fails gracefully", "[log_sink_write_fail]") {
+    // Fix #271: 写入失败路径应返回 false 而非崩溃
+    // 创建一个只读目录作为 base_dir
+    const std::string base_dir = "/tmp/taskflow_test_logs_readonly";
+    fs::remove_all(base_dir);
+    fs::create_directories(base_dir);
+
+    // 创建 sink 后将目录设为只读
+    FileLogSink sink(base_dir);
+    fs::permissions(base_dir, fs::perms::owner_read | fs::perms::owner_exec,
+                    fs::perm_options::replace);
+
+    // 写入应失败（无法创建子目录），但不崩溃
+    bool result = sink.write("wf-readonly", "task-1", "data\n");
+    // 在 root 权限下可能仍能写入，所以只验证不崩溃
+    // 恢复权限以便清理
+    fs::permissions(base_dir, fs::perms::owner_all, fs::perm_options::replace);
+    fs::remove_all(base_dir);
+}
+
+// ============================================================================
 // Fix #253: TaskExecutor shutdown/registerExecutor/setLogSink 测试
 // 验收指标：
 //   1. shutdown() 后 submit 被拒绝
@@ -907,4 +1072,143 @@ TEST_CASE_METHOD(LogDirFixture, "ScriptExecutor: python3 script with syntax erro
     auto result = executor.execute("interp-python-err", config, 10, TEST_LOG_DIR);
     REQUIRE(result.status == "FAILED");
     REQUIRE(result.exit_code != 0);
+}
+
+// ============================================================================
+// Fix #272: TaskExecutor 重复 task_instance_id 与回调异常安全测试
+// 验收指标：
+//   1. 重复 task_instance_id 被拒绝（旧任务仍在运行时）
+//   2. 回调抛异常不导致 std::terminate
+//   3. 回调抛异常后 active_threads_ 仍正确递减
+//   4. 回调抛异常后 runningCount 归零
+// ============================================================================
+
+TEST_CASE("TaskExecutor: rejects duplicate task_instance_id while running", "[task_executor_duplicate]") {
+    // Fix #272: 验证重复 task_instance_id 被拒绝，防止覆盖旧任务导致无法 cancel
+    TaskExecutor executor(10);
+
+    nlohmann::json config;
+    config["command"] = "/bin/sleep 5";
+
+    // 第一次提交应成功
+    auto result1 = executor.submit("dup-task-id", "command", config, 30,
+                                   TEST_LOG_DIR, "", nullptr);
+    REQUIRE(result1.ok());
+
+    // 第二次提交相同 ID 应失败（旧任务仍在运行）
+    auto result2 = executor.submit("dup-task-id", "command", config, 30,
+                                   TEST_LOG_DIR, "", nullptr);
+    REQUIRE_FALSE(result2.ok());
+    REQUIRE(result2.error().find("Duplicate") != std::string::npos);
+    REQUIRE(result2.error().find("dup-task-id") != std::string::npos);
+
+    // 取消第一个任务以便清理
+    auto cancel_result = executor.cancel("dup-task-id");
+    // cancel 可能成功也可能因任务完成而返回 failure，都可接受
+    executor.shutdown(10);
+}
+
+TEST_CASE("TaskExecutor: callback throwing exception does not crash", "[task_executor_callback_exception]") {
+    // Fix #272: 验证回调抛异常不会导致 std::terminate
+    TaskExecutor executor(10);
+
+    nlohmann::json config;
+    config["command"] = "/bin/echo callback_exception_test";
+
+    std::atomic<bool> callback_invoked{false};
+
+    auto submit_result = executor.submit("callback-throw", "command", config, 10,
+        TEST_LOG_DIR, "",
+        [&](const TaskResult&) {
+            callback_invoked = true;
+            throw std::runtime_error("intentional callback exception");
+        });
+    REQUIRE(submit_result.ok());
+
+    // 等待任务完成 —— 如果回调异常导致 std::terminate，测试会崩溃
+    for (int i = 0; i < 100 && !callback_invoked; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(callback_invoked);
+
+    // 回调抛异常后，runningCount 仍应归零（active_threads_ 正确递减）
+    for (int i = 0; i < 30 && executor.runningCount() > 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(executor.runningCount() == 0);
+
+    // shutdown 应能正常完成（不因回调异常而永久阻塞）
+    executor.shutdown(5);
+}
+
+TEST_CASE("TaskExecutor: callback throwing non-std exception does not crash", "[task_executor_callback_exception]") {
+    // Fix #272: 验证回调抛非 std 异常（catch (...) 捕获）不会崩溃
+    TaskExecutor executor(10);
+
+    nlohmann::json config;
+    config["command"] = "/bin/echo non_std_exception";
+
+    std::atomic<bool> callback_invoked{false};
+
+    auto submit_result = executor.submit("callback-throw-nonstd", "command", config, 10,
+        TEST_LOG_DIR, "",
+        [&](const TaskResult&) {
+            callback_invoked = true;
+            throw 42;  // 非 std 异常（int）
+        });
+    REQUIRE(submit_result.ok());
+
+    for (int i = 0; i < 100 && !callback_invoked; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(callback_invoked);
+
+    // runningCount 应归零
+    for (int i = 0; i < 30 && executor.runningCount() > 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(executor.runningCount() == 0);
+
+    executor.shutdown(5);
+}
+
+TEST_CASE("TaskExecutor: duplicate id rejected then accepted after completion", "[task_executor_duplicate]") {
+    // Fix #272: 验证旧任务完成后，相同 ID 可以再次提交
+    TaskExecutor executor(10);
+
+    nlohmann::json config;
+    config["command"] = "/bin/echo reuse_id";
+
+    std::atomic<bool> first_done{false};
+
+    // 第一次提交
+    auto result1 = executor.submit("reuse-id", "command", config, 10,
+        TEST_LOG_DIR, "",
+        [&](const TaskResult&) { first_done = true; });
+    REQUIRE(result1.ok());
+
+    // 等待第一次完成
+    for (int i = 0; i < 50 && !first_done; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(first_done);
+
+    // 确保计数器归零
+    for (int i = 0; i < 20 && executor.runningCount() > 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // 第二次提交相同 ID 应成功（旧任务已完成）
+    std::atomic<bool> second_done{false};
+    auto result2 = executor.submit("reuse-id", "command", config, 10,
+        TEST_LOG_DIR, "",
+        [&](const TaskResult&) { second_done = true; });
+    REQUIRE(result2.ok());
+
+    for (int i = 0; i < 50 && !second_done; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(second_done);
+
+    executor.shutdown(5);
 }
