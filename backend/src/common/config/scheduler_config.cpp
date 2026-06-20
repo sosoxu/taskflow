@@ -131,6 +131,21 @@ void SchedulerConfig::validate() const {
     if (schedule.leader_lease_interval <= 0) {
         throw std::runtime_error("配置错误: schedule.leader_lease_interval 必须大于 0");
     }
+    // Fix #280: 补充 timeout_check_interval 校验（遗漏会导致 tight-loop spinning）
+    if (schedule.timeout_check_interval <= 0) {
+        throw std::runtime_error("配置错误: schedule.timeout_check_interval 必须大于 0");
+    }
+    // Fix #280: 补充 token TTL 校验（0 或负数导致 token 立即过期，无法登录）
+    if (auth.access_token_ttl <= 0) {
+        throw std::runtime_error("配置错误: auth.access_token_ttl 必须大于 0");
+    }
+    if (auth.refresh_token_ttl <= 0) {
+        throw std::runtime_error("配置错误: auth.refresh_token_ttl 必须大于 0");
+    }
+    // Fix #280: 补充 database.port 范围校验（与 server.http_port/grpc_port 一致）
+    if (database.port <= 0 || database.port > 65535) {
+        throw std::runtime_error("配置错误: database.port 无效");
+    }
 }
 
 }  // namespace taskflow::common::config

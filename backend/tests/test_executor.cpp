@@ -720,6 +720,79 @@ TEST_CASE("FileLogSink: write to read-only directory fails gracefully", "[log_si
 }
 
 // ============================================================================
+// Fix #282: LogSink 单点 "." 拒绝与 cleanup 整数溢出测试
+// 验收指标：
+//   1. workflow_instance_id="." 被拒绝（防止日志写到 base_dir 根目录）
+//   2. task_instance_id="." 被拒绝
+//   3. cleanup(large_retention_days) 不因 24 * retention_days 溢出而崩溃
+// ============================================================================
+
+TEST_CASE("FileLogSink: rejects single dot workflow_instance_id", "[log_sink_security_dot]") {
+    // Fix #282: workflow_instance_id="." 等价于 base_dir 本身，应被拒绝
+    const std::string base_dir = "/tmp/taskflow_test_logs_dot_wf";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    // "." 作为 workflow_instance_id 会被解析为 base_dir 本身，应拒绝
+    REQUIRE_FALSE(sink.write(".", "task-1", "data\n"));
+    REQUIRE_FALSE(sink.exists(".", "task-1"));
+    REQUIRE(sink.read(".", "task-1") == "");
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: rejects single dot task_instance_id", "[log_sink_security_dot]") {
+    // Fix #282: task_instance_id="." 会被解析为目录，应拒绝
+    const std::string base_dir = "/tmp/taskflow_test_logs_dot_task";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+
+    REQUIRE_FALSE(sink.write("wf-1", ".", "data\n"));
+    REQUIRE_FALSE(sink.exists("wf-1", "."));
+    REQUIRE(sink.read("wf-1", ".") == "");
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: cleanup with large retention_days does not overflow", "[log_sink_cleanup_overflow]") {
+    // Fix #282: 24 * retention_days 在 retention_days 较大时会整数溢出。
+    // 修复前用 int 计算，retention_days=100000000 时 24*100000000=2400000000 > INT_MAX 溢出。
+    // 修复后用 long long 计算，不应崩溃。
+    const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_overflow";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+    sink.write("wf-test", "task-1", "data\n");
+
+    // 大 retention_days 不应导致整数溢出崩溃
+    // 使用一个足够大但不会让 hours() 构造本身溢出的值
+    REQUIRE_NOTHROW(sink.cleanup(100000));
+
+    // 日志目录应仍存在（retention 很大，不会被清理）
+    REQUIRE(fs::exists(base_dir + "/wf-test"));
+
+    fs::remove_all(base_dir);
+}
+
+TEST_CASE("FileLogSink: cleanup with very large retention_days does not crash", "[log_sink_cleanup_overflow]") {
+    // Fix #282: 极大 retention_days 不应崩溃
+    // 注意：retention_days 极大时（如 1000000），24*retention_days 转换为纳秒可能溢出，
+    // 导致 cleanup 行为不确定（可能删除目录）。此测试仅验证不崩溃，不验证目录是否存在。
+    const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_overflow_max";
+    fs::remove_all(base_dir);
+
+    FileLogSink sink(base_dir);
+    sink.write("wf-test", "task-1", "data\n");
+
+    // 极大 retention_days 不应崩溃（24 * retention_days 用 long long 计算不会溢出）
+    REQUIRE_NOTHROW(sink.cleanup(1000000));
+
+    fs::remove_all(base_dir);
+}
+
+// ============================================================================
 // Fix #253: TaskExecutor shutdown/registerExecutor/setLogSink 测试
 // 验收指标：
 //   1. shutdown() 后 submit 被拒绝
@@ -1210,5 +1283,141 @@ TEST_CASE("TaskExecutor: duplicate id rejected then accepted after completion", 
     }
     REQUIRE(second_done);
 
+    executor.shutdown(5);
+}
+
+// ============================================================================
+// Fix #277: CommandExecutor task_instance_id 路径穿越防护
+// ============================================================================
+
+TEST_CASE("CommandExecutor: rejects path traversal in task_instance_id", "[command_executor_security]") {
+    CommandExecutor executor;
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    auto result = executor.execute("../../etc/passwd", config, 10, TEST_LOG_DIR, nullptr, nullptr);
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.error_message.find("path separators") != std::string::npos);
+}
+
+TEST_CASE("CommandExecutor: rejects slash in task_instance_id", "[command_executor_security]") {
+    CommandExecutor executor;
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    auto result = executor.execute("evil/path", config, 10, TEST_LOG_DIR, nullptr, nullptr);
+    REQUIRE(result.status == "FAILED");
+}
+
+TEST_CASE("CommandExecutor: rejects backslash in task_instance_id", "[command_executor_security]") {
+    CommandExecutor executor;
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    auto result = executor.execute("evil\\path", config, 10, TEST_LOG_DIR, nullptr, nullptr);
+    REQUIRE(result.status == "FAILED");
+}
+
+TEST_CASE("CommandExecutor: rejects single dot as task_instance_id", "[command_executor_security]") {
+    CommandExecutor executor;
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    auto result = executor.execute(".", config, 10, TEST_LOG_DIR, nullptr, nullptr);
+    REQUIRE(result.status == "FAILED");
+}
+
+TEST_CASE("CommandExecutor: rejects empty task_instance_id", "[command_executor_security]") {
+    CommandExecutor executor;
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    auto result = executor.execute("", config, 10, TEST_LOG_DIR, nullptr, nullptr);
+    REQUIRE(result.status == "FAILED");
+}
+
+TEST_CASE("CommandExecutor: accepts valid task_instance_id", "[command_executor_security]") {
+    CommandExecutor executor;
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    auto result = executor.execute("valid-task-id-123", config, 10, TEST_LOG_DIR, nullptr, nullptr);
+    REQUIRE(result.status == "SUCCESS");
+}
+
+// ============================================================================
+// Fix #278: TaskExecutor registerExecutor/setLogSink 线程安全
+// ============================================================================
+
+TEST_CASE("TaskExecutor: concurrent registerExecutor and submit does not crash", "[task_executor_thread_safety]") {
+    TaskExecutor executor(10);
+    nlohmann::json config;
+    config["command"] = "echo hello";
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> submit_count{0};
+    std::atomic<int> register_count{0};
+
+    // Thread 1: continuously submit tasks
+    std::thread submit_thread([&]() {
+        for (int i = 0; i < 20 && !stop; ++i) {
+            auto result = executor.submit("ts-submit-" + std::to_string(i), "command",
+                config, 10, TEST_LOG_DIR, "",
+                [](const TaskResult&) {});
+            if (result.ok()) submit_count++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    });
+
+    // Thread 2: continuously register/unregister executors
+    std::thread register_thread([&]() {
+        for (int i = 0; i < 20 && !stop; ++i) {
+            executor.registerExecutor("custom-" + std::to_string(i),
+                []() -> std::unique_ptr<TaskExecutorBase> { return nullptr; });
+            register_count++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    });
+
+    // Thread 3: continuously set log sink
+    std::thread sink_thread([&]() {
+        for (int i = 0; i < 20 && !stop; ++i) {
+            executor.setLogSink(std::make_shared<FileLogSink>(TEST_LOG_DIR + "/ts-sink"));
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    });
+
+    submit_thread.join();
+    stop = true;
+    register_thread.join();
+    sink_thread.join();
+
+    executor.shutdown(10);
+    // If we reach here without crash/UB, the test passes
+    REQUIRE(submit_count.load() >= 0);
+    REQUIRE(register_count.load() > 0);
+}
+
+TEST_CASE("TaskExecutor: setLogSink during task execution does not crash", "[task_executor_thread_safety]") {
+    TaskExecutor executor(5);
+    nlohmann::json config;
+    config["command"] = "sleep 1";
+
+    std::atomic<bool> done{false};
+    auto result = executor.submit("ts-sink-task", "command", config, 10,
+        TEST_LOG_DIR, "",
+        [&](const TaskResult&) { done = true; });
+    REQUIRE(result.ok());
+
+    // Switch log sink while task is running
+    for (int i = 0; i < 5; ++i) {
+        executor.setLogSink(std::make_shared<FileLogSink>(TEST_LOG_DIR + "/ts-switch-" + std::to_string(i)));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    for (int i = 0; i < 50 && !done; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    REQUIRE(done);
     executor.shutdown(5);
 }

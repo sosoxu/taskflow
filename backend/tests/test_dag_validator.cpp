@@ -527,3 +527,66 @@ TEST_CASE("DagValidator - dependencies references non-existent error message", "
     REQUIRE_FALSE(result.ok());
     REQUIRE(result.error().find("x") != std::string::npos);
 }
+
+// ============================================================================
+// Fix #285: DagValidator hasCycle 递归栈溢出 + edges 非数组静默忽略
+// ============================================================================
+
+TEST_CASE("DagValidator - edges not array returns error", "[dag_validator_edges]") {
+    // Fix #285: edges 存在但非数组应返回错误，而非静默忽略
+    nlohmann::json dag;
+    dag["nodes"] = nlohmann::json::array({{{"id", "a"}, {"task_id", "t1"}}});
+    dag["edges"] = "not-an-array";  // 非数组
+
+    auto result = DagValidator::validate(dag);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("edges") != std::string::npos);
+}
+
+TEST_CASE("DagValidator - edges as object returns error", "[dag_validator_edges]") {
+    // Fix #285: edges 为对象应返回错误
+    nlohmann::json dag;
+    dag["nodes"] = nlohmann::json::array({{{"id", "a"}, {"task_id", "t1"}}});
+    dag["edges"] = nlohmann::json::object({{"source", "a"}, {"target", "b"}});
+
+    auto result = DagValidator::validate(dag);
+    REQUIRE_FALSE(result.ok());
+}
+
+TEST_CASE("DagValidator - deep chain does not stack overflow", "[dag_validator_deep]") {
+    // Fix #285: 深链 DAG 不应栈溢出（迭代式 DFS）
+    nlohmann::json dag;
+    dag["nodes"] = nlohmann::json::array();
+    dag["edges"] = nlohmann::json::array();
+    const int depth = 5000;
+    for (int i = 0; i < depth; ++i) {
+        dag["nodes"].push_back({{"id", "n" + std::to_string(i)}, {"task_id", "t" + std::to_string(i)}});
+    }
+    for (int i = 0; i < depth - 1; ++i) {
+        dag["edges"].push_back({{"source", "n" + std::to_string(i)}, {"target", "n" + std::to_string(i + 1)}});
+    }
+
+    // Should not crash (stack overflow) and should validate as a valid DAG
+    auto result = DagValidator::validate(dag);
+    REQUIRE(result.ok());
+}
+
+TEST_CASE("DagValidator - deep chain with cycle is detected", "[dag_validator_deep]") {
+    // Fix #285: 深链 + 环应被正确检测（迭代式 DFS）
+    nlohmann::json dag;
+    dag["nodes"] = nlohmann::json::array();
+    dag["edges"] = nlohmann::json::array();
+    const int depth = 1000;
+    for (int i = 0; i < depth; ++i) {
+        dag["nodes"].push_back({{"id", "n" + std::to_string(i)}, {"task_id", "t" + std::to_string(i)}});
+    }
+    for (int i = 0; i < depth - 1; ++i) {
+        dag["edges"].push_back({{"source", "n" + std::to_string(i)}, {"target", "n" + std::to_string(i + 1)}});
+    }
+    // Add cycle: last -> first
+    dag["edges"].push_back({{"source", "n" + std::to_string(depth - 1)}, {"target", "n0"}});
+
+    auto result = DagValidator::validate(dag);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("cycle") != std::string::npos);
+}

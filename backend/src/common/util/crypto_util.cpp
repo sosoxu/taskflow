@@ -2,6 +2,7 @@
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <limits>
 
 namespace taskflow::common::util {
 
@@ -54,6 +55,12 @@ common::result::Result<std::vector<unsigned char>> base64Decode(const std::strin
 
     if (encoded.empty()) {
         return std::vector<unsigned char>{};
+    }
+
+    // Fix #284: 校验 encoded.size() <= INT_MAX，防止 static_cast<int> 截断为负数导致越界读
+    if (encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return common::result::Result<std::vector<unsigned char>>::failure(
+            "Invalid base64: input too large");
     }
 
     auto len = static_cast<int>(encoded.size());

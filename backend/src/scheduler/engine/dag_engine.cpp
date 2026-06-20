@@ -44,6 +44,11 @@ common::result::Result<std::vector<std::vector<std::string>>> DagEngine::topolog
     std::unordered_map<std::string, int> in_degree;
 
     for (const auto& node : nodes) {
+        // Fix #279: 使用 contains() + is_string() 校验后再 get，避免 const json operator[] 访问缺失键的 UB
+        if (!node.contains("id") || !node["id"].is_string()) {
+            return common::result::Result<std::vector<std::vector<std::string>>>::failure(
+                "Each node must have a string 'id' field");
+        }
         std::string id = node["id"].get<std::string>();
         // Fix #158: Detect duplicate node IDs (operator[] silently overwrites).
         if (adj.count(id)) {
@@ -56,6 +61,12 @@ common::result::Result<std::vector<std::vector<std::string>>> DagEngine::topolog
 
     if (dag_json.contains("edges") && dag_json["edges"].is_array()) {
         for (const auto& edge : dag_json["edges"]) {
+            // Fix #279: 校验 edge 字段类型
+            if (!edge.contains("source") || !edge["source"].is_string() ||
+                !edge.contains("target") || !edge["target"].is_string()) {
+                return common::result::Result<std::vector<std::vector<std::string>>>::failure(
+                    "Each edge must have 'source' and 'target' string fields");
+            }
             std::string source = edge["source"].get<std::string>();
             std::string target = edge["target"].get<std::string>();
             // Fix #158: Validate edge endpoints reference existing nodes.
@@ -127,12 +138,17 @@ std::set<std::string> DagEngine::findReadyTasks(
     // Build reverse adjacency: for each node, who are its upstream nodes
     std::map<std::string, std::vector<std::string>> upstream;
     for (const auto& node : dag_json["nodes"]) {
+        // Fix #279: 校验 id 字段后再 get
+        if (!node.contains("id") || !node["id"].is_string()) return ready;
         std::string id = node["id"].get<std::string>();
         upstream[id] = {};
     }
 
     if (dag_json.contains("edges") && dag_json["edges"].is_array()) {
         for (const auto& edge : dag_json["edges"]) {
+            // Fix #279: 校验 edge 字段类型
+            if (!edge.contains("source") || !edge["source"].is_string() ||
+                !edge.contains("target") || !edge["target"].is_string()) continue;
             std::string source = edge["source"].get<std::string>();
             std::string target = edge["target"].get<std::string>();
             upstream[target].push_back(source);
@@ -140,6 +156,7 @@ std::set<std::string> DagEngine::findReadyTasks(
     }
 
     for (const auto& node : dag_json["nodes"]) {
+        if (!node.contains("id") || !node["id"].is_string()) continue;
         std::string id = node["id"].get<std::string>();
 
         auto status_it = task_statuses.find(id);
@@ -176,12 +193,17 @@ std::set<std::string> DagEngine::findBlockedTasks(
     // Build reverse adjacency
     std::map<std::string, std::vector<std::string>> upstream;
     for (const auto& node : dag_json["nodes"]) {
+        // Fix #279: 校验 id 字段后再 get
+        if (!node.contains("id") || !node["id"].is_string()) return blocked;
         std::string id = node["id"].get<std::string>();
         upstream[id] = {};
     }
 
     if (dag_json.contains("edges") && dag_json["edges"].is_array()) {
         for (const auto& edge : dag_json["edges"]) {
+            // Fix #279: 校验 edge 字段类型
+            if (!edge.contains("source") || !edge["source"].is_string() ||
+                !edge.contains("target") || !edge["target"].is_string()) continue;
             std::string source = edge["source"].get<std::string>();
             std::string target = edge["target"].get<std::string>();
             upstream[target].push_back(source);
@@ -189,6 +211,7 @@ std::set<std::string> DagEngine::findBlockedTasks(
     }
 
     for (const auto& node : dag_json["nodes"]) {
+        if (!node.contains("id") || !node["id"].is_string()) continue;
         std::string id = node["id"].get<std::string>();
 
         auto status_it = task_statuses.find(id);

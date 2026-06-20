@@ -667,3 +667,85 @@ TEST_CASE("TokenBlacklist: same jti re-added with new exp", "[jwt_blacklist_exp]
     blacklist.add(jti, future_exp);
     REQUIRE(blacklist.isBlacklisted(jti));
 }
+
+// ============================================================================
+// Fix #284: CryptoUtil base64Decode 整数溢出防护测试
+// base64Decode 中 static_cast<int>(encoded.size()) 在 size > INT_MAX 时会截断为
+// 负数，导致循环不执行或越界读。修复后添加了 size > INT_MAX 校验。
+// 注意：>INT_MAX 的输入（2GB+）无法在测试中构造，以下测试验证大输入被正确处理。
+// ============================================================================
+
+TEST_CASE("CryptoUtil: decrypt very large valid base64 fails gracefully", "[crypto_overflow]") {
+    // Fix #284: 超大 base64 输入不应导致越界读或崩溃
+    // 构造 100KB 的有效 base64 字符串（全 'A'，解码为全 0 字节）
+    const std::string key(32, 'k');
+    std::string large_b64(100000, 'A');
+    auto result = CryptoUtil::decrypt(large_b64, key);
+    // 应失败（GCM tag 验证失败或密文结构错误），但不崩溃
+    REQUIRE_FALSE(result.ok());
+}
+
+TEST_CASE("CryptoUtil: decrypt base64 length not multiple of 4 fails", "[crypto_overflow]") {
+    // Fix #284: base64 长度非 4 的倍数应失败（base64Decode 长度校验）
+    const std::string key(32, 'k');
+    auto result = CryptoUtil::decrypt("AAAAA", key);  // 5 chars, not multiple of 4
+    REQUIRE_FALSE(result.ok());
+}
+
+TEST_CASE("CryptoUtil: decrypt with empty base64 fails gracefully", "[crypto_overflow]") {
+    // Fix #284: 空输入应被安全处理（base64Decode 返回空 vector，decrypt 报 ciphertext too short）
+    const std::string key(32, 'k');
+    auto result = CryptoUtil::decrypt("", key);
+    REQUIRE_FALSE(result.ok());
+}
+
+// ============================================================================
+// Fix #286: PasswordUtil PBKDF2 迭代次数 DoS 防护测试
+// verifyPasswordPBKDF2 原不限制迭代次数上限，恶意构造的哈希（如 i=2000000000）
+// 会导致 PKCS5_PBKDF2_HMAC 长时间阻塞，引发 DoS。修复后限制上限为 1000000。
+// 同时 base64Decode 添加了 size > INT_MAX 校验（与 #284 一致）。
+// ============================================================================
+
+TEST_CASE("PasswordUtil: PBKDF2 iterations exceeding maximum returns failure", "[password_pbkdf2_dos]") {
+    // Fix #286: 迭代次数超过上限（1000001 > 1000000）应返回失败
+    auto result = PasswordUtil::verifyPassword("test", "$pbkdf2-sha256$i=1000001$AAAA$AAAA");
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("iterations exceed maximum") != std::string::npos);
+}
+
+TEST_CASE("PasswordUtil: PBKDF2 iterations at maximum passes max check", "[password_pbkdf2_dos]") {
+    // Fix #286: 迭代次数等于上限（1000000）应通过上限检查
+    // 使用无效 base64 "!!!!" 使其在 base64Decode 阶段快速失败，避免实际运行 100 万次 PBKDF2
+    auto result = PasswordUtil::verifyPassword("test", "$pbkdf2-sha256$i=1000000$!!!!$!!!!");
+    REQUIRE_FALSE(result.ok());
+    // 错误应是 base64 解码失败，而非迭代次数超限
+    REQUIRE(result.error().find("iterations exceed maximum") == std::string::npos);
+}
+
+TEST_CASE("PasswordUtil: PBKDF2 with very large iterations returns failure", "[password_pbkdf2_dos]") {
+    // Fix #286: 极大迭代次数（INT_MAX = 2147483647）应返回失败，防止 DoS
+    auto result = PasswordUtil::verifyPassword("test", "$pbkdf2-sha256$i=2147483647$AAAA$AAAA");
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("iterations exceed maximum") != std::string::npos);
+}
+
+TEST_CASE("PasswordUtil: PBKDF2 with extremely large iterations returns failure", "[password_pbkdf2_dos]") {
+    // Fix #286: 超大迭代次数（超过 INT_MAX 的字符串表示）应返回失败
+    // stoi 会解析为 int，超大值可能抛异常，应被 catch 并返回失败
+    auto result = PasswordUtil::verifyPassword("test", "$pbkdf2-sha256$i=9999999999$AAAA$AAAA");
+    REQUIRE_FALSE(result.ok());
+}
+
+TEST_CASE("PasswordUtil: PBKDF2 with negative iterations returns failure", "[password_pbkdf2_dos]") {
+    // Fix #286: 负迭代次数应返回失败（已有校验，确保不被上限检查绕过）
+    auto result = PasswordUtil::verifyPassword("test", "$pbkdf2-sha256$i=-1$AAAA$AAAA");
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("non-positive iterations") != std::string::npos);
+}
+
+TEST_CASE("PasswordUtil: PBKDF2 with zero iterations returns failure", "[password_pbkdf2_dos]") {
+    // Fix #286: 零迭代次数应返回失败
+    auto result = PasswordUtil::verifyPassword("test", "$pbkdf2-sha256$i=0$AAAA$AAAA");
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("non-positive iterations") != std::string::npos);
+}

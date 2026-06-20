@@ -79,6 +79,9 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     bool shutting_down_{false};
+    // Fix #278: executor_factories_ 和 log_sink_ 需要独立锁保护，
+    // 因为 createExecutor 在 worker 线程中调用，而 registerExecutor/setLogSink 可能在主线程并发调用
+    std::mutex config_mutex_;
     std::map<std::string, std::function<std::unique_ptr<TaskExecutorBase>()>> executor_factories_;
     std::shared_ptr<LogSink> log_sink_;
 

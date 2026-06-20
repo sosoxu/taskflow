@@ -103,8 +103,13 @@ common::result::Result<void> TaskExecutor::submit(
     };
 
     // Capture log_sink as raw pointer (shared_ptr keeps it alive)
-    auto* raw_log_sink = log_sink_.get();
-    auto log_sink_ref = log_sink_;  // Keep a reference to prevent destruction
+    // Fix #278: 用 config_mutex_ 保护 log_sink_ 的读取
+    std::shared_ptr<LogSink> log_sink_ref;
+    {
+        std::lock_guard<std::mutex> lock(config_mutex_);
+        log_sink_ref = log_sink_;
+    }
+    auto* raw_log_sink = log_sink_ref.get();
 
     std::thread([this, task_instance_id, executor = std::move(executor),
                  config, timeout, log_dir, workflow_instance_id,
@@ -282,6 +287,8 @@ void TaskExecutor::shutdown(int timeout_seconds) {
 
 std::unique_ptr<TaskExecutorBase> TaskExecutor::createExecutor(
     const std::string& task_type) {
+    // Fix #278: 用 config_mutex_ 保护 executor_factories_ 的读取
+    std::lock_guard<std::mutex> lock(config_mutex_);
     // Check registered factories first
     auto it = executor_factories_.find(task_type);
     if (it != executor_factories_.end()) {
@@ -301,11 +308,15 @@ std::unique_ptr<TaskExecutorBase> TaskExecutor::createExecutor(
 void TaskExecutor::registerExecutor(
     const std::string& task_type,
     std::function<std::unique_ptr<TaskExecutorBase>()> factory) {
+    // Fix #278: 用 config_mutex_ 保护 executor_factories_ 的写入
+    std::lock_guard<std::mutex> lock(config_mutex_);
     executor_factories_[task_type] = std::move(factory);
     spdlog::info("TaskExecutor: registered custom executor for task type: {}", task_type);
 }
 
 void TaskExecutor::setLogSink(std::shared_ptr<LogSink> log_sink) {
+    // Fix #278: 用 config_mutex_ 保护 log_sink_ 的写入
+    std::lock_guard<std::mutex> lock(config_mutex_);
     log_sink_ = std::move(log_sink);
     spdlog::info("TaskExecutor: log sink configured");
 }

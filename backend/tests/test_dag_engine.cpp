@@ -361,35 +361,42 @@ TEST_CASE("DagEngine topological sort - edges field is not array", "[dag_engine]
 
 TEST_CASE("DagEngine topological sort - node id not string throws", "[dag_engine]") {
     // Fix #257: 节点 id 字段类型错误（非字符串），源码 node["id"].get<std::string>() 抛 type_error
-    // 注：节点缺少 id 字段时，const json 的 operator[] 触发 assert（SIGABRT），
-    // 这是源码缺陷；此处验证类型错误路径，该路径正确抛出异常。
+    // Fix #279: 修复后 topologicalSort 使用 contains()+is_string() 校验，返回 failure 而非抛异常
     nlohmann::json dag;
     dag["nodes"] = nlohmann::json::array();
     dag["edges"] = nlohmann::json::array();
     dag["nodes"].push_back({{"id", 123}, {"task_id", "t1"}});  // id 是数字，非字符串
-    REQUIRE_THROWS_AS(DagEngine::topologicalSort(dag), nlohmann::json::exception);
+    auto result = DagEngine::topologicalSort(dag);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("id") != std::string::npos);
 }
 
 TEST_CASE("DagEngine topological sort - edge source not string throws", "[dag_engine]") {
     // Fix #257: 边 source 字段类型错误（非字符串），源码 edge["source"].get<std::string>() 抛 type_error
+    // Fix #279: 修复后返回 failure 而非抛异常
     nlohmann::json dag;
     dag["nodes"] = nlohmann::json::array();
     dag["edges"] = nlohmann::json::array();
     dag["nodes"].push_back({{"id", "a"}, {"task_id", "t1"}});
     dag["nodes"].push_back({{"id", "b"}, {"task_id", "t2"}});
     dag["edges"].push_back({{"source", 123}, {"target", "b"}});  // source 是数字
-    REQUIRE_THROWS_AS(DagEngine::topologicalSort(dag), nlohmann::json::exception);
+    auto result = DagEngine::topologicalSort(dag);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("source") != std::string::npos);
 }
 
 TEST_CASE("DagEngine topological sort - edge target not string throws", "[dag_engine]") {
     // Fix #257: 边 target 字段类型错误（非字符串），源码 edge["target"].get<std::string>() 抛 type_error
+    // Fix #279: 修复后返回 failure 而非抛异常
     nlohmann::json dag;
     dag["nodes"] = nlohmann::json::array();
     dag["edges"] = nlohmann::json::array();
     dag["nodes"].push_back({{"id", "a"}, {"task_id", "t1"}});
     dag["nodes"].push_back({{"id", "b"}, {"task_id", "t2"}});
     dag["edges"].push_back({{"source", "a"}, {"target", 123}});  // target 是数字
-    REQUIRE_THROWS_AS(DagEngine::topologicalSort(dag), nlohmann::json::exception);
+    auto result = DagEngine::topologicalSort(dag);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("target") != std::string::npos);
 }
 
 TEST_CASE("DagEngine topological sort - self-loop edge detected as cycle", "[dag_engine]") {
@@ -660,4 +667,90 @@ TEST_CASE("DagEngine allTasksFinished - RUNNING is not finished", "[dag_engine]"
     // Fix #260: RUNNING 是非终态
     std::map<std::string, std::string> statuses = {{"a", "RUNNING"}};
     REQUIRE_FALSE(DagEngine::allTasksFinished(statuses));
+}
+
+// ============================================================================
+// Fix #279: DagEngine const json operator[] 访问缺失 id 字段为 UB
+// ============================================================================
+
+TEST_CASE("DagEngine topologicalSort - node missing id returns failure not crash", "[dag_engine_ub]") {
+    // Fix #279: 节点缺失 id 字段应返回错误而非 UB/SIGABRT
+    nlohmann::json dag = nlohmann::json::array({nlohmann::json::object({{"task_id", "t1"}})});
+    nlohmann::json dag_json;
+    dag_json["nodes"] = dag;
+    auto result = DagEngine::topologicalSort(dag_json);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("id") != std::string::npos);
+}
+
+TEST_CASE("DagEngine topologicalSort - node id not string returns failure", "[dag_engine_ub]") {
+    // Fix #279: id 为非字符串类型应返回错误
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({nlohmann::json::object({{"id", 123}})});
+    auto result = DagEngine::topologicalSort(dag_json);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("id") != std::string::npos);
+}
+
+TEST_CASE("DagEngine topologicalSort - edge missing source returns failure", "[dag_engine_ub]") {
+    // Fix #279: edge 缺失 source 字段应返回错误
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"target", "b"}})  // missing source
+    });
+    auto result = DagEngine::topologicalSort(dag_json);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("source") != std::string::npos);
+}
+
+TEST_CASE("DagEngine topologicalSort - edge source not string returns failure", "[dag_engine_ub]") {
+    // Fix #279: edge source 为非字符串类型应返回错误
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"source", 123}, {"target", "b"}})
+    });
+    auto result = DagEngine::topologicalSort(dag_json);
+    REQUIRE_FALSE(result.ok());
+}
+
+TEST_CASE("DagEngine findReadyTasks - node missing id returns empty not crash", "[dag_engine_ub]") {
+    // Fix #279: findReadyTasks 节点缺失 id 应返回空集而非崩溃
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({nlohmann::json::object({{"task_id", "t1"}})});
+    std::map<std::string, std::string> statuses;
+    auto ready = DagEngine::findReadyTasks(dag_json, statuses);
+    REQUIRE(ready.empty());
+}
+
+TEST_CASE("DagEngine findBlockedTasks - node missing id returns empty not crash", "[dag_engine_ub]") {
+    // Fix #279: findBlockedTasks 节点缺失 id 应返回空集而非崩溃
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({nlohmann::json::object({{"task_id", "t1"}})});
+    std::map<std::string, std::string> statuses;
+    auto blocked = DagEngine::findBlockedTasks(dag_json, statuses);
+    REQUIRE(blocked.empty());
+}
+
+TEST_CASE("DagEngine findReadyTasks - edge with non-string source is skipped", "[dag_engine_ub]") {
+    // Fix #279: edge source 为非字符串类型应跳过而非崩溃
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"source", 123}, {"target", "b"}})
+    });
+    std::map<std::string, std::string> statuses = {{"a", "SUCCESS"}, {"b", "PENDING"}};
+    auto ready = DagEngine::findReadyTasks(dag_json, statuses);
+    // b's upstream (invalid edge) is skipped, so b is ready
+    REQUIRE(ready.count("b") > 0);
 }

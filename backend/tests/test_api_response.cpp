@@ -154,3 +154,90 @@ TEST_CASE("ApiResponse: all responses have exactly 3 fields", "[api_response]") 
     REQUIRE(ApiResponse::notFound().size() == 3);
     REQUIRE(ApiResponse::internalError().size() == 3);
 }
+
+// ============================================================================
+// Fix #283: ApiResponse paged/error 参数校验测试
+// 原实现不校验参数，负 total/page、page_size<1 会产生非法分页响应（下游除零、
+// 越界）；error(code<=0) 与 success 的 code=0 冲突，客户端无法区分成功/失败。
+// ============================================================================
+
+TEST_CASE("ApiResponse: paged with negative total normalizes to 0", "[api_response_validation]") {
+    // Fix #283: 负 total 应归一化为 0
+    nlohmann::json items = nlohmann::json::array();
+    auto resp = ApiResponse::paged(items, -5, 1, 10);
+    REQUIRE(resp["code"] == 0);
+    REQUIRE(resp["data"]["total"] == 0);
+}
+
+TEST_CASE("ApiResponse: paged with negative page normalizes to 0", "[api_response_validation]") {
+    // Fix #283: 负 page 应归一化为 0
+    nlohmann::json items = nlohmann::json::array();
+    auto resp = ApiResponse::paged(items, 10, -1, 10);
+    REQUIRE(resp["code"] == 0);
+    REQUIRE(resp["data"]["page"] == 0);
+}
+
+TEST_CASE("ApiResponse: paged with zero page_size normalizes to 1", "[api_response_validation]") {
+    // Fix #283: page_size=0 会导致下游除零，应归一化为 1
+    nlohmann::json items = nlohmann::json::array();
+    auto resp = ApiResponse::paged(items, 10, 1, 0);
+    REQUIRE(resp["code"] == 0);
+    REQUIRE(resp["data"]["page_size"] == 1);
+}
+
+TEST_CASE("ApiResponse: paged with negative page_size normalizes to 1", "[api_response_validation]") {
+    // Fix #283: 负 page_size 应归一化为 1
+    nlohmann::json items = nlohmann::json::array();
+    auto resp = ApiResponse::paged(items, 10, 1, -5);
+    REQUIRE(resp["code"] == 0);
+    REQUIRE(resp["data"]["page_size"] == 1);
+}
+
+TEST_CASE("ApiResponse: paged with all invalid params normalizes correctly", "[api_response_validation]") {
+    // Fix #283: 所有参数非法时全部归一化
+    nlohmann::json items = nlohmann::json::array({{"id", 1}});
+    auto resp = ApiResponse::paged(items, -100, -2, -10);
+    REQUIRE(resp["code"] == 0);
+    REQUIRE(resp["data"]["total"] == 0);
+    REQUIRE(resp["data"]["page"] == 0);
+    REQUIRE(resp["data"]["page_size"] == 1);
+    // items 仍应原样保留
+    REQUIRE(resp["data"]["items"].size() == 1);
+}
+
+TEST_CASE("ApiResponse: paged with valid boundary page_size 1 passes", "[api_response_validation]") {
+    // Fix #283: page_size=1（下界）应原样通过
+    nlohmann::json items = nlohmann::json::array();
+    auto resp = ApiResponse::paged(items, 0, 0, 1);
+    REQUIRE(resp["data"]["page_size"] == 1);
+    REQUIRE(resp["data"]["page"] == 0);
+    REQUIRE(resp["data"]["total"] == 0);
+}
+
+TEST_CASE("ApiResponse: error with code zero normalizes to 50000", "[api_response_validation]") {
+    // Fix #283: code=0 与 success 冲突，应归一化为 50000
+    auto resp = ApiResponse::error(0, "should not be success");
+    REQUIRE(resp["code"] == 50000);
+    REQUIRE(resp["message"] == "should not be success");
+    REQUIRE(resp["data"].is_null());
+}
+
+TEST_CASE("ApiResponse: error with negative code normalizes to 50000", "[api_response_validation]") {
+    // Fix #283: 负 code 应归一化为 50000
+    auto resp = ApiResponse::error(-1, "negative code");
+    REQUIRE(resp["code"] == 50000);
+    REQUIRE(resp["message"] == "negative code");
+}
+
+TEST_CASE("ApiResponse: error with code 1 passes (lower bound)", "[api_response_validation]") {
+    // Fix #283: code=1（正数下界）应原样通过
+    auto resp = ApiResponse::error(1, "minimal error code");
+    REQUIRE(resp["code"] == 1);
+    REQUIRE(resp["message"] == "minimal error code");
+}
+
+TEST_CASE("ApiResponse: error with large positive code passes", "[api_response_validation]") {
+    // Fix #283: 大正数 code 应原样通过
+    auto resp = ApiResponse::error(59900, "large error code");
+    REQUIRE(resp["code"] == 59900);
+}

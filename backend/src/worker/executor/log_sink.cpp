@@ -8,14 +8,17 @@
 namespace taskflow::worker::executor {
 
 // Fix #271: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
+// Fix #282: 额外拒绝单个 "."，防止日志写到 base_dir 根目录
 static bool isValidInstanceId(const std::string& id) {
     if (id.empty()) return false;
-    // 拒绝含路径分隔符、点号（防止 ".."）、空字节的 ID
+    // 拒绝含路径分隔符、空字节的 ID
     for (char c : id) {
         if (c == '/' || c == '\\' || c == '\0') return false;
     }
     // 拒绝 ".." 序列
     if (id.find("..") != std::string::npos) return false;
+    // Fix #282: 拒绝单个 "."（等价于 base_dir 本身）
+    if (id == ".") return false;
     return true;
 }
 
@@ -87,7 +90,8 @@ void FileLogSink::cleanup(int retention_days) {
     if (!std::filesystem::exists(base_dir_)) return;
 
     auto now = std::filesystem::file_time_type::clock::now();
-    auto retention = std::chrono::hours(24 * retention_days);
+    // Fix #282: 用 long long 防止 24 * retention_days 整数溢出
+    auto retention = std::chrono::hours(static_cast<long long>(24) * retention_days);
 
     for (const auto& entry : std::filesystem::directory_iterator(base_dir_)) {
         if (!entry.is_directory()) continue;

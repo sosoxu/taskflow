@@ -26,7 +26,11 @@ public:
     }
 
     // 分页响应
+    // Fix #283: 校验参数非负，page_size >= 1，防止非法分页响应和下游除零
     static nlohmann::json paged(const nlohmann::json& items, int total, int page, int page_size) {
+        if (total < 0) total = 0;
+        if (page < 0) page = 0;
+        if (page_size < 1) page_size = 1;
         return success({
             {"items", items},
             {"total", total},
@@ -36,7 +40,9 @@ public:
     }
 
     // 错误响应
+    // Fix #283: 校验 code > 0，防止与 success 的 code=0 冲突
     static nlohmann::json error(int code, const std::string& message) {
+        if (code <= 0) code = 50000;
         return {
             {"code", code},
             {"message", message},

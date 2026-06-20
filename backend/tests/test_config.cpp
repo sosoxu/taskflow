@@ -740,3 +740,169 @@ TEST_CASE("SchedulerConfig: max_connections equals min passes", "[config_boundar
     cfg.database.max_connections = 10;
     REQUIRE_NOTHROW(cfg.validate());
 }
+
+// ============================================================================
+// Fix #280: SchedulerConfig 补充校验测试
+// 原校验遗漏 timeout_check_interval / access_token_ttl / refresh_token_ttl /
+// database.port。0 或负值会导致 tight-loop spinning、token 立即过期、连接失败。
+// ============================================================================
+
+TEST_CASE("SchedulerConfig: timeout_check_interval zero throws", "[config_boundary]") {
+    // Fix #280: timeout_check_interval=0 会导致任务超时检查 tight-loop spinning
+    auto cfg = makeValidSchedulerConfig();
+    cfg.schedule.timeout_check_interval = 0;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: timeout_check_interval negative throws", "[config_boundary]") {
+    // Fix #280: timeout_check_interval 负值应失败
+    auto cfg = makeValidSchedulerConfig();
+    cfg.schedule.timeout_check_interval = -1;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: access_token_ttl zero throws", "[config_boundary]") {
+    // Fix #280: access_token_ttl=0 会导致 access token 立即过期，无法登录
+    auto cfg = makeValidSchedulerConfig();
+    cfg.auth.access_token_ttl = 0;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: access_token_ttl negative throws", "[config_boundary]") {
+    // Fix #280: access_token_ttl 负值应失败
+    auto cfg = makeValidSchedulerConfig();
+    cfg.auth.access_token_ttl = -1;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: refresh_token_ttl zero throws", "[config_boundary]") {
+    // Fix #280: refresh_token_ttl=0 会导致 refresh token 立即过期
+    auto cfg = makeValidSchedulerConfig();
+    cfg.auth.refresh_token_ttl = 0;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: refresh_token_ttl negative throws", "[config_boundary]") {
+    // Fix #280: refresh_token_ttl 负值应失败
+    auto cfg = makeValidSchedulerConfig();
+    cfg.auth.refresh_token_ttl = -1;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: database_port zero throws", "[config_boundary]") {
+    // Fix #280: database.port=0 无效
+    auto cfg = makeValidSchedulerConfig();
+    cfg.database.port = 0;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: database_port negative throws", "[config_boundary]") {
+    // Fix #280: database.port 负值无效
+    auto cfg = makeValidSchedulerConfig();
+    cfg.database.port = -1;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: database_port 65536 throws (upper bound)", "[config_boundary]") {
+    // Fix #280: database.port 超过 65535 无效
+    auto cfg = makeValidSchedulerConfig();
+    cfg.database.port = 65536;
+    REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
+}
+
+TEST_CASE("SchedulerConfig: database_port 65535 passes (upper bound)", "[config_boundary]") {
+    // Fix #280: database.port=65535（上界）应通过
+    auto cfg = makeValidSchedulerConfig();
+    cfg.database.port = 65535;
+    REQUIRE_NOTHROW(cfg.validate());
+}
+
+TEST_CASE("SchedulerConfig: database_port 1 passes (lower bound)", "[config_boundary]") {
+    // Fix #280: database.port=1（下界）应通过
+    auto cfg = makeValidSchedulerConfig();
+    cfg.database.port = 1;
+    REQUIRE_NOTHROW(cfg.validate());
+}
+
+// ============================================================================
+// Fix #281: DatabaseConfig::connectionString() 转义测试
+// 原实现直接拼接 password 等字段，含空格/单引号/反斜杠的值会破坏 libpq 连接串
+// 语法或引发注入。这些测试验证转义逻辑。
+// ============================================================================
+
+TEST_CASE("DatabaseConfig: connectionString escapes password with space", "[config_db_connstr]") {
+    // Fix #281: 含空格的 password 需用单引号包裹
+    DatabaseConfig db;
+    db.host = "localhost";
+    db.port = 5432;
+    db.name = "taskflow";
+    db.user = "taskflow";
+    db.password = "my password";
+    std::string conn = db.connectionString();
+    // 应包含 password='my password'
+    REQUIRE(conn.find("password='my password'") != std::string::npos);
+}
+
+TEST_CASE("DatabaseConfig: connectionString escapes password with single quote", "[config_db_connstr]") {
+    // Fix #281: 含单引号的 password 需转义并包裹
+    DatabaseConfig db;
+    db.host = "localhost";
+    db.port = 5432;
+    db.name = "taskflow";
+    db.user = "taskflow";
+    db.password = "pa'ss";
+    std::string conn = db.connectionString();
+    // 单引号应被反斜杠转义：password='pa\'ss'
+    REQUIRE(conn.find("password='pa\\'ss'") != std::string::npos);
+}
+
+TEST_CASE("DatabaseConfig: connectionString escapes password with backslash", "[config_db_connstr]") {
+    // Fix #281: 含反斜杠的 password 需转义并包裹
+    DatabaseConfig db;
+    db.host = "localhost";
+    db.port = 5432;
+    db.name = "taskflow";
+    db.user = "taskflow";
+    db.password = "pa\\ss";
+    std::string conn = db.connectionString();
+    // 反斜杠应被转义为双反斜杠：password='pa\\ss'
+    REQUIRE(conn.find("password='pa\\\\ss'") != std::string::npos);
+}
+
+TEST_CASE("DatabaseConfig: connectionString no escape for simple password", "[config_db_connstr]") {
+    // Fix #281: 不含特殊字符的 password 不应被包裹
+    DatabaseConfig db;
+    db.host = "localhost";
+    db.port = 5432;
+    db.name = "taskflow";
+    db.user = "taskflow";
+    db.password = "simplepass123";
+    std::string conn = db.connectionString();
+    REQUIRE(conn.find("password=simplepass123") != std::string::npos);
+    // 不应被单引号包裹
+    REQUIRE(conn.find("password='simplepass123'") == std::string::npos);
+}
+
+TEST_CASE("DatabaseConfig: connectionString escapes empty password", "[config_db_connstr]") {
+    // Fix #281: 空 password 应输出 password=''
+    DatabaseConfig db;
+    db.host = "localhost";
+    db.port = 5432;
+    db.name = "taskflow";
+    db.user = "taskflow";
+    db.password = "";
+    std::string conn = db.connectionString();
+    REQUIRE(conn.find("password=''") != std::string::npos);
+}
+
+TEST_CASE("DatabaseConfig: connectionString escapes host with space", "[config_db_connstr]") {
+    // Fix #281: host 含空格也需转义
+    DatabaseConfig db;
+    db.host = "my host";
+    db.port = 5432;
+    db.name = "taskflow";
+    db.user = "taskflow";
+    db.password = "pass";
+    std::string conn = db.connectionString();
+    REQUIRE(conn.find("host='my host'") != std::string::npos);
+}

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <random>
+#include <limits>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <sstream>
@@ -195,6 +196,11 @@ private:
         if (iterations <= 0) {
             return common::result::Result<bool>::failure("Invalid hash format: non-positive iterations");
         }
+        // Fix #286: 添加迭代次数上限，防止恶意构造的超大迭代次数导致 DoS
+        constexpr int kMaxIterations = 1000000;
+        if (iterations > kMaxIterations) {
+            return common::result::Result<bool>::failure("Invalid hash format: iterations exceed maximum");
+        }
 
         auto salt_result = base64Decode(parts[2]);
         if (!salt_result.ok()) {
@@ -276,6 +282,12 @@ private:
 
         if (encoded.empty()) {
             return std::vector<unsigned char>{};
+        }
+
+        // Fix #286: 校验 encoded.size() <= INT_MAX，防止 static_cast<int> 截断为负数导致越界读
+        if (encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            return common::result::Result<std::vector<unsigned char>>::failure(
+                "Invalid base64: input too large");
         }
 
         auto len = static_cast<int>(encoded.size());

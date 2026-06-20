@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <nlohmann/json.hpp>
 #include "common/result/result.h"
@@ -55,7 +56,11 @@ public:
             adj[id] = {};
         }
 
-        if (dag_json.contains("edges") && dag_json["edges"].is_array()) {
+        if (dag_json.contains("edges")) {
+            // Fix #285: edges 存在但非数组时返回错误，而非静默忽略
+            if (!dag_json["edges"].is_array()) {
+                return common::result::Result<void>::failure("'edges' must be an array");
+            }
             const auto& edges = dag_json["edges"];
             for (const auto& edge : edges) {
                 if (!edge.contains("source") || !edge["source"].is_string() ||
@@ -128,22 +133,37 @@ public:
     }
 
 private:
-    static bool hasCycle(const std::string& node,
+    // Fix #285: 改为迭代式 DFS 防止深链场景栈溢出
+    // WHITE=0, GRAY=1, BLACK=2
+    static bool hasCycle(const std::string& start,
                          const std::unordered_map<std::string, std::vector<std::string>>& adj,
                          std::unordered_map<std::string, int>& color) {
-        color[node] = 1;  // GRAY
-        auto it = adj.find(node);
-        if (it != adj.end()) {
-            for (const auto& neighbor : it->second) {
-                if (color[neighbor] == 1) {  // Back edge -> cycle
-                    return true;
-                }
-                if (color[neighbor] == 0 && hasCycle(neighbor, adj, color)) {
-                    return true;
-                }
+        std::vector<std::pair<std::string, size_t>> stack;
+        stack.emplace_back(start, 0);
+        color[start] = 1;  // GRAY
+
+        while (!stack.empty()) {
+            auto& [node, idx] = stack.back();
+            auto it = adj.find(node);
+            if (it == adj.end() || idx >= it->second.size()) {
+                // All neighbors processed, mark BLACK
+                color[node] = 2;
+                stack.pop_back();
+                continue;
             }
+            const std::string& neighbor = it->second[idx];
+            ++idx;  // Advance for next iteration
+
+            int c = color[neighbor];
+            if (c == 1) {  // Back edge -> cycle
+                return true;
+            }
+            if (c == 0) {
+                color[neighbor] = 1;  // GRAY
+                stack.emplace_back(neighbor, 0);
+            }
+            // c == 2 (BLACK): already fully processed, skip
         }
-        color[node] = 2;  // BLACK
         return false;
     }
 };

@@ -12,6 +12,18 @@
 
 namespace taskflow::worker::executor {
 
+// Fix #277: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
+// 与 log_sink.cpp 的 isValidInstanceId 保持一致
+static bool isValidInstanceId(const std::string& id) {
+    if (id.empty()) return false;
+    for (char c : id) {
+        if (c == '/' || c == '\\' || c == '\0') return false;
+    }
+    if (id.find("..") != std::string::npos) return false;
+    if (id == ".") return false;
+    return true;
+}
+
 TaskResult CommandExecutor::execute(const std::string& task_instance_id,
                                     const nlohmann::json& config,
                                     int timeout,
@@ -27,7 +39,14 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
         return result;
     }
 
-    std::string command = config["command"].get<std::string>();
+    // Fix #277: 校验 task_instance_id 防止路径穿越（与 log_sink Fix #271 一致）
+    if (!isValidInstanceId(task_instance_id)) {
+        result.status = "FAILED";
+        result.exit_code = 1;
+        result.error_message = "Invalid task_instance_id contains path separators or traversal";
+        return result;
+    }
+
     std::string log_path = log_dir + "/" + task_instance_id + ".log";
 
     // Use /bin/sh -c to support shell operators (&&, ||, |, ;, etc.)

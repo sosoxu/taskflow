@@ -16,8 +16,29 @@ struct DatabaseConfig {
     int max_connections = 20;
 
     std::string connectionString() const {
-        return "host=" + host + " port=" + std::to_string(port) +
-               " dbname=" + name + " user=" + user + " password=" + password;
+        // Fix #281: 对含特殊字符（空格、单引号、反斜杠）的值用单引号包裹并转义
+        // libpq key=value 格式中，含特殊字符的值需用单引号包裹，内部单引号和反斜杠需转义
+        auto escape = [](const std::string& val) -> std::string {
+            if (val.empty()) return "''";
+            bool need_quote = false;
+            for (char c : val) {
+                if (c == ' ' || c == '\'' || c == '\\' || c == '\t' || c == '\n') {
+                    need_quote = true;
+                    break;
+                }
+            }
+            if (!need_quote) return val;
+            std::string result = "'";
+            for (char c : val) {
+                if (c == '\\' || c == '\'') result += '\\';
+                result += c;
+            }
+            result += "'";
+            return result;
+        };
+        return "host=" + escape(host) + " port=" + std::to_string(port) +
+               " dbname=" + escape(name) + " user=" + escape(user) +
+               " password=" + escape(password);
     }
 };
 
