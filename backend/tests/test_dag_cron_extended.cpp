@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <set>
+#include <string>
+#include <map>
 #include "scheduler/service/dag_validator.h"
 #include "scheduler/engine/dag_engine.h"
 #include "scheduler/engine/cron_parser.h"
@@ -16,7 +19,7 @@ using namespace taskflow::scheduler::engine;
 //   5. 多节点无孤立节点合法
 //   6. 菱形 DAG 合法
 //   7. 缺少 nodes 字段被拒绝
-//   8. 缺少 edges 字段被拒绝
+//   8. 缺少 edges 字段合法（仅依赖 dependencies 字段声明依赖）
 // ============================================================================
 
 TEST_CASE("DagValidator: self-loop edge rejected", "[dag_validator_ext]") {
@@ -28,6 +31,8 @@ TEST_CASE("DagValidator: self-loop edge rejected", "[dag_validator_ext]") {
 
     auto result = DagValidator::validate(dag);
     REQUIRE_FALSE(result.ok());
+    // 验证错误消息包含 "cycle"（自环被环检测捕获）
+    REQUIRE(result.error().find("cycle") != std::string::npos);
 }
 
 TEST_CASE("DagValidator: edge to non-existent node rejected", "[dag_validator_ext]") {
@@ -39,6 +44,9 @@ TEST_CASE("DagValidator: edge to non-existent node rejected", "[dag_validator_ex
 
     auto result = DagValidator::validate(dag);
     REQUIRE_FALSE(result.ok());
+    // 验证错误消息包含 target 和不存在的节点 ID
+    REQUIRE(result.error().find("target") != std::string::npos);
+    REQUIRE(result.error().find("nonexistent") != std::string::npos);
 }
 
 TEST_CASE("DagValidator: edge from non-existent node rejected", "[dag_validator_ext]") {
@@ -50,6 +58,9 @@ TEST_CASE("DagValidator: edge from non-existent node rejected", "[dag_validator_
 
     auto result = DagValidator::validate(dag);
     REQUIRE_FALSE(result.ok());
+    // 验证错误消息包含 source 和不存在的节点 ID
+    REQUIRE(result.error().find("source") != std::string::npos);
+    REQUIRE(result.error().find("nonexistent") != std::string::npos);
 }
 
 TEST_CASE("DagValidator: duplicate node id is rejected (Fix #158)", "[dag_validator_ext]") {
@@ -104,6 +115,8 @@ TEST_CASE("DagValidator: node missing id field rejected", "[dag_validator_ext]")
 
     auto result = DagValidator::validate(dag);
     REQUIRE_FALSE(result.ok());
+    // 验证错误消息包含 "id"
+    REQUIRE(result.error().find("id") != std::string::npos);
 }
 
 TEST_CASE("DagValidator: edge missing source rejected", "[dag_validator_ext]") {
@@ -115,6 +128,8 @@ TEST_CASE("DagValidator: edge missing source rejected", "[dag_validator_ext]") {
 
     auto result = DagValidator::validate(dag);
     REQUIRE_FALSE(result.ok());
+    // 验证错误消息包含 "source"
+    REQUIRE(result.error().find("source") != std::string::npos);
 }
 
 TEST_CASE("DagValidator: edge missing target rejected", "[dag_validator_ext]") {
@@ -126,6 +141,33 @@ TEST_CASE("DagValidator: edge missing target rejected", "[dag_validator_ext]") {
 
     auto result = DagValidator::validate(dag);
     REQUIRE_FALSE(result.ok());
+    // 验证错误消息包含 "target"
+    REQUIRE(result.error().find("target") != std::string::npos);
+}
+
+TEST_CASE("DagValidator: missing edges field is valid (dependencies only)", "[dag_validator_ext]") {
+    // 验收指标 8：缺少 edges 字段合法（仅依赖 dependencies 字段声明依赖）
+    // 之前文件头注释错误地声称"缺少 edges 字段被拒绝"，实际源码第 58 行
+    // `if (dag_json.contains("edges") && dag_json["edges"].is_array())` 不存在 edges 时跳过
+    nlohmann::json dag;
+    dag["nodes"] = nlohmann::json::array();
+    // 不设置 edges 字段，仅用 dependencies 声明依赖
+    dag["nodes"].push_back({{"id", "a"}, {"task_id", "t1"}});
+    dag["nodes"].push_back({{"id", "b"}, {"task_id", "t2"}, {"dependencies", nlohmann::json::array({"a"})}});
+
+    auto result = DagValidator::validate(dag);
+    REQUIRE(result.ok());
+}
+
+TEST_CASE("DagValidator: missing nodes field rejected", "[dag_validator_ext]") {
+    // 验收指标 7：缺少 nodes 字段被拒绝
+    nlohmann::json dag;
+    dag["edges"] = nlohmann::json::array();
+    // 不设置 nodes 字段
+
+    auto result = DagValidator::validate(dag);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("nodes") != std::string::npos);
 }
 
 // ============================================================================
@@ -153,6 +195,11 @@ TEST_CASE("DagEngine: diamond DAG topological sort", "[dag_engine_ext]") {
     REQUIRE(levels.size() == 3);  // [a], [b,c], [d]
     REQUIRE(levels[0].size() == 1);
     REQUIRE(levels[0][0] == "a");
+    // 验证 levels[1] 包含 b 和 c（之前未验证中间层成员内容）
+    REQUIRE(levels[1].size() == 2);
+    std::set<std::string> layer1(levels[1].begin(), levels[1].end());
+    REQUIRE(layer1.count("b") == 1);
+    REQUIRE(layer1.count("c") == 1);
     REQUIRE(levels[2].size() == 1);
     REQUIRE(levels[2][0] == "d");
 }
@@ -259,11 +306,39 @@ TEST_CASE("DagEngine: allTasksFinished with various statuses", "[dag_engine_ext]
     };
     REQUIRE(DagEngine::allTasksFinished(s3));
 
-    // DISPATCHED is not finished
+    // NODE_OFFLINE counts as finished（之前未覆盖此终态）
     std::map<std::string, std::string> s4 = {
+        {"a", "NODE_OFFLINE"}, {"b", "SUCCESS"}
+    };
+    REQUIRE(DagEngine::allTasksFinished(s4));
+
+    // DISPATCHED is not finished
+    std::map<std::string, std::string> s5 = {
         {"a", "DISPATCHED"}
     };
-    REQUIRE_FALSE(DagEngine::allTasksFinished(s4));
+    REQUIRE_FALSE(DagEngine::allTasksFinished(s5));
+
+    // RUNNING is not finished（之前未覆盖此非终态）
+    std::map<std::string, std::string> s6 = {
+        {"a", "RUNNING"}, {"b", "SUCCESS"}
+    };
+    REQUIRE_FALSE(DagEngine::allTasksFinished(s6));
+
+    // PENDING is not finished（之前未覆盖此非终态）
+    std::map<std::string, std::string> s7 = {
+        {"a", "PENDING"}
+    };
+    REQUIRE_FALSE(DagEngine::allTasksFinished(s7));
+
+    // 空映射视为全部完成
+    std::map<std::string, std::string> s8;
+    REQUIRE(DagEngine::allTasksFinished(s8));
+
+    // 未知状态不视为终态
+    std::map<std::string, std::string> s9 = {
+        {"a", "UNKNOWN_STATUS"}
+    };
+    REQUIRE_FALSE(DagEngine::allTasksFinished(s9));
 }
 
 // ============================================================================
@@ -282,7 +357,8 @@ TEST_CASE("CronParser: specific day of week", "[cron_parser_ext]") {
     auto result = CronParser::getNextTrigger("0 0 9 * * 1", "2025-01-01 00:00:00");
     REQUIRE(result.ok());
     // 2025-01-01 is Wednesday, next Monday is 2025-01-06
-    REQUIRE(result.value().substr(0, 10) == "2025-01-06");
+    // 之前只检查日期不检查时间，补充完整时间断言
+    REQUIRE(result.value() == "2025-01-06 09:00:00");
 }
 
 TEST_CASE("CronParser: every 10 minutes", "[cron_parser_ext]") {

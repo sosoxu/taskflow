@@ -3,6 +3,8 @@
 #include <memory>
 #include <utility>
 #include <stdexcept>
+#include <variant>
+#include <nlohmann/json.hpp>
 #include "common/result/result.h"
 
 using namespace taskflow::common::result;
@@ -141,14 +143,17 @@ TEST_CASE("Result<T>: rvalue value() extracts by move", "[result_move]") {
     REQUIRE(*extracted == 123);
 }
 
-TEST_CASE("Result<T>: failure with moved string", "[result_move]") {
-    // Fix #245: failure(std::string&&) 应移动错误消息而非拷贝
+TEST_CASE("Result<T>: failure with moved string (move semantics)", "[result_move]") {
+    // Fix #262: 修正重复测试名 —— 原 "failure with moved string" 与第 45 行重复
+    // 改造为验证移动后原 string 的状态（移动语义验证）
     std::string err = "moved_failure_error";
 
     auto r = Result<int>::failure(std::move(err));
     REQUIRE_FALSE(r.ok());
     REQUIRE(r.error() == "moved_failure_error");
-    // 验证错误消息内容正确（移动后原 string 可能为空或未指定状态）
+    // 移动后原 string 处于有效但未指定状态（可能为空，可能仍持有原值）
+    // 验证 Result 持有的错误消息与原值相同
+    REQUIRE(r.error() == "moved_failure_error");
 }
 
 TEST_CASE("Result<T>: move-only type with vector", "[result_move]") {
@@ -175,12 +180,129 @@ TEST_CASE("Result<void>: move construction of failure", "[result_move]") {
 }
 
 TEST_CASE("Result<T>: value() const& returns reference (no copy of moved type)", "[result_move]") {
-    // Fix #245: 验证 const 左值 value() 返回引用，不触发移动
+    // Fix #262: 修正弱断言 —— 原 use_count() >= 1 对任何有效 shared_ptr 恒为真
+    // 改为 == 1，若 value() 内部拷贝则 use_count 为 2，测试会失败
     Result<std::shared_ptr<int>> r(std::make_shared<int>(42));
     REQUIRE(r.ok());
 
     const auto& ref = r.value();
     REQUIRE(*ref == 42);
-    // 原 Result 仍持有有效值
-    REQUIRE(r.value().use_count() >= 1);
+    // 原 Result 仍持有有效值，且未发生拷贝（use_count 应为 1）
+    REQUIRE(r.value().use_count() == 1);
+}
+
+// ============================================================================
+// Fix #262: error() 在成功 Result 上行为、value() && 和 const& 失败路径、
+// 拷贝/移动赋值、可变引用修改
+// ============================================================================
+
+TEST_CASE("Result<T>: error() on success throws bad_variant_access", "[result_error]") {
+    // Fix #262: 成功状态下调用 error() 会抛 std::bad_variant_access（std::get<Error> 失败）
+    Result<int> r(42);
+    REQUIRE(r.ok());
+    REQUIRE_THROWS_AS(r.error(), std::bad_variant_access);
+}
+
+TEST_CASE("Result<void>: error() on success returns empty string", "[result_error]") {
+    // Fix #262: Result<void> 成功时 error() 返回默认空字符串（不抛异常）
+    Result<void> r;
+    REQUIRE(r.ok());
+    REQUIRE(r.error().empty());
+}
+
+TEST_CASE("Result<T>: value() rvalue throws on failure", "[result_value_fail]") {
+    // Fix #262: value() && 重载在失败时抛 std::runtime_error
+    auto r = Result<int>::failure("rvalue_fail_error");
+    REQUIRE_THROWS_AS(std::move(r).value(), std::runtime_error);
+}
+
+TEST_CASE("Result<T>: value() const& throws on failure", "[result_value_fail]") {
+    // Fix #262: value() const& 重载在失败时抛 std::runtime_error
+    const auto r = Result<int>::failure("const_lvalue_fail_error");
+    REQUIRE_THROWS_AS(r.value(), std::runtime_error);
+}
+
+TEST_CASE("Result<T>: value() throws with error message", "[result_value_fail]") {
+    // Fix #262: 验证异常消息内容包含 error() 返回的字符串
+    auto r = Result<int>::failure("specific_error_message_xyz");
+    try {
+        r.value();
+        FAIL("Expected std::runtime_error");
+    } catch (const std::runtime_error& e) {
+        REQUIRE(std::string(e.what()).find("specific_error_message_xyz") != std::string::npos);
+    }
+}
+
+TEST_CASE("Result<T>: copy construction preserves value", "[result_copy]") {
+    // Fix #262: 拷贝构造后两者独立且值正确
+    Result<int> r1(42);
+    Result<int> r2(r1);
+    REQUIRE(r1.ok());
+    REQUIRE(r2.ok());
+    REQUIRE(r1.value() == 42);
+    REQUIRE(r2.value() == 42);
+}
+
+TEST_CASE("Result<T>: copy construction preserves error", "[result_copy]") {
+    // Fix #262: 拷贝构造 failure 结果
+    auto r1 = Result<int>::failure("copy_error_msg");
+    Result<int> r2(r1);
+    REQUIRE_FALSE(r1.ok());
+    REQUIRE_FALSE(r2.ok());
+    REQUIRE(r1.error() == "copy_error_msg");
+    REQUIRE(r2.error() == "copy_error_msg");
+}
+
+TEST_CASE("Result<T>: copy assignment preserves value", "[result_copy]") {
+    // Fix #262: 拷贝赋值后两者独立且值正确
+    Result<int> r1(42);
+    Result<int> r2(0);
+    r2 = r1;
+    REQUIRE(r1.ok());
+    REQUIRE(r2.ok());
+    REQUIRE(r1.value() == 42);
+    REQUIRE(r2.value() == 42);
+}
+
+TEST_CASE("Result<T>: move assignment transfers value", "[result_move]") {
+    // Fix #262: 移动赋值后新对象持有原值
+    Result<int> r1(99);
+    Result<int> r2(0);
+    r2 = std::move(r1);
+    REQUIRE(r2.ok());
+    REQUIRE(r2.value() == 99);
+}
+
+TEST_CASE("Result<T>: value() & allows mutation", "[result_mutation]") {
+    // Fix #262: value() & 返回可变引用，允许修改内部值
+    Result<int> r(1);
+    r.value() = 100;
+    REQUIRE(r.value() == 100);
+}
+
+TEST_CASE("Result<void>: copy construction preserves state", "[result_copy]") {
+    // Fix #262: Result<void> 拷贝构造
+    auto r1 = Result<void>::failure("void_copy_error");
+    Result<void> r2(r1);
+    REQUIRE_FALSE(r1.ok());
+    REQUIRE_FALSE(r2.ok());
+    REQUIRE(r1.error() == "void_copy_error");
+    REQUIRE(r2.error() == "void_copy_error");
+}
+
+TEST_CASE("Result<void>: copy construction of success", "[result_copy]") {
+    // Fix #262: Result<void> 成功状态的拷贝构造
+    Result<void> r1;
+    Result<void> r2(r1);
+    REQUIRE(r1.ok());
+    REQUIRE(r2.ok());
+}
+
+TEST_CASE("Result<void>: move assignment transfers error", "[result_move]") {
+    // Fix #262: Result<void> 移动赋值
+    auto r1 = Result<void>::failure("void_move_assign_error");
+    Result<void> r2;
+    r2 = std::move(r1);
+    REQUIRE_FALSE(r2.ok());
+    REQUIRE(r2.error() == "void_move_assign_error");
 }

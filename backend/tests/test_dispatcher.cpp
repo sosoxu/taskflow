@@ -35,12 +35,25 @@ TEST_CASE("RandomDispatcher selects from online workers", "[dispatcher]") {
     REQUIRE((result.value().id == "w1" || result.value().id == "w2"));
 }
 
-TEST_CASE("RandomDispatcher fails with no online workers", "[dispatcher]") {
+TEST_CASE("RandomDispatcher fails with empty worker list", "[dispatcher]") {
+    // Fix #261: 修正误导性测试名 —— 实际传入空 vector，源码不按 status 过滤
     RandomDispatcher dispatcher;
 
     std::vector<WorkerInfo> workers;
     auto result = dispatcher.selectWorker(workers);
     REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("没有在线") != std::string::npos);
+}
+
+TEST_CASE("RandomDispatcher selects from workers regardless of status field", "[dispatcher]") {
+    // Fix #261: 验证源码不按 status 字段过滤 —— 传入 status="offline" 的 worker 仍会被选中
+    RandomDispatcher dispatcher;
+
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "offline", 0, 10));  // status 非 online
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().id == "w1");
 }
 
 TEST_CASE("LoadBalanceDispatcher selects least loaded", "[dispatcher]") {
@@ -254,8 +267,8 @@ TEST_CASE("LoadBalanceDispatcher: single worker", "[dispatcher]") {
     REQUIRE(result.value().id == "only");
 }
 
-TEST_CASE("LoadBalanceDispatcher: all workers at full capacity still selects one", "[dispatcher]") {
-    // Fix #239: 满载场景 —— 所有 Worker running >= max，仍需选出负载比最低的
+TEST_CASE("LoadBalanceDispatcher: mixed load selects lowest ratio", "[dispatcher]") {
+    // Fix #261: 修正误导性测试名 —— 原 "all workers at full capacity" 实际是混合负载
     LoadBalanceDispatcher dispatcher;
 
     std::vector<WorkerInfo> workers;
@@ -266,6 +279,33 @@ TEST_CASE("LoadBalanceDispatcher: all workers at full capacity still selects one
     auto result = dispatcher.selectWorker(workers);
     REQUIRE(result.ok());
     REQUIRE(result.value().id == "w2");  // 80% 是最低
+}
+
+TEST_CASE("LoadBalanceDispatcher: all workers zero capacity returns first", "[dispatcher]") {
+    // Fix #261: 全部 worker 为零容量（max_tasks=0），所有 ratio 均为 1e9，应返回第一个
+    LoadBalanceDispatcher dispatcher;
+
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, 0));  // ratio = 1e9
+    workers.push_back(makeWorker("w2", "online", 0, 0));  // ratio = 1e9
+    workers.push_back(makeWorker("w3", "online", 0, 0));  // ratio = 1e9
+
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().id == "w1");  // 严格 < 比较，平局保留第一个
+}
+
+TEST_CASE("LoadBalanceDispatcher: negative max_tasks treated as zero capacity", "[dispatcher]") {
+    // Fix #261: 负数 max_tasks 走 max_tasks <= 0 分支，ratio = 1e9
+    LoadBalanceDispatcher dispatcher;
+
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, -1));   // ratio = 1e9
+    workers.push_back(makeWorker("w2", "online", 5, 10));   // ratio = 0.5
+
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().id == "w2");
 }
 
 TEST_CASE("LoadBalanceDispatcher: empty list fails", "[dispatcher]") {
@@ -320,4 +360,137 @@ TEST_CASE("SpecifiedDispatcher: target is last in list", "[dispatcher]") {
     auto result = dispatcher.selectWorker(workers);
     REQUIRE(result.ok());
     REQUIRE(result.value().id == "w3");
+}
+
+// ============================================================================
+// Fix #261: 补充 error 消息断言、filterByResourceTags worker 端非数组分支、
+// SpecifiedDispatcher 边界测试
+// ============================================================================
+
+TEST_CASE("LoadBalanceDispatcher: empty list error message", "[dispatcher]") {
+    // Fix #261: 验证空列表的错误消息
+    LoadBalanceDispatcher dispatcher;
+    std::vector<WorkerInfo> workers;
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("没有在线") != std::string::npos);
+}
+
+TEST_CASE("SpecifiedDispatcher: target not in list error message", "[dispatcher]") {
+    // Fix #261: 验证目标不在列表的错误消息含 worker_id
+    SpecifiedDispatcher dispatcher("w3");
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, 10));
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("w3") != std::string::npos);
+}
+
+TEST_CASE("SpecifiedDispatcher: empty list error message", "[dispatcher]") {
+    // Fix #261: 验证空列表的错误消息
+    SpecifiedDispatcher dispatcher("w1");
+    std::vector<WorkerInfo> workers;
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error().find("w1") != std::string::npos);
+}
+
+TEST_CASE("SpecifiedDispatcher: empty string worker_id not found", "[dispatcher]") {
+    // Fix #261: 空字符串 worker_id 匹配 id=="" 的 worker（通常不存在），返回 failure
+    SpecifiedDispatcher dispatcher("");
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, 10));
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE_FALSE(result.ok());
+}
+
+TEST_CASE("SpecifiedDispatcher: duplicate worker IDs returns first match", "[dispatcher]") {
+    // Fix #261: 列表中有两个相同 ID 的 worker，应返回第一个匹配
+    SpecifiedDispatcher dispatcher("dup");
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("dup", "online", 1, 10));  // 第一个
+    workers.push_back(makeWorker("dup", "online", 2, 10));  // 第二个（同 ID）
+    auto result = dispatcher.selectWorker(workers);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().id == "dup");
+    REQUIRE(result.value().running_tasks == 1);  // 返回第一个
+}
+
+TEST_CASE("filterByResourceTags: worker with non-array resource_tags is filtered out", "[dispatcher_filter]") {
+    // Fix #261: worker.resource_tags 为非数组类型（object/string）时被视为空标签集，要求任何标签时被过滤
+    std::vector<WorkerInfo> workers;
+    WorkerInfo w1;
+    w1.id = "w1"; w1.status = "online"; w1.running_tasks = 0; w1.max_tasks = 10;
+    w1.resource_tags = nlohmann::json::object();  // 非数组
+    workers.push_back(w1);
+
+    WorkerInfo w2;
+    w2.id = "w2"; w2.status = "online"; w2.running_tasks = 0; w2.max_tasks = 10;
+    w2.resource_tags = "gpu";  // 非数组（字符串）
+    workers.push_back(w2);
+
+    WorkerInfo w3;
+    w3.id = "w3"; w3.status = "online"; w3.running_tasks = 0; w3.max_tasks = 10;
+    w3.resource_tags = nlohmann::json::array({"gpu"});  // 正常数组
+    workers.push_back(w3);
+
+    auto filtered = filterByResourceTags(workers, nlohmann::json::array({"gpu"}));
+    REQUIRE(filtered.size() == 1);
+    REQUIRE(filtered[0].id == "w3");  // 只有 w3 有正确的数组标签
+}
+
+TEST_CASE("filterByResourceTags: worker with mixed-type tags only counts strings", "[dispatcher_filter]") {
+    // Fix #261: worker.resource_tags 数组含非字符串元素，只有字符串元素被计入
+    std::vector<WorkerInfo> workers;
+    WorkerInfo w1;
+    w1.id = "w1"; w1.status = "online"; w1.running_tasks = 0; w1.max_tasks = 10;
+    w1.resource_tags = nlohmann::json::array({123, "gpu", true});  // 混合类型
+    workers.push_back(w1);
+
+    auto filtered = filterByResourceTags(workers, nlohmann::json::array({"gpu"}));
+    REQUIRE(filtered.size() == 1);
+    REQUIRE(filtered[0].id == "w1");
+}
+
+TEST_CASE("filterByResourceTags: duplicate required tags are deduplicated", "[dispatcher_filter]") {
+    // Fix #261: required_tags 含重复标签，去重后行为与单个标签相同
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, 10, nlohmann::json::array({"gpu"})));
+
+    auto filtered = filterByResourceTags(workers, nlohmann::json::array({"gpu", "gpu"}));
+    REQUIRE(filtered.size() == 1);
+    REQUIRE(filtered[0].id == "w1");
+}
+
+TEST_CASE("filterByResourceTags: multiple matches preserve input order", "[dispatcher_filter]") {
+    // Fix #261: 多个 worker 都匹配时，输出顺序与输入一致
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, 10, nlohmann::json::array({"gpu"})));
+    workers.push_back(makeWorker("w2", "online", 0, 10, nlohmann::json::array({"gpu", "highmem"})));
+    workers.push_back(makeWorker("w3", "online", 0, 10, nlohmann::json::array({"gpu"})));
+
+    auto filtered = filterByResourceTags(workers, nlohmann::json::array({"gpu"}));
+    REQUIRE(filtered.size() == 3);
+    REQUIRE(filtered[0].id == "w1");
+    REQUIRE(filtered[1].id == "w2");
+    REQUIRE(filtered[2].id == "w3");
+}
+
+TEST_CASE("RandomDispatcher: multiple calls cover different workers", "[dispatcher]") {
+    // Fix #261: 循环调用 100 次，验证两个 worker 都至少被选中一次
+    RandomDispatcher dispatcher;
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 0, 10));
+    workers.push_back(makeWorker("w2", "online", 0, 10));
+
+    bool saw_w1 = false, saw_w2 = false;
+    for (int i = 0; i < 100; ++i) {
+        auto result = dispatcher.selectWorker(workers);
+        REQUIRE(result.ok());
+        if (result.value().id == "w1") saw_w1 = true;
+        if (result.value().id == "w2") saw_w2 = true;
+    }
+    // 统计上 100 次调用应覆盖两个 worker（概率极低不覆盖）
+    REQUIRE(saw_w1);
+    REQUIRE(saw_w2);
 }
