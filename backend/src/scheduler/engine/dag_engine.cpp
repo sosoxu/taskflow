@@ -151,6 +151,13 @@ std::set<std::string> DagEngine::findReadyTasks(
                 !edge.contains("target") || !edge["target"].is_string()) continue;
             std::string source = edge["source"].get<std::string>();
             std::string target = edge["target"].get<std::string>();
+            // Fix #293: 校验边端点是否引用了已存在的节点
+            // 不存在的 source 会导致 task 永远无法变为 ready（找不到 source 的状态）
+            // 不存在的 target 会创建空的 upstream 条目，污染 upstream map
+            if (upstream.find(source) == upstream.end() ||
+                upstream.find(target) == upstream.end()) {
+                continue;
+            }
             upstream[target].push_back(source);
         }
     }
@@ -206,6 +213,12 @@ std::set<std::string> DagEngine::findBlockedTasks(
                 !edge.contains("target") || !edge["target"].is_string()) continue;
             std::string source = edge["source"].get<std::string>();
             std::string target = edge["target"].get<std::string>();
+            // Fix #293: 校验边端点是否引用了已存在的节点
+            // 与 findReadyTasks 保持一致，避免不存在的 source/target 污染 upstream map
+            if (upstream.find(source) == upstream.end() ||
+                upstream.find(target) == upstream.end()) {
+                continue;
+            }
             upstream[target].push_back(source);
         }
     }

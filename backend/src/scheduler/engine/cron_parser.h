@@ -289,8 +289,10 @@ private:
             }
 
             // Generate values
-            for (int v = range_start; v <= range_end; v += step) {
-                result.push_back(v);
+            // Fix #291: 用 long long 防止 v += step 整数溢出导致无限循环
+            // 例如 step=2147483647 时，int 的 v += step 会溢出为负数，导致 v <= range_end 恒真
+            for (long long v = range_start; v <= range_end; v += step) {
+                result.push_back(static_cast<int>(v));
             }
         }
 

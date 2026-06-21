@@ -27,10 +27,11 @@ struct User {
     }
 
     nlohmann::json toJson() const {
+        // Fix #289: 不再输出 password_hash，避免误用导致密码哈希泄露
+        // 如需包含密码哈希（如 DAO 层内部使用），请直接访问成员变量
         return nlohmann::json{
             {"id", id},
             {"username", username},
-            {"password_hash", password_hash},
             {"role", role},
             {"created_at", created_at},
             {"updated_at", updated_at}

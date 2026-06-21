@@ -14,6 +14,38 @@
 
 namespace taskflow::worker::executor {
 
+// Fix #288: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
+static bool isValidInstanceId(const std::string& id) {
+    if (id.empty()) return false;
+    for (char c : id) {
+        if (c == '/' || c == '\\' || c == '\0') return false;
+    }
+    if (id.find("..") != std::string::npos) return false;
+    if (id == ".") return false;
+    return true;
+}
+
+// Fix #288: 转义 libpq 连接串中的特殊字符（空格、单引号、反斜杠）
+// 与 DatabaseConfig::connectionString() 的转义逻辑保持一致（Fix #281）
+static std::string escapeConnValue(const std::string& val) {
+    if (val.empty()) return "''";
+    bool need_quote = false;
+    for (char c : val) {
+        if (c == ' ' || c == '\'' || c == '\\' || c == '\t' || c == '\n') {
+            need_quote = true;
+            break;
+        }
+    }
+    if (!need_quote) return val;
+    std::string result = "'";
+    for (char c : val) {
+        if (c == '\\' || c == '\'') result += '\\';
+        result += c;
+    }
+    result += "'";
+    return result;
+}
+
 // Runs in the child process after fork(). Connects to PostgreSQL, executes
 // the statement, writes the result to the log file, and exits with 0 on
 // success or non-zero on failure. The child must NOT use spdlog or any
@@ -93,6 +125,14 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
                                 LogSink* /*log_sink*/) {
     TaskResult result;
 
+    // Fix #288: 校验 task_instance_id 防止路径穿越
+    if (!isValidInstanceId(task_instance_id)) {
+        result.status = "FAILED";
+        result.exit_code = 1;
+        result.error_message = "Invalid task_instance_id contains path separators or traversal";
+        return result;
+    }
+
     // Validate required config fields
     auto get_string = [&config, &result](const std::string& key)
         -> std::string {
@@ -129,11 +169,12 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
     std::string log_path = log_dir + "/" + task_instance_id + ".log";
 
     // Build connection string
-    std::string conn_str = "host=" + db_host +
+    // Fix #288: 对含特殊字符的值用单引号包裹并转义，防止连接串注入
+    std::string conn_str = "host=" + escapeConnValue(db_host) +
                            " port=" + db_port +
-                           " dbname=" + db_name +
-                           " user=" + db_user +
-                           " password=" + db_password;
+                           " dbname=" + escapeConnValue(db_name) +
+                           " user=" + escapeConnValue(db_user) +
+                           " password=" + escapeConnValue(db_password);
 
     // Fix #147: Fork a child process to run the SQL so the task can be
     // cancelled via SIGTERM (the same mechanism used by CommandExecutor and
@@ -152,7 +193,10 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
         // Child process
         // Fix #206: Create a new process group so timeout/cancel can kill the
         // whole group, cleaning up any subprocesses pqxx/libpq may spawn.
-        setpgid(0, 0);
+        // Fix #294: 检查 setpgid 返回值，失败时退出子进程，防止 kill(-pid) 误杀 Worker
+        if (setpgid(0, 0) != 0) {
+            _exit(127);
+        }
         int rc = runSqlChild(conn_str, sql_statement, log_path);
         _exit(rc);
     }

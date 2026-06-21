@@ -754,3 +754,78 @@ TEST_CASE("DagEngine findReadyTasks - edge with non-string source is skipped", "
     // b's upstream (invalid edge) is skipped, so b is ready
     REQUIRE(ready.count("b") > 0);
 }
+
+// Fix #293: 边端点引用不存在的节点时应跳过，不污染 upstream map
+TEST_CASE("DagEngine findReadyTasks - edge with nonexistent source skipped", "[dag_engine_ub]") {
+    // Fix #293: edge source 引用不存在的节点 "ghost" 应跳过
+    // 否则 "ghost" 会进入 upstream["b"]，导致 b 永远无法 ready（找不到 ghost 的状态）
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"source", "ghost"}, {"target", "b"}})
+    });
+    std::map<std::string, std::string> statuses = {{"a", "SUCCESS"}, {"b", "PENDING"}};
+    auto ready = DagEngine::findReadyTasks(dag_json, statuses);
+    // ghost 不在节点列表中，边被跳过，b 无上游，应 ready
+    REQUIRE(ready.count("b") > 0);
+}
+
+// Fix #293: edge target 引用不存在的节点时应跳过
+TEST_CASE("DagEngine findReadyTasks - edge with nonexistent target skipped", "[dag_engine_ub]") {
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"source", "a"}, {"target", "ghost"}})
+    });
+    std::map<std::string, std::string> statuses = {{"a", "SUCCESS"}, {"b", "PENDING"}};
+    auto ready = DagEngine::findReadyTasks(dag_json, statuses);
+    // ghost 不在节点列表中，边被跳过，b 无上游，应 ready
+    REQUIRE(ready.count("b") > 0);
+}
+
+// Fix #293: findBlockedTasks 同样应跳过引用不存在节点的边
+TEST_CASE("DagEngine findBlockedTasks - edge with nonexistent source skipped", "[dag_engine_ub]") {
+    // Fix #293: edge source 引用不存在的节点 "ghost" 应跳过
+    // 否则 "ghost" 会进入 upstream["b"]，但 ghost 不在 statuses 中，不会触发阻塞
+    // 但更重要的是不应污染 upstream map（与 findReadyTasks 行为一致）
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"source", "ghost"}, {"target", "b"}})
+    });
+    // 即使 ghost 状态为 FAILED，也不应阻塞 b（因为 ghost 不是真实节点）
+    std::map<std::string, std::string> statuses = {
+        {"a", "SUCCESS"}, {"b", "PENDING"}, {"ghost", "FAILED"}
+    };
+    auto blocked = DagEngine::findBlockedTasks(dag_json, statuses);
+    // ghost 不在节点列表中，边被跳过，b 不应被阻塞
+    REQUIRE(blocked.count("b") == 0);
+}
+
+// Fix #293: findBlockedTasks edge target 引用不存在的节点应跳过
+TEST_CASE("DagEngine findBlockedTasks - edge with nonexistent target skipped", "[dag_engine_ub]") {
+    nlohmann::json dag_json;
+    dag_json["nodes"] = nlohmann::json::array({
+        nlohmann::json::object({{"id", "a"}}),
+        nlohmann::json::object({{"id", "b"}})
+    });
+    dag_json["edges"] = nlohmann::json::array({
+        nlohmann::json::object({{"source", "a"}, {"target", "ghost"}})
+    });
+    std::map<std::string, std::string> statuses = {
+        {"a", "FAILED"}, {"b", "PENDING"}
+    };
+    auto blocked = DagEngine::findBlockedTasks(dag_json, statuses);
+    // ghost 不在节点列表中，边被跳过；b 的上游 a 为 FAILED 但没有 a->b 的边
+    // 所以 b 不应被阻塞
+    REQUIRE(blocked.count("b") == 0);
+}

@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include "worker/util/resource_collector.h"
 
@@ -63,4 +65,53 @@ TEST_CASE("ResourceCollector: memory usage reflects actual memory", "[resource_c
     REQUIRE(usage.memory_usage >= 0.0);
     // 实际系统内存使用率通常 > 0
     INFO("memory_usage: " << usage.memory_usage);
+}
+
+// Fix #292: 验证 MemAvailable 缺失时使用 MemFree 回退
+// 原实现 MemAvailable=0 时返回 (mem_total-0)/mem_total*100 = 100%，错误报告内存已满
+TEST_CASE("ResourceCollector: memory usage not falsely 100% when MemAvailable missing", "[resource_collector]") {
+    // Fix #292: 若系统不支持 MemAvailable（内核 < 3.14），应回退使用 MemFree
+    // 此测试验证内存使用率不会因 MemAvailable 缺失而错误报告为 100%
+    auto usage = ResourceCollector::collect();
+
+    // 读取 /proc/meminfo 检查 MemAvailable 是否存在
+    std::ifstream ifs("/proc/meminfo");
+    bool has_mem_available = false;
+    unsigned long long mem_total = 0;
+    unsigned long long mem_available = 0;
+    unsigned long long mem_free = 0;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        if (line.compare(0, 9, "MemTotal:") == 0) {
+            std::istringstream iss(line.substr(9));
+            iss >> mem_total;
+        } else if (line.compare(0, 13, "MemAvailable:") == 0) {
+            std::istringstream iss(line.substr(13));
+            iss >> mem_available;
+            has_mem_available = true;
+        } else if (line.compare(0, 8, "MemFree:") == 0) {
+            std::istringstream iss(line.substr(8));
+            iss >> mem_free;
+        }
+    }
+
+    if (has_mem_available) {
+        // 系统支持 MemAvailable，使用率应基于 MemAvailable 计算
+        double expected = (static_cast<double>(mem_total - mem_available) /
+                           static_cast<double>(mem_total)) * 100.0;
+        // 允许 ±5% 误差（采集期间内存可能变化）
+        REQUIRE(usage.memory_usage >= expected - 5.0);
+        REQUIRE(usage.memory_usage <= expected + 5.0);
+    } else if (mem_free > 0) {
+        // Fix #292: 系统不支持 MemAvailable，应回退使用 MemFree
+        // 原 bug 会返回 100%，修复后应返回基于 MemFree 的合理值
+        double expected = (static_cast<double>(mem_total - mem_free) /
+                           static_cast<double>(mem_total)) * 100.0;
+        // 不应错误报告为 100%（除非内存真的用完了，此时 mem_free 接近 0）
+        REQUIRE(usage.memory_usage < 100.0);
+        // 允许 ±10% 误差
+        REQUIRE(usage.memory_usage >= expected - 10.0);
+        REQUIRE(usage.memory_usage <= expected + 10.0);
+    }
+    // 若两者都没有，collect() 返回 0.0，已在前面测试覆盖
 }

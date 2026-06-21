@@ -84,6 +84,8 @@ private:
 
         unsigned long long mem_total = 0;
         unsigned long long mem_available = 0;
+        unsigned long long mem_free = 0;
+        bool has_mem_available = false;
 
         std::string line;
         while (std::getline(ifs, line)) {
@@ -93,9 +95,13 @@ private:
             } else if (line.compare(0, 13, "MemAvailable:") == 0) {
                 std::istringstream iss(line.substr(13));
                 iss >> mem_available;
+                has_mem_available = true;
+            } else if (line.compare(0, 8, "MemFree:") == 0) {
+                std::istringstream iss(line.substr(8));
+                iss >> mem_free;
             }
 
-            if (mem_total != 0 && mem_available != 0) {
+            if (mem_total != 0 && has_mem_available) {
                 break;
             }
         }
@@ -104,7 +110,19 @@ private:
             return 0.0;
         }
 
-        return (static_cast<double>(mem_total - mem_available) / static_cast<double>(mem_total)) * 100.0;
+        // Fix #292: 若系统不支持 MemAvailable（内核 < 3.14），回退使用 MemFree
+        // 原实现 mem_available=0 时返回 (mem_total-0)/mem_total*100 = 100%，错误报告内存已满
+        unsigned long long mem_used;
+        if (has_mem_available) {
+            mem_used = mem_total - mem_available;
+        } else if (mem_free > 0) {
+            mem_used = mem_total - mem_free;
+        } else {
+            // 无法采集可用内存信息，返回 0 表示无法确定
+            return 0.0;
+        }
+
+        return (static_cast<double>(mem_used) / static_cast<double>(mem_total)) * 100.0;
     }
 };
 

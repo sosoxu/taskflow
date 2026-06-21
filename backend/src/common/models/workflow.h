@@ -24,15 +24,21 @@ struct Workflow {
         Workflow workflow;
         workflow.id = row["id"].as<std::string>();
         workflow.name = row["name"].as<std::string>();
-        workflow.description = row["description"].as<std::string>();
-        workflow.dag_json = nlohmann::json::parse(row["dag_json"].as<std::string>());
-        workflow.schedule_strategy = row["schedule_strategy"].as<std::string>();
+        workflow.description = row["description"].is_null()
+            ? "" : row["description"].as<std::string>();
+        // Fix #290: 处理 dag_json 为 NULL 的情况，避免 pqxx::conversion_error 崩溃
+        workflow.dag_json = row["dag_json"].is_null()
+            ? nlohmann::json::object()
+            : nlohmann::json::parse(row["dag_json"].as<std::string>());
+        workflow.schedule_strategy = row["schedule_strategy"].is_null()
+            ? "" : row["schedule_strategy"].as<std::string>();
         workflow.target_worker_id = row["target_worker_id"].is_null()
             ? "" : row["target_worker_id"].as<std::string>();
         workflow.cron_expression = row["cron_expression"].is_null()
             ? "" : row["cron_expression"].as<std::string>();
         workflow.cron_enabled = row["cron_enabled"].as<bool>();
-        workflow.creator_id = row["creator_id"].as<std::string>();
+        workflow.creator_id = row["creator_id"].is_null()
+            ? "" : row["creator_id"].as<std::string>();
         workflow.version = row["version"].as<int>();
         workflow.deleted = row["deleted"].as<bool>();
         workflow.created_at = row["created_at"].as<std::string>();

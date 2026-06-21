@@ -27,14 +27,23 @@ struct Task {
         task.id = row["id"].as<std::string>();
         task.name = row["name"].as<std::string>();
         task.type = row["type"].as<std::string>();
-        task.config_json = nlohmann::json::parse(row["config_json"].as<std::string>());
-        task.description = row["description"].as<std::string>();
+        // Fix #290: 处理 NULL 字段，避免 pqxx::conversion_error 崩溃
+        task.config_json = row["config_json"].is_null()
+            ? nlohmann::json::object()
+            : nlohmann::json::parse(row["config_json"].as<std::string>());
+        task.description = row["description"].is_null()
+            ? "" : row["description"].as<std::string>();
         task.timeout = row["timeout"].as<int>();
         task.max_retries = row["max_retries"].as<int>();
         task.retry_interval = row["retry_interval"].as<int>();
-        task.resource_tags = nlohmann::json::parse(row["resource_tags"].as<std::string>());
-        task.parameters_json = nlohmann::json::parse(row["parameters_json"].as<std::string>());
-        task.creator_id = row["creator_id"].as<std::string>();
+        task.resource_tags = row["resource_tags"].is_null()
+            ? nlohmann::json::object()
+            : nlohmann::json::parse(row["resource_tags"].as<std::string>());
+        task.parameters_json = row["parameters_json"].is_null()
+            ? nlohmann::json::object()
+            : nlohmann::json::parse(row["parameters_json"].as<std::string>());
+        task.creator_id = row["creator_id"].is_null()
+            ? "" : row["creator_id"].as<std::string>();
         task.version = row["version"].as<int>();
         task.deleted = row["deleted"].as<bool>();
         task.created_at = row["created_at"].as<std::string>();

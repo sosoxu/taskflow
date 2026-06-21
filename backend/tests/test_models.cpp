@@ -383,8 +383,8 @@ TEST_CASE("WorkerInfo: toJson with default resource_tags", "[model_worker_full]"
     REQUIRE(j["registered_at"] == "");
 }
 
-TEST_CASE("User: toJson includes password_hash", "[model_user_full]") {
-    // Fix #256: 验证 toJson 包含 password_hash 字段
+TEST_CASE("User: toJson excludes password_hash", "[model_user_full]") {
+    // Fix #289: 验证 toJson 不再包含 password_hash 字段，避免误用导致密码哈希泄露
     User u;
     u.id = "user-full";
     u.username = "admin_user";
@@ -396,14 +396,14 @@ TEST_CASE("User: toJson includes password_hash", "[model_user_full]") {
     auto j = u.toJson();
     REQUIRE(j["id"] == "user-full");
     REQUIRE(j["username"] == "admin_user");
-    REQUIRE(j["password_hash"] == "$2b$12$somebcrypt_hash_value_here");
     REQUIRE(j["role"] == "admin");
     REQUIRE(j["created_at"] == "2025-01-01T00:00:00Z");
     REQUIRE(j["updated_at"] == "2025-06-20T10:00:00Z");
 
-    // toJson 应包含 6 个字段（含 password_hash）
-    REQUIRE(j.size() == 6);
-    REQUIRE(j.contains("password_hash"));
+    // Fix #289: toJson 应不包含 password_hash
+    REQUIRE_FALSE(j.contains("password_hash"));
+    // toJson 应包含 5 个字段（不含 password_hash）
+    REQUIRE(j.size() == 5);
 }
 
 TEST_CASE("User: toSafeJson excludes password_hash", "[model_user_safe]") {
@@ -430,8 +430,8 @@ TEST_CASE("User: toSafeJson excludes password_hash", "[model_user_safe]") {
     REQUIRE(j.size() == 5);
 }
 
-TEST_CASE("User: toJson vs toSafeJson difference", "[model_user_safe]") {
-    // Fix #256: 对比 toJson 和 toSafeJson，唯一区别是 password_hash
+TEST_CASE("User: toJson vs toSafeJson both exclude password_hash", "[model_user_safe]") {
+    // Fix #289: toJson 和 toSafeJson 现在都不包含 password_hash
     User u;
     u.id = "user-diff";
     u.username = "diff_user";
@@ -443,12 +443,13 @@ TEST_CASE("User: toJson vs toSafeJson difference", "[model_user_safe]") {
     auto full = u.toJson();
     auto safe = u.toSafeJson();
 
-    // safe 比 full 少一个字段
-    REQUIRE(full.size() == safe.size() + 1);
-    // full 有 password_hash，safe 没有
-    REQUIRE(full.contains("password_hash"));
+    // Fix #289: 两者都不包含 password_hash
+    REQUIRE_FALSE(full.contains("password_hash"));
     REQUIRE_FALSE(safe.contains("password_hash"));
-    // 其他字段相同
+    // 两者字段数相同（均为 5）
+    REQUIRE(full.size() == 5);
+    REQUIRE(safe.size() == 5);
+    // 所有字段相同
     REQUIRE(full["id"] == safe["id"]);
     REQUIRE(full["username"] == safe["username"]);
     REQUIRE(full["role"] == safe["role"]);

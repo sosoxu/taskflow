@@ -322,8 +322,9 @@ TEST_CASE("SqlExecutor: db_port as integer", "[sql_executor]") {
 
     // Should not fail due to port type - connection may fail but not validation
     auto result = executor.execute("sql-int-port", config, 10, TEST_LOG_DIR);
-    // Either SUCCESS (if DB reachable) or FAILED (connection error), not a crash
-    REQUIRE((result.status == "SUCCESS" || result.status == "FAILED"));
+    // Fix #296: 强化断言 —— 测试环境无 PostgreSQL，连接必失败返回 FAILED
+    // （若 DB 可达则 SUCCESS，但测试环境不应有 DB，故断言 FAILED）
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: db_port as string", "[sql_executor]") {
@@ -338,7 +339,8 @@ TEST_CASE("SqlExecutor: db_port as string", "[sql_executor]") {
     config["sql_statement"] = "SELECT 1";
 
     auto result = executor.execute("sql-str-port", config, 10, TEST_LOG_DIR);
-    REQUIRE((result.status == "SUCCESS" || result.status == "FAILED"));
+    // Fix #296: 强化断言 —— 测试环境无 PostgreSQL，连接必失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: db_port as float returns FAILED", "[sql_executor]") {
@@ -535,17 +537,17 @@ TEST_CASE("ScriptExecutor: missing script_content returns FAILED", "[script_exec
 }
 
 TEST_CASE("ScriptExecutor: script_content as non-string returns FAILED", "[script_executor_edge]") {
-    // Fix #273: script_content 为非字符串类型应返回 FAILED（get<std::string> 抛异常）
+    // Fix #273: script_content 为非字符串类型应返回 FAILED（源码 is_string() 检查）
+    // Fix #296: 修正测试名与实现不符 —— 原测试仅 REQUIRE_NOTHROW 不验证返回值
     ScriptExecutor executor;
     nlohmann::json config;
     config["script_content"] = 12345;  // 数字而非字符串
     config["interpreter"] = "bash";
 
-    // get<std::string>() 对数字抛 type_error，但 execute 内部可能无 try-catch
-    // 此测试验证不崩溃（可能抛异常或返回 FAILED）
-    REQUIRE_NOTHROW([&]() {
-        auto result = executor.execute("non-string-content", config, 10, TEST_LOG_DIR);
-    }());
+    auto result = executor.execute("non-string-content", config, 10, TEST_LOG_DIR);
+    // 源码第 43-49 行检查 is_string()，非字符串直接返回 FAILED
+    REQUIRE(result.status == "FAILED");
+    REQUIRE(result.exit_code != 0);
 }
 
 TEST_CASE("ScriptExecutor: interpreter as non-string uses default", "[script_executor_edge]") {
@@ -631,8 +633,8 @@ TEST_CASE("SqlExecutor: empty sql_statement returns FAILED", "[sql_executor_edge
     config["sql_statement"] = "";
 
     auto result = executor.execute("sql-empty-stmt", config, 10, TEST_LOG_DIR);
-    // 空 SQL 在子进程中检测到并返回 exit code 1
-    REQUIRE((result.status == "FAILED" || result.status == "SUCCESS"));
+    // Fix #296: 强化断言 —— 空 SQL 或连接失败均返回 FAILED（子进程 exit code 1）
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: whitespace-only sql_statement", "[sql_executor_edge]") {
@@ -648,8 +650,8 @@ TEST_CASE("SqlExecutor: whitespace-only sql_statement", "[sql_executor_edge]") {
     config["sql_statement"] = "   \n\t  ";
 
     auto result = executor.execute("sql-whitespace-stmt", config, 10, TEST_LOG_DIR);
-    // 空白 SQL 在子进程中检测到并返回非零 exit code
-    REQUIRE((result.status == "FAILED" || result.status == "SUCCESS"));
+    // Fix #296: 强化断言 —— 空白 SQL 或连接失败均返回 FAILED（子进程 exit code 1）
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_edge]") {
@@ -670,7 +672,8 @@ TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_edge
 
 TEST_CASE("SqlExecutor: db_password with special characters does not crash", "[sql_executor_edge]") {
     // Fix #274: db_password 含特殊字符（空格、=、反斜杠）不应崩溃
-    // 注：连接字符串可能断裂，但 execute 不应崩溃
+    // Fix #288: 连接串转义后连接会失败（测试环境无 DB），返回 FAILED
+    // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值而非仅验证不抛异常
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -681,14 +684,15 @@ TEST_CASE("SqlExecutor: db_password with special characters does not crash", "[s
     config["db_type"] = "postgresql";
     config["sql_statement"] = "SELECT 1";
 
-    REQUIRE_NOTHROW([&]() {
-        auto result = executor.execute("sql-special-password", config, 10, TEST_LOG_DIR);
-    }());
+    auto result = executor.execute("sql-special-password", config, 10, TEST_LOG_DIR);
+    // 转义后连接串合法，但测试环境无 DB，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: db_password as non-string does not crash", "[sql_executor_edge]") {
     // Fix #274: db_password 为非字符串类型（数字）不应崩溃
-    // get<std::string>() 对数字抛 type_error
+    // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值
+    // 源码 get_string() 对 is_number() 调用 std::to_string(get<int>())，转换为 "12345"
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -699,14 +703,14 @@ TEST_CASE("SqlExecutor: db_password as non-string does not crash", "[sql_executo
     config["db_type"] = "postgresql";
     config["sql_statement"] = "SELECT 1";
 
-    // 可能抛异常或返回 FAILED，验证不崩溃
-    REQUIRE_NOTHROW([&]() {
-        auto result = executor.execute("sql-int-password", config, 10, TEST_LOG_DIR);
-    }());
+    auto result = executor.execute("sql-int-password", config, 10, TEST_LOG_DIR);
+    // 数字被转换为字符串 "12345"，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: sql_statement as non-string does not crash", "[sql_executor_edge]") {
     // Fix #274: sql_statement 为非字符串类型不应崩溃
+    // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -717,9 +721,9 @@ TEST_CASE("SqlExecutor: sql_statement as non-string does not crash", "[sql_execu
     config["db_type"] = "postgresql";
     config["sql_statement"] = 12345;  // 数字而非字符串
 
-    REQUIRE_NOTHROW([&]() {
-        auto result = executor.execute("sql-int-stmt", config, 10, TEST_LOG_DIR);
-    }());
+    auto result = executor.execute("sql-int-stmt", config, 10, TEST_LOG_DIR);
+    // 数字被转换为字符串 "12345"，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: db_port as negative number does not crash", "[sql_executor_edge]") {
@@ -735,12 +739,14 @@ TEST_CASE("SqlExecutor: db_port as negative number does not crash", "[sql_execut
     config["sql_statement"] = "SELECT 1";
 
     auto result = executor.execute("sql-negative-port", config, 10, TEST_LOG_DIR);
-    // 连接会失败，返回 FAILED
-    REQUIRE((result.status == "FAILED" || result.status == "SUCCESS"));
+    // Fix #296: 强化断言 —— 负数端口连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: db_host with special characters does not crash", "[sql_executor_edge]") {
     // Fix #274: db_host 含特殊字符不应崩溃
+    // Fix #288: 连接串转义后连接会失败（测试环境无 DB），返回 FAILED
+    // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "host with spaces";
@@ -751,9 +757,9 @@ TEST_CASE("SqlExecutor: db_host with special characters does not crash", "[sql_e
     config["db_type"] = "postgresql";
     config["sql_statement"] = "SELECT 1";
 
-    REQUIRE_NOTHROW([&]() {
-        auto result = executor.execute("sql-special-host", config, 10, TEST_LOG_DIR);
-    }());
+    auto result = executor.execute("sql-special-host", config, 10, TEST_LOG_DIR);
+    // 转义后连接串合法，但测试环境无 DB，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: lowercase select statement", "[sql_executor_edge]") {
@@ -770,7 +776,8 @@ TEST_CASE("SqlExecutor: lowercase select statement", "[sql_executor_edge]") {
 
     // 连接会失败，但不应崩溃。小写 select 走非事务路径。
     auto result = executor.execute("sql-lowercase-select", config, 10, TEST_LOG_DIR);
-    REQUIRE((result.status == "FAILED" || result.status == "SUCCESS"));
+    // Fix #296: 强化断言 —— 测试环境无 DB，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: mixed case Select statement", "[sql_executor_edge]") {
@@ -786,7 +793,8 @@ TEST_CASE("SqlExecutor: mixed case Select statement", "[sql_executor_edge]") {
     config["sql_statement"] = "Select 1";
 
     auto result = executor.execute("sql-mixed-select", config, 10, TEST_LOG_DIR);
-    REQUIRE((result.status == "FAILED" || result.status == "SUCCESS"));
+    // Fix #296: 强化断言 —— 测试环境无 DB，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
 }
 
 TEST_CASE("SqlExecutor: SELECT with leading parentheses treated as DML", "[sql_executor_edge]") {
@@ -804,5 +812,155 @@ TEST_CASE("SqlExecutor: SELECT with leading parentheses treated as DML", "[sql_e
 
     // 连接会失败，但不应崩溃。带括号的 SELECT 走事务路径（DML）。
     auto result = executor.execute("sql-paren-select", config, 10, TEST_LOG_DIR);
-    REQUIRE((result.status == "FAILED" || result.status == "SUCCESS"));
+    // Fix #296: 强化断言 —— 测试环境无 DB，连接失败返回 FAILED
+    REQUIRE(result.status == "FAILED");
+}
+
+// ============================================================================
+// Fix #287: ScriptExecutor 路径穿越防护测试
+// 验收指标：
+//   1. 含 "/" 的 task_instance_id 被拒绝
+//   2. 含 "\" 的 task_instance_id 被拒绝
+//   3. 含 ".." 的 task_instance_id 被拒绝
+//   4. 含 null 字节的 task_instance_id 被拒绝
+//   5. 单 "." 的 task_instance_id 被拒绝
+//   6. 空 task_instance_id 被拒绝
+//   7. 正常 task_instance_id 不受影响
+// ============================================================================
+
+TEST_CASE("ScriptExecutor: path traversal in task_instance_id rejected", "[script_executor_security]") {
+    // Fix #287: 验证含路径分隔符的 task_instance_id 被拒绝
+    ScriptExecutor executor;
+    nlohmann::json config;
+    config["script_content"] = "echo hello";
+    config["interpreter"] = "bash";
+
+    SECTION("slash in id") {
+        auto result = executor.execute("evil/../etc/passwd", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+        REQUIRE(result.error_message.find("path separators") != std::string::npos);
+    }
+
+    SECTION("backslash in id") {
+        auto result = executor.execute("evil\\..\\etc", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+
+    SECTION("dot-dot in id") {
+        auto result = executor.execute("foo..bar", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+
+    SECTION("single dot id") {
+        auto result = executor.execute(".", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+
+    SECTION("empty id") {
+        auto result = executor.execute("", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+
+    SECTION("normal id still works") {
+        auto result = executor.execute("normal-task-id-123", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "SUCCESS");
+        REQUIRE(result.exit_code == 0);
+    }
+}
+
+// ============================================================================
+// Fix #288: SqlExecutor 路径穿越防护测试
+// ============================================================================
+
+TEST_CASE("SqlExecutor: path traversal in task_instance_id rejected", "[sql_executor_security]") {
+    // Fix #288: 验证含路径分隔符的 task_instance_id 被拒绝
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "localhost";
+    config["db_port"] = 5432;
+    config["db_name"] = "test";
+    config["db_user"] = "test";
+    config["db_password"] = "test";
+    config["db_type"] = "postgresql";
+    config["sql_statement"] = "SELECT 1";
+
+    SECTION("slash in id") {
+        auto result = executor.execute("evil/../etc/passwd", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+        REQUIRE(result.error_message.find("path separators") != std::string::npos);
+    }
+
+    SECTION("backslash in id") {
+        auto result = executor.execute("evil\\..\\etc", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+
+    SECTION("dot-dot in id") {
+        auto result = executor.execute("foo..bar", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+
+    SECTION("empty id") {
+        auto result = executor.execute("", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+        REQUIRE(result.exit_code == 1);
+    }
+}
+
+// ============================================================================
+// Fix #288: SqlExecutor 连接串转义测试
+// 验证含特殊字符的 db_host/db_name/db_user/db_password 被正确转义
+// ============================================================================
+
+TEST_CASE("SqlExecutor: connection string escaping with special characters", "[sql_executor_security]") {
+    // Fix #288: 验证含空格、单引号、反斜杠的连接参数被正确转义
+    // 转义后连接串合法，但测试环境无 DB，连接失败返回 FAILED（不是崩溃）
+    SqlExecutor executor;
+    nlohmann::json config;
+    config["db_host"] = "localhost";
+    config["db_port"] = 5432;
+    config["db_name"] = "test";
+    config["db_user"] = "test";
+
+    SECTION("password with single quote") {
+        config["db_password"] = "pass'word";
+        config["db_type"] = "postgresql";
+        config["sql_statement"] = "SELECT 1";
+        auto result = executor.execute("sql-escape-quote", config, 10, TEST_LOG_DIR);
+        // 转义后连接串合法，连接失败返回 FAILED（不崩溃）
+        REQUIRE(result.status == "FAILED");
+    }
+
+    SECTION("password with backslash") {
+        config["db_password"] = "pass\\word";
+        config["db_type"] = "postgresql";
+        config["sql_statement"] = "SELECT 1";
+        auto result = executor.execute("sql-escape-backslash", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+    }
+
+    SECTION("password with tab and newline") {
+        config["db_password"] = "pass\tword\n";
+        config["db_type"] = "postgresql";
+        config["sql_statement"] = "SELECT 1";
+        auto result = executor.execute("sql-escape-tab-newline", config, 10, TEST_LOG_DIR);
+        REQUIRE(result.status == "FAILED");
+    }
+
+    SECTION("empty password") {
+        config["db_password"] = "";
+        config["db_type"] = "postgresql";
+        config["sql_statement"] = "SELECT 1";
+        auto result = executor.execute("sql-escape-empty", config, 10, TEST_LOG_DIR);
+        // 空密码被转义为 ''，连接失败返回 FAILED
+        REQUIRE(result.status == "FAILED");
+    }
 }

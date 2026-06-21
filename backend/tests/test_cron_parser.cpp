@@ -315,3 +315,22 @@ TEST_CASE("CronParser - value exceeding field range in list rejected", "[cron_pa
     REQUIRE(result.error().find("out of bounds") != std::string::npos);
     REQUIRE(result.error().find("0-59") != std::string::npos);
 }
+
+// Fix #291: 验证极大步长不会导致整数溢出无限循环
+// 原代码 for (int v = ...; v += step) 中 step 极大值导致有符号溢出为负数，v <= range_end 恒真
+TEST_CASE("CronParser - very large step does not overflow into infinite loop", "[cron_parser_overflow]") {
+    // step=2000000000，range 0-59，应只产生 {0} 并正常返回
+    // 若发生 int 溢出，v += 2000000000 会变为负数，导致无限循环（测试会超时）
+    auto result = CronParser::getNextTrigger("0-59/2000000000 * * * * *", "2025-01-01 00:00:00");
+    REQUIRE(result.ok());
+    // 只产生 {0}，从 00:00:00 开始下一个 sec=0 是 00:01:00
+    REQUIRE(result.value() == "2025-01-01 00:01:00");
+}
+
+// Fix #291: 验证步长接近 INT_MAX 时不溢出
+TEST_CASE("CronParser - step near INT_MAX does not overflow", "[cron_parser_overflow]") {
+    // step=2147483647 (INT_MAX)，range 0-1，应只产生 {0}
+    auto result = CronParser::getNextTrigger("0-1/2147483647 * * * * *", "2025-01-01 00:00:00");
+    REQUIRE(result.ok());
+    REQUIRE(result.value() == "2025-01-01 00:01:00");
+}

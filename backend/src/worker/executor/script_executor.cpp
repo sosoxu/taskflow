@@ -12,6 +12,18 @@
 
 namespace taskflow::worker::executor {
 
+// Fix #287: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
+// 与 command_executor.cpp / log_sink.cpp 的 isValidInstanceId 保持一致
+static bool isValidInstanceId(const std::string& id) {
+    if (id.empty()) return false;
+    for (char c : id) {
+        if (c == '/' || c == '\\' || c == '\0') return false;
+    }
+    if (id.find("..") != std::string::npos) return false;
+    if (id == ".") return false;
+    return true;
+}
+
 TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
                                    const nlohmann::json& config,
                                    int timeout,
@@ -19,6 +31,14 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
                                    std::function<void(pid_t)> pid_callback,
                                    LogSink* /*log_sink*/) {
     TaskResult result;
+
+    // Fix #287: 校验 task_instance_id 防止路径穿越
+    if (!isValidInstanceId(task_instance_id)) {
+        result.status = "FAILED";
+        result.exit_code = 1;
+        result.error_message = "Invalid task_instance_id contains path separators or traversal";
+        return result;
+    }
 
     if (!config.contains("script_content") ||
         !config["script_content"].is_string()) {
@@ -85,7 +105,10 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
         // Child process
         // Fix #206: Create a new process group so timeout/cancel can kill the
         // whole group, cleaning up any subprocesses the interpreter may spawn.
-        setpgid(0, 0);
+        // Fix #294: 检查 setpgid 返回值，失败时退出子进程，防止 kill(-pid) 误杀 Worker
+        if (setpgid(0, 0) != 0) {
+            _exit(127);
+        }
         int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd < 0) {
             _exit(127);

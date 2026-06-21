@@ -15,6 +15,7 @@ add_executable(taskflow_tests
     test_api_response.cpp
     test_resource_collector.cpp
     test_dag_driver.cpp
+    test_regression_116.cpp
     ${CMAKE_SOURCE_DIR}/src/scheduler/engine/dag_engine.cpp
     ${CMAKE_SOURCE_DIR}/src/common/util/crypto_util.cpp
     ${CMAKE_SOURCE_DIR}/src/worker/executor/task_executor.cpp

@@ -81,7 +81,10 @@ TaskResult CommandExecutor::execute(const std::string& task_instance_id,
         // shell may have spawned (pipelines, background jobs, etc.). Without
         // this, kill(pid) only terminates the direct /bin/sh child, leaving
         // grandchildren orphaned and still running.
-        setpgid(0, 0);
+        // Fix #294: 检查 setpgid 返回值，失败时退出子进程，防止 kill(-pid) 误杀 Worker
+        if (setpgid(0, 0) != 0) {
+            _exit(127);
+        }
 
         int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd < 0) {
