@@ -64,6 +64,11 @@ public:
         }
         tm_from.tm_isdst = 0;
         auto from_time_t = timegm(&tm_from);
+        // Fix #297: 检查 timegm 返回值，失败时返回错误而非从 1970 年开始搜索
+        if (from_time_t == static_cast<time_t>(-1)) {
+            return common::result::Result<std::string>::failure(
+                "Invalid from_time: timegm() failed to convert to time_t");
+        }
 
         // Start searching from from_time + 1 second
         auto search_time_t = from_time_t + 1;
@@ -80,7 +85,11 @@ public:
 
         while (search_time_t <= max_search_time_t) {
             std::tm tm_search{};
-            gmtime_r(&search_time_t, &tm_search);
+            // Fix #297: 检查 gmtime_r 返回值，失败时返回错误而非访问未初始化的 tm_search
+            if (gmtime_r(&search_time_t, &tm_search) == nullptr) {
+                return common::result::Result<std::string>::failure(
+                    "gmtime_r() failed for search_time_t=" + std::to_string(search_time_t));
+            }
 
             // Check month
             bool month_wrapped = false;
@@ -95,6 +104,11 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                // Fix #297: 检查 timegm 返回值，失败时跳出循环
+                if (search_time_t == static_cast<time_t>(-1)) {
+                    return common::result::Result<std::string>::failure(
+                        "timegm() failed during month wrap");
+                }
                 continue;
             }
             if (next_month != tm_search.tm_mon + 1) {
@@ -106,6 +120,11 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                // Fix #297: 检查 timegm 返回值
+                if (search_time_t == static_cast<time_t>(-1)) {
+                    return common::result::Result<std::string>::failure(
+                        "timegm() failed during month advance");
+                }
                 continue;
             }
 
@@ -146,6 +165,8 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                // Fix #297: 检查 timegm 返回值，失败时跳出循环
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
 
@@ -160,6 +181,7 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
             if (next_hour != tm_search.tm_hour) {
@@ -168,6 +190,7 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
 
@@ -181,6 +204,7 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
             if (next_min != tm_search.tm_min) {
@@ -188,6 +212,7 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
 
@@ -200,12 +225,14 @@ public:
                 tm_search.tm_sec = 0;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
             if (next_sec != tm_search.tm_sec) {
                 tm_search.tm_sec = next_sec;
                 tm_search.tm_isdst = 0;
                 search_time_t = timegm(&tm_search);
+                if (search_time_t == static_cast<time_t>(-1)) break;
                 continue;
             }
 

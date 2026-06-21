@@ -12,8 +12,15 @@ void RoleFilter::doFilter(
 
     auto attrs = req->getAttributes();
     if (!attrs->find("role")) {
-        // 没有 role 属性说明 AuthFilter 未执行，放行
-        fccb();
+        // Fix #299: 改为 fail-closed 设计 —— 若 role 属性不存在（AuthFilter 未执行），
+        // 返回 403 Forbidden 而非放行。安全系统应默认拒绝。
+        Json::Value resp;
+        resp["code"] = 40301;
+        resp["message"] = "权限不足：未认证";
+        resp["data"] = Json::nullValue;
+        auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+        httpResp->setStatusCode(drogon::k403Forbidden);
+        fcb(httpResp);
         return;
     }
 

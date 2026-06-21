@@ -106,12 +106,19 @@ void DatabaseManager::returnConnection(std::unique_ptr<pqxx::connection> conn) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (shutdown_ || !conn->is_open()) {
-        activeCount_--;
+        // Fix #300: 检查 activeCount_ > 0 再递减，避免 shutdown 后下溢为 -1
+        // shutdown() 会将 activeCount_ 重置为 0，此时若仍有调用方归还连接，
+        // 递减会导致下溢，使 getConnection 中 activeCount_ < maxConn_ 永远为真
+        if (activeCount_ > 0) {
+            activeCount_--;
+        }
         return;
     }
 
     pool_.push(std::move(conn));
-    activeCount_--;
+    if (activeCount_ > 0) {
+        activeCount_--;
+    }
     cv_.notify_one();
 }
 

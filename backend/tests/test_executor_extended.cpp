@@ -19,6 +19,11 @@ struct LogDirFixture2 {
     LogDirFixture2() {
         fs::create_directories(TEST_LOG_DIR);
     }
+    // Fix #306: 析构时清理日志目录，避免 /tmp 残留文件累积导致 CI 磁盘占用增长
+    ~LogDirFixture2() {
+        std::error_code ec;
+        fs::remove_all(TEST_LOG_DIR, ec);
+    }
 };
 
 // Fix #243: Helper to read a task log file content for output verification.
@@ -281,7 +286,7 @@ TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: invalid working_dir returns FA
 //   3. db_port 字符串类型支持
 // ============================================================================
 
-TEST_CASE("SqlExecutor: missing db_host returns FAILED", "[sql_executor]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing db_host returns FAILED", "[sql_executor]") {
     SqlExecutor executor;
     nlohmann::json config;
     config["db_port"] = 5432;
@@ -295,7 +300,7 @@ TEST_CASE("SqlExecutor: missing db_host returns FAILED", "[sql_executor]") {
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: missing sql_statement returns FAILED", "[sql_executor]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing sql_statement returns FAILED", "[sql_executor]") {
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -309,7 +314,7 @@ TEST_CASE("SqlExecutor: missing sql_statement returns FAILED", "[sql_executor]")
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_port as integer", "[sql_executor]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_port as integer", "[sql_executor]") {
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -327,7 +332,7 @@ TEST_CASE("SqlExecutor: db_port as integer", "[sql_executor]") {
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_port as string", "[sql_executor]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_port as string", "[sql_executor]") {
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -343,7 +348,7 @@ TEST_CASE("SqlExecutor: db_port as string", "[sql_executor]") {
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_port as float returns FAILED", "[sql_executor]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_port as float returns FAILED", "[sql_executor]") {
     SqlExecutor executor;
     nlohmann::json config;
     config["db_host"] = "localhost";
@@ -368,7 +373,7 @@ TEST_CASE("SqlExecutor: db_port as float returns FAILED", "[sql_executor]") {
 //   5. 超时返回 TIMEOUT（连接不可达主机）
 // ============================================================================
 
-TEST_CASE("SqlExecutor: missing db_port returns FAILED", "[sql_executor_fields]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing db_port returns FAILED", "[sql_executor_fields]") {
     // Fix #254: 验证缺少 db_port 字段返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -385,7 +390,7 @@ TEST_CASE("SqlExecutor: missing db_port returns FAILED", "[sql_executor_fields]"
     REQUIRE(result.error_message.find("db_port") != std::string::npos);
 }
 
-TEST_CASE("SqlExecutor: missing db_name returns FAILED", "[sql_executor_fields]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing db_name returns FAILED", "[sql_executor_fields]") {
     // Fix #254: 验证缺少 db_name 字段返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -402,7 +407,7 @@ TEST_CASE("SqlExecutor: missing db_name returns FAILED", "[sql_executor_fields]"
     REQUIRE(result.error_message.find("db_name") != std::string::npos);
 }
 
-TEST_CASE("SqlExecutor: missing db_user returns FAILED", "[sql_executor_fields]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing db_user returns FAILED", "[sql_executor_fields]") {
     // Fix #254: 验证缺少 db_user 字段返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -419,7 +424,7 @@ TEST_CASE("SqlExecutor: missing db_user returns FAILED", "[sql_executor_fields]"
     REQUIRE(result.error_message.find("db_user") != std::string::npos);
 }
 
-TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_fields]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing db_password returns FAILED", "[sql_executor_fields]") {
     // Fix #254: 验证缺少 db_password 字段返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -436,7 +441,7 @@ TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_fiel
     REQUIRE(result.error_message.find("db_password") != std::string::npos);
 }
 
-TEST_CASE("SqlExecutor: all fields missing returns FAILED on first check", "[sql_executor_fields]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: all fields missing returns FAILED on first check", "[sql_executor_fields]") {
     // Fix #254: 验证所有字段缺失时在第一个字段（db_host）检查就返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -448,7 +453,7 @@ TEST_CASE("SqlExecutor: all fields missing returns FAILED on first check", "[sql
     REQUIRE(result.error_message.find("db_host") != std::string::npos);
 }
 
-TEST_CASE("SqlExecutor: timeout on unreachable host returns TIMEOUT", "[sql_executor_timeout]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: timeout on unreachable host returns TIMEOUT", "[sql_executor_timeout]") {
     // Fix #254: 验证连接不可达主机时超时返回 TIMEOUT
     // 使用 TEST-NET-1 (192.0.2.0/24) 保留地址，保证不可达
     SqlExecutor executor;
@@ -484,7 +489,7 @@ TEST_CASE("SqlExecutor: timeout on unreachable host returns TIMEOUT", "[sql_exec
 //   5. interpreter 路径穿越验证
 // ============================================================================
 
-TEST_CASE("ScriptExecutor: interpreter with space fails", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: interpreter with space fails", "[script_executor_edge]") {
     // Fix #273: interpreter 含空格（如 "python3 -u"）应失败
     // execlp 将整个字符串当作程序名，找不到 "python3 -u" 这个程序
     ScriptExecutor executor;
@@ -497,7 +502,7 @@ TEST_CASE("ScriptExecutor: interpreter with space fails", "[script_executor_edge
     REQUIRE(result.exit_code != 0);
 }
 
-TEST_CASE("ScriptExecutor: empty interpreter uses bash default", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: empty interpreter uses bash default", "[script_executor_edge]") {
     // Fix #273: interpreter 为空字符串时，源码第 33 行 is_string() 为 true，
     // interpreter 被设为空字符串，execlp("") 行为未定义但应返回 FAILED
     ScriptExecutor executor;
@@ -511,7 +516,7 @@ TEST_CASE("ScriptExecutor: empty interpreter uses bash default", "[script_execut
     REQUIRE(result.exit_code != 0);
 }
 
-TEST_CASE("ScriptExecutor: empty script content executes without crash", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: empty script content executes without crash", "[script_executor_edge]") {
     // Fix #273: 空 script_content 应能执行（空脚本），不崩溃
     ScriptExecutor executor;
     nlohmann::json config;
@@ -524,7 +529,7 @@ TEST_CASE("ScriptExecutor: empty script content executes without crash", "[scrip
     REQUIRE(result.exit_code == 0);
 }
 
-TEST_CASE("ScriptExecutor: missing script_content returns FAILED", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: missing script_content returns FAILED", "[script_executor_edge]") {
     // Fix #273: 缺少 script_content 参数应返回 FAILED
     ScriptExecutor executor;
     nlohmann::json config;
@@ -536,7 +541,7 @@ TEST_CASE("ScriptExecutor: missing script_content returns FAILED", "[script_exec
     REQUIRE(result.exit_code != 0);
 }
 
-TEST_CASE("ScriptExecutor: script_content as non-string returns FAILED", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: script_content as non-string returns FAILED", "[script_executor_edge]") {
     // Fix #273: script_content 为非字符串类型应返回 FAILED（源码 is_string() 检查）
     // Fix #296: 修正测试名与实现不符 —— 原测试仅 REQUIRE_NOTHROW 不验证返回值
     ScriptExecutor executor;
@@ -550,7 +555,7 @@ TEST_CASE("ScriptExecutor: script_content as non-string returns FAILED", "[scrip
     REQUIRE(result.exit_code != 0);
 }
 
-TEST_CASE("ScriptExecutor: interpreter as non-string uses default", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: interpreter as non-string uses default", "[script_executor_edge]") {
     // Fix #273: interpreter 为非字符串类型时，is_string() 为 false，使用默认 bash
     ScriptExecutor executor;
     nlohmann::json config;
@@ -563,7 +568,7 @@ TEST_CASE("ScriptExecutor: interpreter as non-string uses default", "[script_exe
     REQUIRE(result.exit_code == 0);
 }
 
-TEST_CASE("ScriptExecutor: whitespace-only script content", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: whitespace-only script content", "[script_executor_edge]") {
     // Fix #273: 仅含空白字符的脚本应能执行
     ScriptExecutor executor;
     nlohmann::json config;
@@ -576,7 +581,7 @@ TEST_CASE("ScriptExecutor: whitespace-only script content", "[script_executor_ed
     REQUIRE(result.exit_code == 0);
 }
 
-TEST_CASE("ScriptExecutor: temp file is cleaned up after execution", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: temp file is cleaned up after execution", "[script_executor_edge]") {
     // Fix #273: 验证临时脚本文件在执行后被清理
     ScriptExecutor executor;
     nlohmann::json config;
@@ -592,7 +597,7 @@ TEST_CASE("ScriptExecutor: temp file is cleaned up after execution", "[script_ex
     REQUIRE_FALSE(fs::exists(expected_temp));
 }
 
-TEST_CASE("ScriptExecutor: temp file is cleaned up on failure", "[script_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: temp file is cleaned up on failure", "[script_executor_edge]") {
     // Fix #273: 验证执行失败后临时脚本文件也被清理
     ScriptExecutor executor;
     nlohmann::json config;
@@ -620,7 +625,7 @@ TEST_CASE("ScriptExecutor: temp file is cleaned up on failure", "[script_executo
 //   7. db_port 为负数不崩溃
 // ============================================================================
 
-TEST_CASE("SqlExecutor: empty sql_statement returns FAILED", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: empty sql_statement returns FAILED", "[sql_executor_edge]") {
     // Fix #274: 空 SQL 语句应返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -637,7 +642,7 @@ TEST_CASE("SqlExecutor: empty sql_statement returns FAILED", "[sql_executor_edge
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: whitespace-only sql_statement", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: whitespace-only sql_statement", "[sql_executor_edge]") {
     // Fix #274: 仅空白字符的 SQL 语句应被检测为空语句
     SqlExecutor executor;
     nlohmann::json config;
@@ -654,7 +659,7 @@ TEST_CASE("SqlExecutor: whitespace-only sql_statement", "[sql_executor_edge]") {
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: missing db_password returns FAILED", "[sql_executor_edge]") {
     // Fix #274: 缺少 db_password 应返回 FAILED
     SqlExecutor executor;
     nlohmann::json config;
@@ -670,7 +675,7 @@ TEST_CASE("SqlExecutor: missing db_password returns FAILED", "[sql_executor_edge
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_password with special characters does not crash", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_password with special characters does not crash", "[sql_executor_edge]") {
     // Fix #274: db_password 含特殊字符（空格、=、反斜杠）不应崩溃
     // Fix #288: 连接串转义后连接会失败（测试环境无 DB），返回 FAILED
     // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值而非仅验证不抛异常
@@ -689,7 +694,7 @@ TEST_CASE("SqlExecutor: db_password with special characters does not crash", "[s
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_password as non-string does not crash", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_password as non-string does not crash", "[sql_executor_edge]") {
     // Fix #274: db_password 为非字符串类型（数字）不应崩溃
     // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值
     // 源码 get_string() 对 is_number() 调用 std::to_string(get<int>())，转换为 "12345"
@@ -708,7 +713,7 @@ TEST_CASE("SqlExecutor: db_password as non-string does not crash", "[sql_executo
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: sql_statement as non-string does not crash", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: sql_statement as non-string does not crash", "[sql_executor_edge]") {
     // Fix #274: sql_statement 为非字符串类型不应崩溃
     // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值
     SqlExecutor executor;
@@ -726,7 +731,7 @@ TEST_CASE("SqlExecutor: sql_statement as non-string does not crash", "[sql_execu
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_port as negative number does not crash", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_port as negative number does not crash", "[sql_executor_edge]") {
     // Fix #274: db_port 为负数不应崩溃（连接会失败但不崩溃）
     SqlExecutor executor;
     nlohmann::json config;
@@ -743,7 +748,7 @@ TEST_CASE("SqlExecutor: db_port as negative number does not crash", "[sql_execut
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: db_host with special characters does not crash", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: db_host with special characters does not crash", "[sql_executor_edge]") {
     // Fix #274: db_host 含特殊字符不应崩溃
     // Fix #288: 连接串转义后连接会失败（测试环境无 DB），返回 FAILED
     // Fix #296: 修正 REQUIRE_NOTHROW lambda 模式 —— 验证返回值
@@ -762,7 +767,7 @@ TEST_CASE("SqlExecutor: db_host with special characters does not crash", "[sql_e
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: lowercase select statement", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: lowercase select statement", "[sql_executor_edge]") {
     // Fix #274: 小写 "select" 应被识别为 SELECT 语句（源码第 43 行检测 "select"）
     SqlExecutor executor;
     nlohmann::json config;
@@ -780,7 +785,7 @@ TEST_CASE("SqlExecutor: lowercase select statement", "[sql_executor_edge]") {
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: mixed case Select statement", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: mixed case Select statement", "[sql_executor_edge]") {
     // Fix #274: 混合大小写 "Select" 应被识别（源码第 44 行检测 "Select"）
     SqlExecutor executor;
     nlohmann::json config;
@@ -797,7 +802,7 @@ TEST_CASE("SqlExecutor: mixed case Select statement", "[sql_executor_edge]") {
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("SqlExecutor: SELECT with leading parentheses treated as DML", "[sql_executor_edge]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: SELECT with leading parentheses treated as DML", "[sql_executor_edge]") {
     // Fix #274: 带前导括号的 SELECT "(SELECT 1)" 被误判为 DML（源码仅检测前 6 字符）
     // 此测试记录当前行为：前导括号的 SELECT 走事务路径
     SqlExecutor executor;
@@ -828,7 +833,7 @@ TEST_CASE("SqlExecutor: SELECT with leading parentheses treated as DML", "[sql_e
 //   7. 正常 task_instance_id 不受影响
 // ============================================================================
 
-TEST_CASE("ScriptExecutor: path traversal in task_instance_id rejected", "[script_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture2, "ScriptExecutor: path traversal in task_instance_id rejected", "[script_executor_security]") {
     // Fix #287: 验证含路径分隔符的 task_instance_id 被拒绝
     ScriptExecutor executor;
     nlohmann::json config;
@@ -877,7 +882,7 @@ TEST_CASE("ScriptExecutor: path traversal in task_instance_id rejected", "[scrip
 // Fix #288: SqlExecutor 路径穿越防护测试
 // ============================================================================
 
-TEST_CASE("SqlExecutor: path traversal in task_instance_id rejected", "[sql_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: path traversal in task_instance_id rejected", "[sql_executor_security]") {
     // Fix #288: 验证含路径分隔符的 task_instance_id 被拒绝
     SqlExecutor executor;
     nlohmann::json config;
@@ -920,7 +925,7 @@ TEST_CASE("SqlExecutor: path traversal in task_instance_id rejected", "[sql_exec
 // 验证含特殊字符的 db_host/db_name/db_user/db_password 被正确转义
 // ============================================================================
 
-TEST_CASE("SqlExecutor: connection string escaping with special characters", "[sql_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture2, "SqlExecutor: connection string escaping with special characters", "[sql_executor_security]") {
     // Fix #288: 验证含空格、单引号、反斜杠的连接参数被正确转义
     // 转义后连接串合法，但测试环境无 DB，连接失败返回 FAILED（不是崩溃）
     SqlExecutor executor;

@@ -32,6 +32,11 @@ struct LogDirFixture {
     LogDirFixture() {
         fs::create_directories(TEST_LOG_DIR);
     }
+    // Fix #306: 析构时清理日志目录，避免 /tmp 残留文件累积导致 CI 磁盘占用增长
+    ~LogDirFixture() {
+        std::error_code ec;
+        fs::remove_all(TEST_LOG_DIR, ec);
+    }
 };
 
 TEST_CASE_METHOD(LogDirFixture, "CommandExecutor: execute echo command", "[command_executor]") {
@@ -195,7 +200,7 @@ public:
     }
 };
 
-TEST_CASE("TaskExecutor: built-in command type", "[task_executor]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: built-in command type", "[task_executor]") {
     TaskExecutor executor(10);
     // submit command type task
     nlohmann::json config;
@@ -221,7 +226,7 @@ TEST_CASE("TaskExecutor: built-in command type", "[task_executor]") {
     REQUIRE(callback_result.status == "SUCCESS");
 }
 
-TEST_CASE("TaskExecutor: register custom executor", "[task_executor]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: register custom executor", "[task_executor]") {
     TaskExecutor executor(10);
 
     executor.registerExecutor("custom_type", []() -> std::unique_ptr<TaskExecutorBase> {
@@ -249,7 +254,7 @@ TEST_LOG_DIR, "",
     REQUIRE(callback_result.error_message == "mock_executor");
 }
 
-TEST_CASE("TaskExecutor: unknown task type returns error", "[task_executor]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: unknown task type returns error", "[task_executor]") {
     TaskExecutor executor(10);
     nlohmann::json config;
 
@@ -258,7 +263,7 @@ TEST_LOG_DIR, "", nullptr);
     REQUIRE_FALSE(result.ok());
 }
 
-TEST_CASE("TaskExecutor: max tasks limit", "[task_executor]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: max tasks limit", "[task_executor]") {
     TaskExecutor executor(1);  // max 1 concurrent task
     nlohmann::json config;
     config["script_content"] = "#!/bin/bash\nsleep 5";
@@ -290,7 +295,7 @@ TEST_LOG_DIR, "", callback);
 //   3. createLogSink 工厂函数根据类型创建
 // ============================================================================
 
-TEST_CASE("FileLogSink: write and read", "[log_sink]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: write and read", "[log_sink]") {
     const std::string base_dir = "/tmp/taskflow_test_logs_sink";
     fs::create_directories(base_dir);
 
@@ -309,7 +314,7 @@ TEST_CASE("FileLogSink: write and read", "[log_sink]") {
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: read non-existent log returns empty", "[log_sink]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: read non-existent log returns empty", "[log_sink]") {
     const std::string base_dir = "/tmp/taskflow_test_logs_sink_ne";
     fs::create_directories(base_dir);
 
@@ -321,7 +326,7 @@ TEST_CASE("FileLogSink: read non-existent log returns empty", "[log_sink]") {
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: getLogPath returns correct path", "[log_sink]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: getLogPath returns correct path", "[log_sink]") {
     const std::string base_dir = "/tmp/taskflow_test_logs_sink_path";
     FileLogSink sink(base_dir);
 
@@ -331,7 +336,7 @@ TEST_CASE("FileLogSink: getLogPath returns correct path", "[log_sink]") {
     REQUIRE(path.find("task-1") != std::string::npos);
 }
 
-TEST_CASE("ElasticLogSink: falls back to file storage", "[log_sink]") {
+TEST_CASE_METHOD(LogDirFixture,"ElasticLogSink: falls back to file storage", "[log_sink]") {
     const std::string base_dir = "/tmp/taskflow_test_logs_sink_es";
     fs::create_directories(base_dir);
 
@@ -347,12 +352,12 @@ TEST_CASE("ElasticLogSink: falls back to file storage", "[log_sink]") {
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("createLogSink: creates FileLogSink for file type", "[log_sink]") {
+TEST_CASE_METHOD(LogDirFixture,"createLogSink: creates FileLogSink for file type", "[log_sink]") {
     auto sink = createLogSink("file", "/tmp/taskflow_test_logs_factory");
     REQUIRE(sink != nullptr);
 }
 
-TEST_CASE("createLogSink: creates ElasticLogSink for elasticsearch type", "[log_sink]") {
+TEST_CASE_METHOD(LogDirFixture,"createLogSink: creates ElasticLogSink for elasticsearch type", "[log_sink]") {
     auto sink = createLogSink("elasticsearch", "/tmp/taskflow_test_logs_factory", "http://localhost:9200", "taskflow-logs");
     REQUIRE(sink != nullptr);
 }
@@ -367,7 +372,7 @@ TEST_CASE("createLogSink: creates ElasticLogSink for elasticsearch type", "[log_
 //   5. createLogSink 未知类型和空类型回退到 FileLogSink
 // ============================================================================
 
-TEST_CASE("FileLogSink: multiple writes append to same log", "[log_sink_append]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: multiple writes append to same log", "[log_sink_append]") {
     // Fix #252: 验证 write 使用追加模式，多次写入不会覆盖之前的内容
     const std::string base_dir = "/tmp/taskflow_test_logs_append";
     fs::remove_all(base_dir);
@@ -385,7 +390,7 @@ TEST_CASE("FileLogSink: multiple writes append to same log", "[log_sink_append]"
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: different workflow instances are isolated", "[log_sink_isolation]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: different workflow instances are isolated", "[log_sink_isolation]") {
     // Fix #252: 验证不同 workflow_instance_id 的日志写入不同目录，互不干扰
     const std::string base_dir = "/tmp/taskflow_test_logs_isolation";
     fs::remove_all(base_dir);
@@ -414,7 +419,7 @@ TEST_CASE("FileLogSink: different workflow instances are isolated", "[log_sink_i
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup removes expired log directories", "[log_sink_cleanup]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup removes expired log directories", "[log_sink_cleanup]") {
     // Fix #252: 验证 cleanup(retention_days) 删除修改时间超过保留期的目录
     const std::string base_dir = "/tmp/taskflow_test_logs_cleanup";
     fs::remove_all(base_dir);
@@ -442,7 +447,7 @@ TEST_CASE("FileLogSink: cleanup removes expired log directories", "[log_sink_cle
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup keeps logs within retention period", "[log_sink_cleanup]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup keeps logs within retention period", "[log_sink_cleanup]") {
     // Fix #252: 验证 cleanup 不删除保留期内的目录
     const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_keep";
     fs::remove_all(base_dir);
@@ -466,7 +471,7 @@ TEST_CASE("FileLogSink: cleanup keeps logs within retention period", "[log_sink_
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup on non-existent base_dir does not crash", "[log_sink_cleanup]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup on non-existent base_dir does not crash", "[log_sink_cleanup]") {
     // Fix #252: 验证 cleanup 对不存在的 base_dir 安全（不崩溃）
     const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_nonexist";
     fs::remove_all(base_dir);
@@ -476,7 +481,7 @@ TEST_CASE("FileLogSink: cleanup on non-existent base_dir does not crash", "[log_
     REQUIRE_NOTHROW(sink.cleanup(7));
 }
 
-TEST_CASE("ElasticLogSink: delegates exists/getLogPath to file sink", "[log_sink_es_delegation]") {
+TEST_CASE_METHOD(LogDirFixture,"ElasticLogSink: delegates exists/getLogPath to file sink", "[log_sink_es_delegation]") {
     // Fix #252: 验证 ElasticLogSink 的 exists/getLogPath 委托给 FileLogSink
     const std::string base_dir = "/tmp/taskflow_test_logs_es_deleg";
     fs::remove_all(base_dir);
@@ -501,7 +506,7 @@ TEST_CASE("ElasticLogSink: delegates exists/getLogPath to file sink", "[log_sink
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("ElasticLogSink: cleanup delegates to file sink", "[log_sink_es_delegation]") {
+TEST_CASE_METHOD(LogDirFixture,"ElasticLogSink: cleanup delegates to file sink", "[log_sink_es_delegation]") {
     // Fix #252: 验证 ElasticLogSink::cleanup 委托给 FileLogSink
     const std::string base_dir = "/tmp/taskflow_test_logs_es_cleanup";
     fs::remove_all(base_dir);
@@ -523,7 +528,7 @@ TEST_CASE("ElasticLogSink: cleanup delegates to file sink", "[log_sink_es_delega
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("createLogSink: unknown type falls back to FileLogSink", "[log_sink_factory_fallback]") {
+TEST_CASE_METHOD(LogDirFixture,"createLogSink: unknown type falls back to FileLogSink", "[log_sink_factory_fallback]") {
     // Fix #252: 验证未知 sink_type 回退到 FileLogSink
     const std::string base_dir = "/tmp/taskflow_test_logs_unknown";
     fs::remove_all(base_dir);
@@ -539,7 +544,7 @@ TEST_CASE("createLogSink: unknown type falls back to FileLogSink", "[log_sink_fa
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("createLogSink: empty type falls back to FileLogSink", "[log_sink_factory_fallback]") {
+TEST_CASE_METHOD(LogDirFixture,"createLogSink: empty type falls back to FileLogSink", "[log_sink_factory_fallback]") {
     // Fix #252: 验证空 sink_type 回退到 FileLogSink
     const std::string base_dir = "/tmp/taskflow_test_logs_empty_type";
     fs::remove_all(base_dir);
@@ -565,7 +570,7 @@ TEST_CASE("createLogSink: empty type falls back to FileLogSink", "[log_sink_fact
 //   6. cleanup 对含普通文件的 base_dir 安全
 // ============================================================================
 
-TEST_CASE("FileLogSink: rejects workflow_instance_id with path traversal", "[log_sink_security]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: rejects workflow_instance_id with path traversal", "[log_sink_security]") {
     // Fix #271: 含 "../" 的 workflow_instance_id 应被拒绝，防止路径穿越
     const std::string base_dir = "/tmp/taskflow_test_logs_traversal";
     fs::remove_all(base_dir);
@@ -583,7 +588,7 @@ TEST_CASE("FileLogSink: rejects workflow_instance_id with path traversal", "[log
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: rejects task_instance_id with path traversal", "[log_sink_security]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: rejects task_instance_id with path traversal", "[log_sink_security]") {
     // Fix #271: 含 "../" 的 task_instance_id 应被拒绝
     const std::string base_dir = "/tmp/taskflow_test_logs_traversal_task";
     fs::remove_all(base_dir);
@@ -597,7 +602,7 @@ TEST_CASE("FileLogSink: rejects task_instance_id with path traversal", "[log_sin
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: rejects instance id with path separator", "[log_sink_security]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: rejects instance id with path separator", "[log_sink_security]") {
     // Fix #271: 含路径分隔符 "/" 的 ID 应被拒绝
     const std::string base_dir = "/tmp/taskflow_test_logs_separator";
     fs::remove_all(base_dir);
@@ -610,7 +615,7 @@ TEST_CASE("FileLogSink: rejects instance id with path separator", "[log_sink_sec
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: rejects empty instance id", "[log_sink_security]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: rejects empty instance id", "[log_sink_security]") {
     // Fix #271: 空 ID 应被拒绝
     const std::string base_dir = "/tmp/taskflow_test_logs_empty_id";
     fs::remove_all(base_dir);
@@ -627,7 +632,7 @@ TEST_CASE("FileLogSink: rejects empty instance id", "[log_sink_security]") {
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: accepts valid instance ids with hyphens and underscores", "[log_sink_security]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: accepts valid instance ids with hyphens and underscores", "[log_sink_security]") {
     // Fix #271: 合法 ID（含连字符、下划线、字母数字）应被接受
     const std::string base_dir = "/tmp/taskflow_test_logs_valid_ids";
     fs::remove_all(base_dir);
@@ -641,7 +646,7 @@ TEST_CASE("FileLogSink: accepts valid instance ids with hyphens and underscores"
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup with zero retention days", "[log_sink_cleanup_edge]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup with zero retention days", "[log_sink_cleanup_edge]") {
     // Fix #271: cleanup(0) 行为验证 —— retention=0 意味着清理所有超过 0 小时的目录
     // 刚创建的目录 last_modified 接近 now，now - last_modified 可能略大于 0
     const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_zero";
@@ -659,7 +664,7 @@ TEST_CASE("FileLogSink: cleanup with zero retention days", "[log_sink_cleanup_ed
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup with negative retention does not crash", "[log_sink_cleanup_edge]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup with negative retention does not crash", "[log_sink_cleanup_edge]") {
     // Fix #271: 负 retention_days 不应崩溃（24 * 负数 = 负小时，now - last_modified > 负值 恒真）
     const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_negative";
     fs::remove_all(base_dir);
@@ -673,7 +678,7 @@ TEST_CASE("FileLogSink: cleanup with negative retention does not crash", "[log_s
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup handles non-directory entries safely", "[log_sink_cleanup_edge]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup handles non-directory entries safely", "[log_sink_cleanup_edge]") {
     // Fix #271: base_dir 含普通文件（非目录）时 cleanup 应安全跳过
     const std::string base_dir = "/tmp/taskflow_test_logs_cleanup_files";
     fs::remove_all(base_dir);
@@ -699,7 +704,7 @@ TEST_CASE("FileLogSink: cleanup handles non-directory entries safely", "[log_sin
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: write to read-only directory fails gracefully", "[log_sink_write_fail]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: write to read-only directory fails gracefully", "[log_sink_write_fail]") {
     // Fix #271: 写入失败路径应返回 false 而非崩溃
     // 创建一个只读目录作为 base_dir
     const std::string base_dir = "/tmp/taskflow_test_logs_readonly";
@@ -727,7 +732,7 @@ TEST_CASE("FileLogSink: write to read-only directory fails gracefully", "[log_si
 //   3. cleanup(large_retention_days) 不因 24 * retention_days 溢出而崩溃
 // ============================================================================
 
-TEST_CASE("FileLogSink: rejects single dot workflow_instance_id", "[log_sink_security_dot]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: rejects single dot workflow_instance_id", "[log_sink_security_dot]") {
     // Fix #282: workflow_instance_id="." 等价于 base_dir 本身，应被拒绝
     const std::string base_dir = "/tmp/taskflow_test_logs_dot_wf";
     fs::remove_all(base_dir);
@@ -742,7 +747,7 @@ TEST_CASE("FileLogSink: rejects single dot workflow_instance_id", "[log_sink_sec
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: rejects single dot task_instance_id", "[log_sink_security_dot]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: rejects single dot task_instance_id", "[log_sink_security_dot]") {
     // Fix #282: task_instance_id="." 会被解析为目录，应拒绝
     const std::string base_dir = "/tmp/taskflow_test_logs_dot_task";
     fs::remove_all(base_dir);
@@ -756,7 +761,7 @@ TEST_CASE("FileLogSink: rejects single dot task_instance_id", "[log_sink_securit
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup with large retention_days does not overflow", "[log_sink_cleanup_overflow]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup with large retention_days does not overflow", "[log_sink_cleanup_overflow]") {
     // Fix #282: 24 * retention_days 在 retention_days 较大时会整数溢出。
     // 修复前用 int 计算，retention_days=100000000 时 24*100000000=2400000000 > INT_MAX 溢出。
     // 修复后用 long long 计算，不应崩溃。
@@ -776,7 +781,7 @@ TEST_CASE("FileLogSink: cleanup with large retention_days does not overflow", "[
     fs::remove_all(base_dir);
 }
 
-TEST_CASE("FileLogSink: cleanup with very large retention_days does not crash", "[log_sink_cleanup_overflow]") {
+TEST_CASE_METHOD(LogDirFixture,"FileLogSink: cleanup with very large retention_days does not crash", "[log_sink_cleanup_overflow]") {
     // Fix #282: 极大 retention_days 不应崩溃
     // 注意：retention_days 极大时（如 1000000），24*retention_days 转换为纳秒可能溢出，
     // 导致 cleanup 行为不确定（可能删除目录）。此测试仅验证不崩溃，不验证目录是否存在。
@@ -802,7 +807,7 @@ TEST_CASE("FileLogSink: cleanup with very large retention_days does not crash", 
 //   5. setLogSink 设置后不影响任务正常执行
 // ============================================================================
 
-TEST_CASE("TaskExecutor: shutdown rejects new submissions", "[task_executor_shutdown]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: shutdown rejects new submissions", "[task_executor_shutdown]") {
     // Fix #253: 验证 shutdown() 后 submit 返回 failure
     TaskExecutor executor(10);
 
@@ -816,7 +821,7 @@ TEST_CASE("TaskExecutor: shutdown rejects new submissions", "[task_executor_shut
     REQUIRE(result.error().find("shutting down") != std::string::npos);
 }
 
-TEST_CASE("TaskExecutor: shutdown waits for running tasks to complete", "[task_executor_shutdown]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: shutdown waits for running tasks to complete", "[task_executor_shutdown]") {
     // Fix #253: 验证 shutdown() 等待运行中的任务自然完成
     TaskExecutor executor(10);
 
@@ -841,7 +846,7 @@ TEST_CASE("TaskExecutor: shutdown waits for running tasks to complete", "[task_e
     REQUIRE(callback_result.status == "SUCCESS");
 }
 
-TEST_CASE("TaskExecutor: shutdown with short timeout cancels long task", "[task_executor_shutdown]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: shutdown with short timeout cancels long task", "[task_executor_shutdown]") {
     // Fix #253: 验证 shutdown(timeout) 超时后取消未完成的任务
     TaskExecutor executor(10);
 
@@ -873,7 +878,7 @@ TEST_CASE("TaskExecutor: shutdown with short timeout cancels long task", "[task_
     REQUIRE(callback_result.status != "SUCCESS");
 }
 
-TEST_CASE("TaskExecutor: registerExecutor overrides built-in type", "[task_executor_register]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: registerExecutor overrides built-in type", "[task_executor_register]") {
     // Fix #253: 验证 registerExecutor 覆盖同类型的内置执行器
     TaskExecutor executor(10);
 
@@ -907,7 +912,7 @@ TEST_CASE("TaskExecutor: registerExecutor overrides built-in type", "[task_execu
     executor.shutdown(5);
 }
 
-TEST_CASE("TaskExecutor: setLogSink does not break task execution", "[task_executor_logsink]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: setLogSink does not break task execution", "[task_executor_logsink]") {
     // Fix #253: 验证 setLogSink 设置日志 sink 后任务仍正常执行
     TaskExecutor executor(10);
 
@@ -942,7 +947,7 @@ TEST_CASE("TaskExecutor: setLogSink does not break task execution", "[task_execu
     fs::remove_all(sink_dir);
 }
 
-TEST_CASE("TaskExecutor: runningCount reflects active tasks", "[task_executor_runningcount]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: runningCount reflects active tasks", "[task_executor_runningcount]") {
     // Fix #253: 验证 runningCount() 在任务运行时 >0，完成后归 0
     TaskExecutor executor(10);
 
@@ -1156,7 +1161,7 @@ TEST_CASE_METHOD(LogDirFixture, "ScriptExecutor: python3 script with syntax erro
 //   4. 回调抛异常后 runningCount 归零
 // ============================================================================
 
-TEST_CASE("TaskExecutor: rejects duplicate task_instance_id while running", "[task_executor_duplicate]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: rejects duplicate task_instance_id while running", "[task_executor_duplicate]") {
     // Fix #272: 验证重复 task_instance_id 被拒绝，防止覆盖旧任务导致无法 cancel
     TaskExecutor executor(10);
 
@@ -1181,7 +1186,7 @@ TEST_CASE("TaskExecutor: rejects duplicate task_instance_id while running", "[ta
     executor.shutdown(10);
 }
 
-TEST_CASE("TaskExecutor: callback throwing exception does not crash", "[task_executor_callback_exception]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: callback throwing exception does not crash", "[task_executor_callback_exception]") {
     // Fix #272: 验证回调抛异常不会导致 std::terminate
     TaskExecutor executor(10);
 
@@ -1214,7 +1219,7 @@ TEST_CASE("TaskExecutor: callback throwing exception does not crash", "[task_exe
     executor.shutdown(5);
 }
 
-TEST_CASE("TaskExecutor: callback throwing non-std exception does not crash", "[task_executor_callback_exception]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: callback throwing non-std exception does not crash", "[task_executor_callback_exception]") {
     // Fix #272: 验证回调抛非 std 异常（catch (...) 捕获）不会崩溃
     TaskExecutor executor(10);
 
@@ -1245,7 +1250,7 @@ TEST_CASE("TaskExecutor: callback throwing non-std exception does not crash", "[
     executor.shutdown(5);
 }
 
-TEST_CASE("TaskExecutor: duplicate id rejected then accepted after completion", "[task_executor_duplicate]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: duplicate id rejected then accepted after completion", "[task_executor_duplicate]") {
     // Fix #272: 验证旧任务完成后，相同 ID 可以再次提交
     TaskExecutor executor(10);
 
@@ -1290,7 +1295,7 @@ TEST_CASE("TaskExecutor: duplicate id rejected then accepted after completion", 
 // Fix #277: CommandExecutor task_instance_id 路径穿越防护
 // ============================================================================
 
-TEST_CASE("CommandExecutor: rejects path traversal in task_instance_id", "[command_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture,"CommandExecutor: rejects path traversal in task_instance_id", "[command_executor_security]") {
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1300,7 +1305,7 @@ TEST_CASE("CommandExecutor: rejects path traversal in task_instance_id", "[comma
     REQUIRE(result.error_message.find("path separators") != std::string::npos);
 }
 
-TEST_CASE("CommandExecutor: rejects slash in task_instance_id", "[command_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture,"CommandExecutor: rejects slash in task_instance_id", "[command_executor_security]") {
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1309,7 +1314,7 @@ TEST_CASE("CommandExecutor: rejects slash in task_instance_id", "[command_execut
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("CommandExecutor: rejects backslash in task_instance_id", "[command_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture,"CommandExecutor: rejects backslash in task_instance_id", "[command_executor_security]") {
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1318,7 +1323,7 @@ TEST_CASE("CommandExecutor: rejects backslash in task_instance_id", "[command_ex
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("CommandExecutor: rejects single dot as task_instance_id", "[command_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture,"CommandExecutor: rejects single dot as task_instance_id", "[command_executor_security]") {
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1327,7 +1332,7 @@ TEST_CASE("CommandExecutor: rejects single dot as task_instance_id", "[command_e
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("CommandExecutor: rejects empty task_instance_id", "[command_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture,"CommandExecutor: rejects empty task_instance_id", "[command_executor_security]") {
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1336,7 +1341,7 @@ TEST_CASE("CommandExecutor: rejects empty task_instance_id", "[command_executor_
     REQUIRE(result.status == "FAILED");
 }
 
-TEST_CASE("CommandExecutor: accepts valid task_instance_id", "[command_executor_security]") {
+TEST_CASE_METHOD(LogDirFixture,"CommandExecutor: accepts valid task_instance_id", "[command_executor_security]") {
     CommandExecutor executor;
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1349,7 +1354,7 @@ TEST_CASE("CommandExecutor: accepts valid task_instance_id", "[command_executor_
 // Fix #278: TaskExecutor registerExecutor/setLogSink 线程安全
 // ============================================================================
 
-TEST_CASE("TaskExecutor: concurrent registerExecutor and submit does not crash", "[task_executor_thread_safety]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: concurrent registerExecutor and submit does not crash", "[task_executor_thread_safety]") {
     TaskExecutor executor(10);
     nlohmann::json config;
     config["command"] = "echo hello";
@@ -1393,12 +1398,13 @@ TEST_CASE("TaskExecutor: concurrent registerExecutor and submit does not crash",
     sink_thread.join();
 
     executor.shutdown(10);
-    // If we reach here without crash/UB, the test passes
-    REQUIRE(submit_count.load() >= 0);
+    // Fix #305: 原断言 submit_count >= 0 恒真（atomic<int> 从 0 递增），无验证意义
+    // 改为验证确实有任务被提交
+    REQUIRE(submit_count.load() > 0);
     REQUIRE(register_count.load() > 0);
 }
 
-TEST_CASE("TaskExecutor: setLogSink during task execution does not crash", "[task_executor_thread_safety]") {
+TEST_CASE_METHOD(LogDirFixture,"TaskExecutor: setLogSink during task execution does not crash", "[task_executor_thread_safety]") {
     TaskExecutor executor(5);
     nlohmann::json config;
     config["command"] = "sleep 1";

@@ -147,7 +147,16 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
                 std::istringstream iss(ti.started_at);
                 iss >> std::get_time(&tm_started, "%Y-%m-%d %H:%M:%S");
                 if (!iss.fail()) {
-                    auto started_tp = std::chrono::system_clock::from_time_t(timegm(&tm_started));
+                    // Fix #303: 检查 timegm 返回值，失败时跳过超时检测
+                    // timegm 失败返回 -1，from_time_t(-1) 为 1969 年，elapsed 会是 50+ 年，
+                    // 恒大于 timeout，导致任务被误标为 TIMEOUT
+                    auto started_time_t = timegm(&tm_started);
+                    if (started_time_t == static_cast<time_t>(-1)) {
+                        spdlog::warn("DagDriver: task instance {} has invalid started_at '{}', skipping timeout check",
+                                     ti.id, ti.started_at);
+                        continue;
+                    }
+                    auto started_tp = std::chrono::system_clock::from_time_t(started_time_t);
                     auto now_tp = std::chrono::system_clock::now();
                     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - started_tp).count();
 

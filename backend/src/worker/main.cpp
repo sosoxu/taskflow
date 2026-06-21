@@ -62,6 +62,18 @@ static void initLogger(const taskflow::common::config::WorkerLogConfig& log_conf
 }
 
 // WorkerService 实现 - 集成 TaskExecutor
+// Fix #298: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
+// 与 executor 中的 isValidInstanceId 保持一致
+static bool isValidInstanceId(const std::string& id) {
+    if (id.empty()) return false;
+    for (char c : id) {
+        if (c == '/' || c == '\\' || c == '\0') return false;
+    }
+    if (id.find("..") != std::string::npos) return false;
+    if (id == ".") return false;
+    return true;
+}
+
 class WorkerServiceImpl final : public WorkerService::Service {
 public:
     WorkerServiceImpl(taskflow::worker::executor::TaskExecutor& executor,
@@ -88,6 +100,16 @@ public:
         std::string task_type = request->task_type();
         std::string workflow_instance_id = request->workflow_instance_id();
         int timeout = request->timeout();
+
+        // Fix #298: 校验 workflow_instance_id 防止路径穿越
+        // task_instance_id 在 executor 内部校验，但 workflow_instance_id 用于构造 log_dir
+        // 必须在此处提前校验，否则 create_directories 会逃逸 log_dir_
+        if (!workflow_instance_id.empty() && !isValidInstanceId(workflow_instance_id)) {
+            response->set_accepted(false);
+            response->set_error_message("Invalid workflow_instance_id contains path separators or traversal");
+            return grpc::Status::OK;
+        }
+
         std::string log_dir = log_dir_;
 
         if (!workflow_instance_id.empty()) {
@@ -141,6 +163,17 @@ public:
                             const TaskLogRequest* request,
                             grpc::ServerWriter<LogChunk>* writer) override {
         spdlog::info("收到日志请求: task_instance_id={}", request->task_instance_id());
+
+        // Fix #298: 校验 task_instance_id 防止路径穿越
+        // 若含 ../，可逃逸日志目录读取任意文件
+        if (!isValidInstanceId(request->task_instance_id())) {
+            LogChunk chunk;
+            chunk.set_task_instance_id(request->task_instance_id());
+            chunk.set_data("Invalid task_instance_id contains path separators or traversal\n");
+            chunk.set_eof(true);
+            writer->Write(chunk);
+            return grpc::Status::OK;
+        }
 
         std::string log_path;
         std::string target_filename = request->task_instance_id() + ".log";

@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <chrono>
 #include <fstream>
 #include <spdlog/spdlog.h>
@@ -153,6 +154,10 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
             break;
         }
         if (ret < 0) {
+            // Fix #301: EINTR 是可恢复错误，应当重试而非失败
+            if (errno == EINTR) {
+                continue;
+            }
             result.status = "FAILED";
             result.exit_code = 1;
             result.error_message = "waitpid() failed";
@@ -164,8 +169,12 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
             std::chrono::steady_clock::now() - start).count();
         if (timeout > 0 && elapsed >= timeout) {
             // Fix #206: Kill the whole process group (negative pid).
-            kill(-pid, SIGKILL);
-            waitpid(pid, &status, 0);
+            // Fix #302: 检查 kill 返回值，失败时回退到 kill(pid)
+            if (kill(-pid, SIGKILL) < 0) {
+                kill(pid, SIGKILL);
+            }
+            // Fix #301: 循环重试 waitpid 直到成功，避免 EINTR 导致僵尸进程
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
             result.status = "TIMEOUT";
             result.exit_code = -1;
             result.error_message = "Task timed out after " +

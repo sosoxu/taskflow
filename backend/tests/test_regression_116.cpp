@@ -15,12 +15,23 @@ using namespace taskflow::worker::executor;
 
 static const std::string REGRESSION_LOG_DIR = "/tmp/taskflow_regression_logs";
 
+// Fix #306: 使用 fixture 在析构时清理日志目录，避免 /tmp 残留文件累积
+struct RegressionLogDirFixture {
+    RegressionLogDirFixture() {
+        std::filesystem::create_directories(REGRESSION_LOG_DIR);
+    }
+    ~RegressionLogDirFixture() {
+        std::error_code ec;
+        std::filesystem::remove_all(REGRESSION_LOG_DIR, ec);
+    }
+};
+
 // Fix #264: 修正回归检测机制 —— 在 submit 成功瞬间采样 runningCount，
 // 而非在回调中采样（回调执行时 running_count_ 已被递减，永远比真实峰值少 1）。
 // 同时修正变量声明顺序避免 use-after-free（原子变量先于 executor 声明，
 // 使 executor 先析构、先等待线程结束，保护回调中对原子变量的引用）。
-TEST_CASE("Regression #116: concurrent submit does not exceed max_tasks", "[regression][executor]") {
-    std::filesystem::create_directories(REGRESSION_LOG_DIR);
+TEST_CASE_METHOD(RegressionLogDirFixture, "Regression #116: concurrent submit does not exceed max_tasks", "[regression][executor]") {
+    // Fix #306: 日志目录由 fixture 管理（创建+清理）
 
     // Fix #264: 原子变量先声明，确保 executor 析构时回调仍可安全访问
     std::atomic<int> accepted{0};
@@ -92,8 +103,8 @@ TEST_CASE("Regression #116: concurrent submit does not exceed max_tasks", "[regr
 }
 
 // Fix #264: 第二个用例补充串行化断言、rejected 计数、任务总数守恒
-TEST_CASE("Regression #116: max_tasks=1 strict serialization", "[regression][executor]") {
-    std::filesystem::create_directories(REGRESSION_LOG_DIR);
+TEST_CASE_METHOD(RegressionLogDirFixture, "Regression #116: max_tasks=1 strict serialization", "[regression][executor]") {
+    // Fix #306: 日志目录由 fixture 管理（创建+清理）
 
     std::atomic<int> accepted{0};
     std::atomic<int> rejected{0};
@@ -154,8 +165,8 @@ TEST_CASE("Regression #116: max_tasks=1 strict serialization", "[regression][exe
 }
 
 // Fix #264: 补充 max_tasks=0 边界测试 —— 所有 submit 应被拒绝
-TEST_CASE("Regression #116: max_tasks=0 rejects all submissions", "[regression][executor]") {
-    std::filesystem::create_directories(REGRESSION_LOG_DIR);
+TEST_CASE_METHOD(RegressionLogDirFixture, "Regression #116: max_tasks=0 rejects all submissions", "[regression][executor]") {
+    // Fix #306: 日志目录由 fixture 管理（创建+清理）
 
     std::atomic<int> accepted{0};
     std::atomic<int> rejected{0};

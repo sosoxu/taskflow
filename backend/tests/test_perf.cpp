@@ -519,8 +519,17 @@ TEST_CASE("Perf: TaskExecutor task submission throughput", "[perf][executor]") {
         }
 
         // 等待全部完成
-        while (completed.load() < accepted.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Fix #304: 增加超时上限，避免回调卡死导致测试永久挂起
+        {
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+            while (completed.load() < accepted.load()) {
+                if (std::chrono::steady_clock::now() > deadline) {
+                    WARN("Timeout waiting for tasks: completed=" << completed.load()
+                         << " accepted=" << accepted.load());
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
         }
         double elapsed = t.elapsedMs();
 
@@ -563,8 +572,17 @@ TEST_CASE("Perf: TaskExecutor concurrent burst (100 tasks)", "[perf][executor]")
     double submitMs = t.elapsedMs();
 
     // 等待全部执行完成
-    while (completed.load() < accepted.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    // Fix #304: 增加超时上限，避免回调卡死导致测试永久挂起
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (completed.load() < accepted.load()) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                WARN("Timeout waiting for burst tasks: completed=" << completed.load()
+                     << " accepted=" << accepted.load());
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
     }
     double totalMs = t.elapsedMs();
 
