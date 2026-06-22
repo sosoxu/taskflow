@@ -30,11 +30,16 @@ public:
 
     // Fix #275: 将 resolveString/resolvePlaceholders 改为 public inline 以便单元测试
     // 且无需编译 dag_driver.cpp（避免 gRPC/DAO 依赖）
-    // Resolve ${var} placeholders in string using parameter values
+    // Resolve ${var} and {var} placeholders in string using parameter values.
+    // ${var}: always recognized; replaced with value if found in params, kept as-is if not.
+    // {var}: only recognized when var is a key in params (avoids false positives
+    // like shell brace expansion {1..10}); replaced with value. If var is NOT in
+    // params, the literal {var} is kept as-is.
     static std::string resolveString(const std::string& input, const nlohmann::json& params) {
         std::string result;
         size_t i = 0;
         while (i < input.size()) {
+            // Pattern 1: ${var} — explicit placeholder syntax
             if (i + 1 < input.size() && input[i] == '$' && input[i + 1] == '{') {
                 size_t end = input.find('}', i + 2);
                 if (end != std::string::npos) {
@@ -53,7 +58,38 @@ public:
                     result += input[i];
                     i++;
                 }
-            } else {
+            }
+            // Pattern 2: {var} — implicit placeholder syntax (only if var is defined in params)
+            else if (input[i] == '{') {
+                size_t end = input.find('}', i + 1);
+                if (end != std::string::npos) {
+                    std::string var_name = input.substr(i + 1, end - i - 1);
+                    // Only treat as placeholder if var_name is a defined parameter key.
+                    // This avoids false positives for shell brace expansion like {1..10}
+                    // or JSON objects like {"key": "value"}.
+                    bool is_valid_var = !var_name.empty();
+                    for (char c : var_name) {
+                        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-') {
+                            is_valid_var = false;
+                            break;
+                        }
+                    }
+                    if (is_valid_var && params.contains(var_name)) {
+                        if (params[var_name].is_string()) {
+                            result += params[var_name].get<std::string>();
+                        } else {
+                            result += params[var_name].dump();
+                        }
+                    } else {
+                        result += input.substr(i, end - i + 1);
+                    }
+                    i = end + 1;
+                } else {
+                    result += input[i];
+                    i++;
+                }
+            }
+            else {
                 result += input[i];
                 i++;
             }

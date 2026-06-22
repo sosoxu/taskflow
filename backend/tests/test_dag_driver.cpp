@@ -228,3 +228,72 @@ TEST_CASE("DagDriver::resolveString - same variable used multiple times", "[dag_
     std::string result = DagDriver::resolveString("${name} and ${name} again", params);
     REQUIRE(result == "taskflow and taskflow again");
 }
+
+// ============================================================================
+// {var} implicit placeholder syntax tests
+// ============================================================================
+
+TEST_CASE("DagDriver::resolveString - {var} basic substitution", "[dag_driver_resolve]") {
+    // {var} syntax: replaced when var is defined in params
+    nlohmann::json params = {{"time", "10"}};
+    std::string result = DagDriver::resolveString("sleep {time}", params);
+    REQUIRE(result == "sleep 10");
+}
+
+TEST_CASE("DagDriver::resolveString - {var} not in params keeps literal", "[dag_driver_resolve]") {
+    // {var} syntax: kept as-is when var is NOT defined in params
+    nlohmann::json params = {{"name", "taskflow"}};
+    std::string result = DagDriver::resolveString("sleep {time}", params);
+    REQUIRE(result == "sleep {time}");
+}
+
+TEST_CASE("DagDriver::resolveString - {var} with underscore and hyphen", "[dag_driver_resolve]") {
+    // {var} syntax: variable names can contain underscores and hyphens
+    nlohmann::json params = {{"my_var", "hello"}, {"db-name", "prod"}};
+    std::string result = DagDriver::resolveString("{my_var} {db-name}", params);
+    REQUIRE(result == "hello prod");
+}
+
+TEST_CASE("DagDriver::resolveString - {var} invalid chars kept as literal", "[dag_driver_resolve]") {
+    // {var} syntax: variable names with special chars (dots, colons) are NOT treated as placeholders
+    nlohmann::json params = {{"var", "value"}};
+    std::string result = DagDriver::resolveString("echo {1..10} {host:port}", params);
+    REQUIRE(result == "echo {1..10} {host:port}");
+}
+
+TEST_CASE("DagDriver::resolveString - mixed ${var} and {var}", "[dag_driver_resolve]") {
+    // Both ${var} and {var} should work together
+    nlohmann::json params = {{"name", "taskflow"}, {"count", "5"}};
+    std::string result = DagDriver::resolveString("${name} runs {count} times", params);
+    REQUIRE(result == "taskflow runs 5 times");
+}
+
+TEST_CASE("DagDriver::resolveString - {var} empty var name kept as literal", "[dag_driver_resolve]") {
+    // {} with empty name should be kept as-is
+    nlohmann::json params = {{"name", "taskflow"}};
+    std::string result = DagDriver::resolveString("empty: {}", params);
+    REQUIRE(result == "empty: {}");
+}
+
+TEST_CASE("DagDriver::resolveString - {var} with integer value", "[dag_driver_resolve]") {
+    // {var} with non-string value should dump as JSON
+    nlohmann::json params = {{"count", 42}};
+    std::string result = DagDriver::resolveString("total: {count}", params);
+    REQUIRE(result == "total: 42");
+}
+
+TEST_CASE("DagDriver::resolveString - JSON object literal not treated as placeholder", "[dag_driver_resolve]") {
+    // {"key": "value"} should NOT be treated as a placeholder
+    nlohmann::json params = {{"key", "value"}};
+    std::string result = DagDriver::resolveString(R"(data: {"key": "value"})", params);
+    // The {"key" part has a colon, so it's not a valid var name — kept as-is
+    REQUIRE(result.find(R"("key")") != std::string::npos);
+}
+
+TEST_CASE("DagDriver::resolvePlaceholders - {var} in command config", "[dag_driver_resolve]") {
+    // Real-world scenario: sleep {time} with time=10
+    nlohmann::json config = {{"command", "sleep {time}"}};
+    nlohmann::json params = {{"time", "10"}};
+    DagDriver::resolvePlaceholders(config, params);
+    REQUIRE(config["command"] == "sleep 10");
+}

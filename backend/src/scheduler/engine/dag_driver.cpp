@@ -532,7 +532,8 @@ common::result::Result<void> DagDriver::dispatchTask(
         spdlog::warn("DagDriver: failed to merge workflow instance param_overrides: {}", e.what());
     }
 
-    // Resolve ${var} placeholders in config using task.parameters_json + param_overrides
+    // Resolve ${var} and {var} placeholders in config using task.parameters_json + param_overrides
+    bool placeholders_resolved = true;
     try {
         nlohmann::json params = task.parameters_json;
         if (!params.is_object()) {
@@ -571,9 +572,22 @@ common::result::Result<void> DagDriver::dispatchTask(
             spdlog::warn("DagDriver: failed to merge workflow instance param_overrides into params: {}", e.what());
         }
 
+        spdlog::debug("DagDriver: resolving placeholders for task instance {}, params={}",
+                       task_instance.id, params.dump());
         resolvePlaceholders(config, params);
+        spdlog::debug("DagDriver: resolved config for task instance {}: {}", task_instance.id, config.dump());
     } catch (const std::exception& e) {
-        spdlog::warn("DagDriver: failed to resolve placeholders: {}", e.what());
+        spdlog::error("DagDriver: failed to resolve placeholders for task instance {}: {}",
+                      task_instance.id, e.what());
+        placeholders_resolved = false;
+    }
+
+    // If placeholder resolution failed, fail the task instead of dispatching
+    // with unresolved ${var} that the shell would misinterpret.
+    if (!placeholders_resolved) {
+        task_instance_dao_.updateStatus(task_instance.id, "FAILED");
+        return common::result::Result<void>::failure(
+            "Placeholder resolution failed for task instance " + task_instance.id);
     }
 
     request.set_workflow_instance_id(task_instance.workflow_instance_id);

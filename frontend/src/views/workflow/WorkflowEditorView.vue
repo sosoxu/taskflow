@@ -135,7 +135,7 @@
             style="margin-bottom: 12px"
           >
             <template #title>
-              覆盖任务定义中的参数默认值。这些值会在执行时替换配置中的 <code>${"{"}var_name{"}"}</code> 占位符。
+              覆盖任务定义中的参数默认值。这些值会在执行时替换配置中的 <code>${"{"}var_name{"}"}</code> 或 <code>{"{"}var_name{"}"}</code> 占位符。
             </template>
           </el-alert>
           <div class="custom-param-editor">

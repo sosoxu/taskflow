@@ -106,7 +106,7 @@
         <template v-if="form.type === 'command'">
           <el-divider content-position="left">Command 配置</el-divider>
           <el-form-item label="命令">
-            <el-input v-model="form.config.command" placeholder="请输入命令，支持 ${var} 占位符" />
+            <el-input v-model="form.config.command" placeholder="请输入命令，支持 ${var} 或 {var} 占位符" />
           </el-form-item>
           <el-form-item label="工作目录">
             <el-input v-model="form.config.working_dir" placeholder="留空使用默认目录" />
@@ -150,19 +150,19 @@
         <template v-if="form.type === 'sql'">
           <el-divider content-position="left">SQL 配置</el-divider>
           <el-form-item label="数据库地址">
-            <el-input v-model="form.config.db_host" placeholder="请输入数据库地址，支持 ${var} 占位符" />
+            <el-input v-model="form.config.db_host" placeholder="请输入数据库地址，支持 ${var} 或 {var} 占位符" />
           </el-form-item>
           <el-form-item label="端口">
             <el-input-number v-model="form.config.db_port" :min="1" :max="65535" />
           </el-form-item>
           <el-form-item label="数据库名">
-            <el-input v-model="form.config.db_name" placeholder="请输入数据库名，支持 ${var} 占位符" />
+            <el-input v-model="form.config.db_name" placeholder="请输入数据库名，支持 ${var} 或 {var} 占位符" />
           </el-form-item>
           <el-form-item label="用户名">
-            <el-input v-model="form.config.db_user" placeholder="请输入用户名，支持 ${var} 占位符" />
+            <el-input v-model="form.config.db_user" placeholder="请输入用户名，支持 ${var} 或 {var} 占位符" />
           </el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="form.config.db_password" type="password" show-password placeholder="请输入密码，支持 ${var} 占位符" />
+            <el-input v-model="form.config.db_password" type="password" show-password placeholder="请输入密码，支持 ${var} 或 {var} 占位符" />
           </el-form-item>
           <el-form-item label="SQL 语句">
             <div ref="sqlEditorRef" class="code-editor"></div>
@@ -178,7 +178,7 @@
           style="margin-bottom: 12px"
         >
           <template #title>
-            在配置字段中使用 <code>${"{"}var_name{"}"}</code> 占位符，然后在下方定义参数默认值。执行时可通过工作流参数覆盖传入实际值。
+            在配置字段中使用 <code>${"{"}var_name{"}"}</code> 或 <code>{"{"}var_name{"}"}</code> 占位符，然后在下方定义参数默认值。执行时可通过工作流参数覆盖传入实际值。
           </template>
         </el-alert>
         <div class="param-editor">
