@@ -8,6 +8,7 @@ export interface TaskItem {
   max_retries: number
   retry_interval: number
   resource_tags: string[]
+  parameters_json: Record<string, unknown>
   creator_id: string
   version: number
   created_at: string
@@ -39,6 +40,7 @@ export interface TaskCreateRequest {
   max_retries?: number
   retry_interval?: number
   resource_tags?: string[]
+  parameters_json?: Record<string, unknown>
 }
 
 export interface TaskUpdateRequest extends Partial<TaskCreateRequest> {}

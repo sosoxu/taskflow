@@ -35,6 +35,28 @@
           </el-descriptions>
         </el-card>
 
+        <!-- Parameters definition -->
+        <el-card v-if="task.parameters_json && Object.keys(task.parameters_json).length > 0" class="config-card" shadow="never">
+          <template #header>
+            <span class="card-title">参数定义</span>
+          </template>
+          <el-descriptions :column="1" border>
+            <el-descriptions-item v-for="(value, key) in task.parameters_json" :key="key" :label="String(key)">
+              {{ typeof value === 'string' ? value : JSON.stringify(value) }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-top: 8px"
+          >
+            <template #title>
+              这些参数可在配置字段中通过 <code>${"{"}{{ Object.keys(task.parameters_json).join('{"}"}、${"{"}') }}{"}"}</code> 引用，执行时可通过工作流参数覆盖传入实际值。
+            </template>
+          </el-alert>
+        </el-card>
+
         <el-card class="config-card" shadow="never">
           <template #header>
             <span class="card-title">任务配置</span>

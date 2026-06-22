@@ -106,7 +106,7 @@
         <template v-if="form.type === 'command'">
           <el-divider content-position="left">Command 配置</el-divider>
           <el-form-item label="命令">
-            <el-input v-model="form.config.command" placeholder="请输入命令" />
+            <el-input v-model="form.config.command" placeholder="请输入命令，支持 ${var} 占位符" />
           </el-form-item>
           <el-form-item label="工作目录">
             <el-input v-model="form.config.working_dir" placeholder="留空使用默认目录" />
@@ -150,24 +150,46 @@
         <template v-if="form.type === 'sql'">
           <el-divider content-position="left">SQL 配置</el-divider>
           <el-form-item label="数据库地址">
-            <el-input v-model="form.config.db_host" placeholder="请输入数据库地址" />
+            <el-input v-model="form.config.db_host" placeholder="请输入数据库地址，支持 ${var} 占位符" />
           </el-form-item>
           <el-form-item label="端口">
             <el-input-number v-model="form.config.db_port" :min="1" :max="65535" />
           </el-form-item>
           <el-form-item label="数据库名">
-            <el-input v-model="form.config.db_name" placeholder="请输入数据库名" />
+            <el-input v-model="form.config.db_name" placeholder="请输入数据库名，支持 ${var} 占位符" />
           </el-form-item>
           <el-form-item label="用户名">
-            <el-input v-model="form.config.db_user" placeholder="请输入用户名" />
+            <el-input v-model="form.config.db_user" placeholder="请输入用户名，支持 ${var} 占位符" />
           </el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="form.config.db_password" type="password" show-password placeholder="请输入密码" />
+            <el-input v-model="form.config.db_password" type="password" show-password placeholder="请输入密码，支持 ${var} 占位符" />
           </el-form-item>
           <el-form-item label="SQL 语句">
             <div ref="sqlEditorRef" class="code-editor"></div>
           </el-form-item>
         </template>
+
+        <!-- Parameters definition -->
+        <el-divider content-position="left">参数定义</el-divider>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+        >
+          <template #title>
+            在配置字段中使用 <code>${"{"}var_name{"}"}</code> 占位符，然后在下方定义参数默认值。执行时可通过工作流参数覆盖传入实际值。
+          </template>
+        </el-alert>
+        <div class="param-editor">
+          <div v-for="(param, index) in paramEntries" :key="index" class="param-row">
+            <el-input v-model="param.key" placeholder="参数名" style="width: 160px" @change="onParamKeyChange" />
+            <span class="param-eq">=</span>
+            <el-input v-model="param.value" placeholder="默认值（留空则执行时必须传入）" style="flex: 1" />
+            <el-button :icon="Delete" circle size="small" @click="removeParam(index)" />
+          </div>
+          <el-button size="small" :icon="Plus" @click="addParam">添加参数</el-button>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -310,6 +332,45 @@ const form = reactive({
   config: defaultConfig(),
 })
 
+// Parameters editor state
+interface ParamEntry { key: string; value: string }
+const paramEntries = ref<ParamEntry[]>([])
+
+function addParam() {
+  paramEntries.value.push({ key: '', value: '' })
+}
+
+function removeParam(index: number) {
+  paramEntries.value.splice(index, 1)
+}
+
+function onParamKeyChange() {
+  // Trigger reactivity
+  paramEntries.value = [...paramEntries.value]
+}
+
+function paramsFromEntries(): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  for (const entry of paramEntries.value) {
+    const key = entry.key.trim()
+    if (key) {
+      params[key] = entry.value
+    }
+  }
+  return params
+}
+
+function entriesFromParams(params: Record<string, unknown> | undefined) {
+  if (!params || typeof params !== 'object') {
+    paramEntries.value = []
+    return
+  }
+  paramEntries.value = Object.entries(params).map(([key, value]) => ({
+    key,
+    value: typeof value === 'string' ? value : JSON.stringify(value),
+  }))
+}
+
 const formRules = {
   name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
   type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
@@ -325,6 +386,7 @@ function resetForm() {
   form.resource_tags = []
   form.config = defaultConfig()
   envKeyTemp.value = {}
+  paramEntries.value = []
 }
 
 function handleTypeChange() {
@@ -440,6 +502,8 @@ async function handleEdit(row: TaskItem) {
         envKeyTemp.value[key] = key
       }
     }
+    // Populate parameters from task
+    entriesFromParams(task.parameters_json)
     destroyEditors()
     dialogVisible.value = true
     nextTick(() => {
@@ -523,6 +587,7 @@ async function handleSubmit() {
       retry_interval: form.retry_interval,
       resource_tags: form.resource_tags,
       config_json: cleanConfig,
+      parameters_json: paramsFromEntries(),
     }
     if (isEdit.value) {
       await updateTask(editingId.value, payload)
@@ -627,6 +692,22 @@ onBeforeUnmount(() => {
 }
 
 .env-eq {
+  color: #909399;
+  font-weight: 600;
+}
+
+.param-editor {
+  width: 100%;
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.param-eq {
   color: #909399;
   font-weight: 600;
 }

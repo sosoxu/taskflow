@@ -113,6 +113,45 @@
         />
       </div>
     </el-card>
+
+    <!-- Trigger dialog with param_overrides -->
+    <el-dialog v-model="triggerDialogVisible" title="触发工作流" width="600px">
+      <p style="margin-bottom: 12px">确定要手动触发此工作流吗？</p>
+      <template v-if="triggerParamEntries.length > 0">
+        <el-divider content-position="left">运行时参数</el-divider>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+        >
+          <template #title>
+            以下参数来自任务定义中的占位符变量，请输入本次执行的值。留空则使用默认值。
+          </template>
+        </el-alert>
+        <div class="trigger-param-editor">
+          <div v-for="(param, index) in triggerParamEntries" :key="index" class="trigger-param-row">
+            <el-input :model-value="param.key" disabled style="width: 160px" />
+            <span class="trigger-param-eq">=</span>
+            <el-input v-model="param.value" :placeholder="param.defaultValue ? `默认值: ${param.defaultValue}` : '请输入参数值'" style="flex: 1" />
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-top: 8px"
+        >
+          <template #title>此工作流无需运行时参数</template>
+        </el-alert>
+      </template>
+      <template #footer>
+        <el-button @click="triggerDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="triggering" @click="confirmTrigger">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -122,6 +161,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getWorkflow, triggerWorkflow } from '../../api/workflow'
 import { getWorkflowInstances } from '../../api/instance'
+import { getTask } from '../../api/task'
 import { formatTime } from '../../utils/format'
 import type { WorkflowItem } from '../../types/workflow'
 import type { WorkflowInstance } from '../../types/instance'
@@ -172,6 +212,38 @@ const instancePageSize = ref(10)
 const instanceTotal = ref(0)
 
 const triggering = ref(false)
+
+// Trigger parameter entries
+interface TriggerParamEntry { key: string; value: string; defaultValue: string }
+const triggerParamEntries = ref<TriggerParamEntry[]>([])
+const triggerDialogVisible = ref(false)
+
+async function loadTriggerParams() {
+  triggerParamEntries.value = []
+  if (!workflow.value?.dag_json?.nodes) return
+  const paramMap = new Map<string, string>()
+  for (const node of workflow.value.dag_json.nodes) {
+    if (!node.task_id) continue
+    try {
+      const { data: taskResp } = await getTask(node.task_id)
+      const task = taskResp.data
+      if (task?.parameters_json && typeof task.parameters_json === 'object') {
+        for (const [key, val] of Object.entries(task.parameters_json)) {
+          if (!paramMap.has(key)) {
+            paramMap.set(key, typeof val === 'string' ? val : JSON.stringify(val))
+          }
+        }
+      }
+    } catch {
+      // Skip tasks that can't be loaded
+    }
+  }
+  triggerParamEntries.value = Array.from(paramMap.entries()).map(([key, defaultValue]) => ({
+    key,
+    value: '',
+    defaultValue,
+  }))
+}
 
 function strategyTagType(strategy?: string) {
   const map: Record<string, string> = {
@@ -271,20 +343,24 @@ function handleSizeChange() {
 }
 
 async function handleTrigger() {
-  try {
-    await ElMessageBox.confirm('确定要手动触发此工作流吗？', '确认触发', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
+  // Load params and show dialog
+  triggerParamEntries.value = []
+  triggerDialogVisible.value = true
+  await loadTriggerParams()
+}
 
+async function confirmTrigger() {
   triggering.value = true
   try {
-    await triggerWorkflow(workflowId.value)
+    const paramOverrides: Record<string, string> = {}
+    for (const entry of triggerParamEntries.value) {
+      if (entry.value.trim()) {
+        paramOverrides[entry.key] = entry.value.trim()
+      }
+    }
+    await triggerWorkflow(workflowId.value, Object.keys(paramOverrides).length > 0 ? paramOverrides : undefined)
     ElMessage.success('触发成功')
+    triggerDialogVisible.value = false
     fetchInstances()
   } catch {
     ElMessage.error('触发失败')
@@ -411,5 +487,21 @@ watch(workflowId, (newId, oldId) => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.trigger-param-editor {
+  width: 100%;
+}
+
+.trigger-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.trigger-param-eq {
+  color: #909399;
+  font-weight: 600;
 }
 </style>

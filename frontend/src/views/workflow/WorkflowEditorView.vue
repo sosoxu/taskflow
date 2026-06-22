@@ -125,7 +125,30 @@
           <el-form-item label="重试间隔覆盖">
             <el-input-number v-model="nodeOverrides.retry_interval" :min="0" :max="3600" placeholder="留空使用默认" clearable />
           </el-form-item>
-          <el-form-item>
+
+          <!-- Custom parameter overrides -->
+          <el-divider content-position="left">自定义参数覆盖</el-divider>
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 12px"
+          >
+            <template #title>
+              覆盖任务定义中的参数默认值。这些值会在执行时替换配置中的 <code>${"{"}var_name{"}"}</code> 占位符。
+            </template>
+          </el-alert>
+          <div class="custom-param-editor">
+            <div v-for="(param, index) in customParamEntries" :key="index" class="custom-param-row">
+              <el-input v-model="param.key" placeholder="参数名" style="width: 160px" />
+              <span class="custom-param-eq">=</span>
+              <el-input v-model="param.value" placeholder="覆盖值" style="flex: 1" />
+              <el-button :icon="Delete" circle size="small" @click="removeCustomParam(index)" />
+            </div>
+            <el-button size="small" :icon="Plus" @click="addCustomParam">添加参数覆盖</el-button>
+          </div>
+
+          <el-form-item style="margin-top: 16px">
             <el-button size="small" type="primary" @click="applyOverrides">应用</el-button>
             <el-button size="small" @click="clearOverrides">清除覆盖</el-button>
           </el-form-item>
@@ -139,7 +162,7 @@
 import { ref, shallowRef, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Plus } from '@element-plus/icons-vue'
 import { VueFlow, Handle, Position, type Node, type Edge } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -266,6 +289,18 @@ const nodeOverrides = reactive({
   retry_interval: undefined as number | undefined,
 })
 
+// Custom parameter overrides for the selected node
+interface CustomParamEntry { key: string; value: string }
+const customParamEntries = ref<CustomParamEntry[]>([])
+
+function addCustomParam() {
+  customParamEntries.value.push({ key: '', value: '' })
+}
+
+function removeCustomParam(index: number) {
+  customParamEntries.value.splice(index, 1)
+}
+
 // Internal data store for DAG nodes (to track task_id, param_overrides etc.)
 const dagNodeDataMap = ref<Map<string, DagNodeData>>(new Map())
 
@@ -343,6 +378,14 @@ function onNodeClick({ node }: { node: Node }) {
     nodeOverrides.timeout = data.param_overrides.timeout as number | undefined
     nodeOverrides.max_retries = data.param_overrides.max_retries as number | undefined
     nodeOverrides.retry_interval = data.param_overrides.retry_interval as number | undefined
+    // Load custom param overrides (exclude timeout/max_retries/retry_interval)
+    const reservedKeys = new Set(['timeout', 'max_retries', 'retry_interval'])
+    customParamEntries.value = Object.entries(data.param_overrides)
+      .filter(([key]) => !reservedKeys.has(key))
+      .map(([key, value]) => ({
+        key,
+        value: typeof value === 'string' ? value : JSON.stringify(value),
+      }))
   } else {
     clearOverrides()
   }
@@ -423,10 +466,17 @@ function applyOverrides() {
   if (!selectedNodeId.value) return
   const data = dagNodeDataMap.value.get(selectedNodeId.value)
   if (!data) return
-  const overrides: Record<string, number> = {}
+  const overrides: Record<string, unknown> = {}
   if (nodeOverrides.timeout !== undefined) overrides.timeout = nodeOverrides.timeout
   if (nodeOverrides.max_retries !== undefined) overrides.max_retries = nodeOverrides.max_retries
   if (nodeOverrides.retry_interval !== undefined) overrides.retry_interval = nodeOverrides.retry_interval
+  // Add custom parameter overrides
+  for (const entry of customParamEntries.value) {
+    const key = entry.key.trim()
+    if (key) {
+      overrides[key] = entry.value
+    }
+  }
   data.param_overrides = Object.keys(overrides).length > 0 ? overrides : undefined
   // Fix #227: applying overrides modifies node data, mark as dirty.
   dirty.value = true
@@ -437,6 +487,7 @@ function clearOverrides() {
   nodeOverrides.timeout = undefined
   nodeOverrides.max_retries = undefined
   nodeOverrides.retry_interval = undefined
+  customParamEntries.value = []
   if (selectedNodeId.value) {
     const data = dagNodeDataMap.value.get(selectedNodeId.value)
     // Fix #227: only mark dirty if there were actual overrides to clear.
@@ -801,5 +852,21 @@ watch(workflowId, (newId, oldId) => {
 .toolbar-hint {
   font-size: 12px;
   color: #909399;
+}
+
+.custom-param-editor {
+  width: 100%;
+}
+
+.custom-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.custom-param-eq {
+  color: #909399;
+  font-weight: 600;
 }
 </style>
