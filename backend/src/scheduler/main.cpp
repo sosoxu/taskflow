@@ -198,10 +198,13 @@ int main(int argc, char* argv[]) {
     spdlog::info("定时调度已启动");
 
     // 配置 Drogon HTTP 服务
+    // Fix #312: Use configurable thread count (default 16, was hardcoded 4).
+    // More IO threads improve concurrent login throughput since bcrypt
+    // password verification (~100ms) blocks the calling IO thread.
     drogon::app()
         .setLogPath("./logs")
         .addListener("0.0.0.0", config.server.http_port)
-        .setThreadNum(4);
+        .setThreadNum(config.server.thread_num);
 
     // Fix #182: Parse allowed CORS origins from config (comma-separated).
     // If the list is non-empty and the request Origin is in it, echo that

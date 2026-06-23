@@ -22,6 +22,8 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         auto s = root["server"];
         if (s["http_port"]) config.server.http_port = s["http_port"].as<int>();
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
+        // Fix #312: configurable IO thread count
+        if (s["thread_num"]) config.server.thread_num = s["thread_num"].as<int>();
         // Fix #182: allowed CORS origins (comma-separated)
         if (s["cors_origins"]) config.server.cors_origins = s["cors_origins"].as<std::string>();
     }
@@ -109,6 +111,10 @@ void SchedulerConfig::validate() const {
     }
     if (server.grpc_port <= 0 || server.grpc_port > 65535) {
         throw std::runtime_error("配置错误: server.grpc_port 无效");
+    }
+    // Fix #312: validate thread_num
+    if (server.thread_num < 1 || server.thread_num > 256) {
+        throw std::runtime_error("配置错误: server.thread_num 必须在 1-256 之间");
     }
     if (database.min_connections <= 0) {
         throw std::runtime_error("配置错误: database.min_connections 必须大于 0");

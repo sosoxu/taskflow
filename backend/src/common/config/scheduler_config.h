@@ -75,6 +75,10 @@ struct TlsConfig {
 struct ServerConfig {
     int http_port = 8080;
     int grpc_port = 50051;
+    // Fix #312: Configurable drogon IO thread count. Default 16 (was hardcoded 4).
+    // bcrypt password verification (~100ms) blocks IO threads; more threads
+    // improve concurrent login throughput.
+    int thread_num = 16;
     TlsConfig tls;
     // Fix #182: Comma-separated list of allowed CORS origins. When non-empty
     // and the request Origin matches an entry, that Origin is echoed back;
