@@ -158,6 +158,7 @@ CREATE INDEX idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE en
 
 -- ============================================================
 -- 初始管理员用户（密码: admin123，bcrypt hash）
+-- Fix #309: Replace the incorrect $2a$ hash with a verified $2b$ hash.
 -- ============================================================
 INSERT INTO users (username, password_hash, role)
-VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin');
+VALUES ('admin', '$2b$10$ueg7X6rg6l88Nt3Hcshq8.GYTQvwJWgufhC25dvYfKJJ7vPokQaBa', 'admin');

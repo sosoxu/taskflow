@@ -551,9 +551,20 @@ common::result::Result<void> DagDriver::dispatchTask(
     // Resolve ${var} and {var} placeholders in config using task.parameters_json + param_overrides
     bool placeholders_resolved = true;
     try {
-        nlohmann::json params = task.parameters_json;
-        if (!params.is_object()) {
-            params = nlohmann::json::object();
+        // Fix #307: Extract default values from parameter definitions.
+        // task.parameters_json stores parameter metadata like
+        // {"duration": {"default": 1, "type": "number"}}, but we need the
+        // actual values like {"duration": 1} for placeholder substitution.
+        nlohmann::json raw_params = task.parameters_json;
+        nlohmann::json params = nlohmann::json::object();
+        if (raw_params.is_object()) {
+            for (auto& [key, value] : raw_params.items()) {
+                if (value.is_object() && value.contains("default")) {
+                    params[key] = value["default"];
+                } else {
+                    params[key] = value;
+                }
+            }
         }
 
         // Merge DAG node param_overrides into params (override default parameters)

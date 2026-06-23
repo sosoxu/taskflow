@@ -343,6 +343,16 @@ common::result::Result<void> WorkflowService::deleteWorkflow(
             "工作流有正在运行的实例，无法删除。请先取消或等待实例完成。");
     }
 
+    // Fix #308: Also check for completed instances. Deleting a workflow with
+    // any instances (even completed ones) would orphan them and break data
+    // integrity (the workflow_id FK would point to a soft-deleted workflow,
+    // making the instance detail page unable to show the workflow name/DAG).
+    auto totalCount = workflow_instance_dao_.countByWorkflow(id);
+    if (totalCount.ok() && totalCount.value() > 0) {
+        return common::result::Result<void>::failure(
+            "工作流存在执行实例，无法删除。请先删除相关实例。");
+    }
+
     // Soft delete the workflow
     auto deleteResult = workflow_dao_.softDelete(id);
     if (!deleteResult.ok()) {
