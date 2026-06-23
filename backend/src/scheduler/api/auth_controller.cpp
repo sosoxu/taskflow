@@ -136,7 +136,9 @@ void AuthController::logout(
     // Fallback: try to get access_token from request body
     if (access_token.empty()) {
         auto json = req->getJsonObject();
-        if (json && (*json).isMember("access_token")) {
+        // Fix #311: Guard isMember with isObject to prevent unhandled
+        // Json::LogicError exception under concurrent load.
+        if (json && (*json).isObject() && (*json).isMember("access_token")) {
             access_token = (*json)["access_token"].asString();
         }
     }

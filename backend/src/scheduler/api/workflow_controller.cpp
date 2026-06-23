@@ -3,6 +3,7 @@
 #include <cctype>
 #include <optional>
 #include <drogon/HttpResponse.h>
+#include <spdlog/spdlog.h>
 
 namespace taskflow::scheduler::api {
 
@@ -67,6 +68,11 @@ void WorkflowController::createWorkflow(
     auto json = req->getJsonObject();
     if (!json) {
         sendError(std::move(callback), 400, 40001, "Request body must be JSON");
+        return;
+    }
+    // Fix #311: Ensure the parsed JSON is an object before calling isMember.
+    if (!(*json).isObject()) {
+        sendError(std::move(callback), 400, 40001, "Request body must be a JSON object");
         return;
     }
 
@@ -190,6 +196,11 @@ void WorkflowController::updateWorkflow(
         sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
+    // Fix #311: Ensure the parsed JSON is an object before calling isMember.
+    if (!(*json).isObject()) {
+        sendError(std::move(callback), 400, 40001, "Request body must be a JSON object");
+        return;
+    }
 
     std::string name = (*json).isMember("name") ? (*json)["name"].asString() : "";
     std::string description = (*json).get("description", "").asString();
@@ -279,6 +290,11 @@ void WorkflowController::triggerWorkflow(
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
+    // Fix #311: Wrap the entire handler in try-catch to prevent unhandled
+    // Json::LogicError exceptions (from isMember on non-object Json::Value
+    // under concurrent load) from causing HTTP 500 with empty body.
+    try {
+
     if (!isValidUUID(id)) {
         sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
         return;
@@ -290,7 +306,11 @@ void WorkflowController::triggerWorkflow(
     // Read param_overrides from request body
     nlohmann::json param_overrides = nlohmann::json::object();
     auto json = req->getJsonObject();
-    if (json && (*json).isMember("param_overrides")) {
+    // Fix #311: Guard isMember with isObject — under concurrent load,
+    // getJsonObject() can return a non-objectValue Json::Value, and
+    // isMember() throws Json::LogicError on non-object types, causing
+    // an unhandled exception → HTTP 500.
+    if (json && (*json).isObject() && (*json).isMember("param_overrides")) {
         param_overrides = jsoncppToNlohmann((*json)["param_overrides"]);
     }
 
@@ -315,6 +335,13 @@ void WorkflowController::triggerWorkflow(
     }
 
     sendSuccess(std::move(callback), result.value());
+
+    } catch (const std::exception& e) {
+        // Fix #311: Catch any Json::LogicError or other exceptions to prevent
+        // HTTP 500 with empty body. Log the error for diagnosis.
+        spdlog::error("triggerWorkflow exception: {}", e.what());
+        sendError(std::move(callback), 500, 50001, "Internal server error");
+    }
 }
 
 }  // namespace taskflow::scheduler::api

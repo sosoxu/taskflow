@@ -90,6 +90,11 @@ void UserController::createUser(
         sendError(std::move(callback), 400, 40001, "Request body must be JSON");
         return;
     }
+    // Fix #311: Ensure the parsed JSON is an object before calling isMember.
+    if (!(*json).isObject()) {
+        sendError(std::move(callback), 400, 40001, "Request body must be a JSON object");
+        return;
+    }
 
     std::string username = (*json)["username"].asString();
     std::string password = (*json)["password"].asString();
@@ -117,6 +122,11 @@ void UserController::updateUserRole(
     auto json = req->getJsonObject();
     if (!json) {
         sendError(std::move(callback), 400, 40001, "Request body must be JSON");
+        return;
+    }
+    // Fix #311: Ensure the parsed JSON is an object before calling isMember.
+    if (!(*json).isObject()) {
+        sendError(std::move(callback), 400, 40001, "Request body must be a JSON object");
         return;
     }
 
