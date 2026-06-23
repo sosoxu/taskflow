@@ -122,6 +122,11 @@ void WorkflowController::listWorkflows(
     if (!page_size_str.empty()) {
         try { page_size = std::stoi(page_size_str); } catch (...) {}
     }
+    // Fix #314: validate pagination parameters
+    if (page < 1 || page_size < 1 || page_size > 100) {
+        sendError(std::move(callback), 400, 40002, "page must be >= 1 and page_size must be between 1 and 100");
+        return;
+    }
 
     std::string keyword = std::string(req->getParameter("keyword"));
 

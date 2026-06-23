@@ -297,6 +297,11 @@ void InstanceController::listInstances(
     if (!page_size_str.empty()) {
         try { page_size = std::stoi(page_size_str); } catch (...) {}
     }
+    // Fix #314: validate pagination parameters
+    if (page < 1 || page_size < 1 || page_size > 100) {
+        sendError(std::move(callback), 400, 40002, "page must be >= 1 and page_size must be between 1 and 100");
+        return;
+    }
 
     std::string user_id = req->getAttributes()->get<std::string>("user_id");
     std::string role = req->getAttributes()->get<std::string>("role");
@@ -335,6 +340,11 @@ void InstanceController::listAllInstances(
     }
     if (!page_size_str.empty()) {
         try { page_size = std::stoi(page_size_str); } catch (...) {}
+    }
+    // Fix #314: validate pagination parameters
+    if (page < 1 || page_size < 1 || page_size > 100) {
+        sendError(std::move(callback), 400, 40002, "page must be >= 1 and page_size must be between 1 and 100");
+        return;
     }
 
     std::string user_id = req->getAttributes()->get<std::string>("user_id");

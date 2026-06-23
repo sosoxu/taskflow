@@ -199,6 +199,35 @@ public:
         return true;
     }
 
+    // Fix #313: Atomically check-and-add. Returns true if the jti was NOT
+    // previously blacklisted (i.e. this is the first caller), false if it
+    // was already blacklisted. This closes the TOCTOU race in refresh token
+    // rotation where two concurrent requests could both pass isBlacklisted()
+    // before either called add().
+    bool tryAddIfNotBlacklisted(const std::string& jti, int64_t exp_timestamp = 0) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        int64_t now = nowSeconds();
+        // Purge already-expired entries to bound memory usage.
+        for (auto it = blacklisted_.begin(); it != blacklisted_.end(); ) {
+            if (it->second < now) {
+                it = blacklisted_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        auto it = blacklisted_.find(jti);
+        if (it != blacklisted_.end()) {
+            // Already blacklisted (and not expired, since expired entries
+            // were purged above).
+            return false;
+        }
+        if (exp_timestamp == 0) {
+            exp_timestamp = now + 86400;  // default 24h
+        }
+        blacklisted_[jti] = exp_timestamp;
+        return true;
+    }
+
 private:
     TokenBlacklist() = default;
 

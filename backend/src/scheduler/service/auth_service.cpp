@@ -137,12 +137,14 @@ common::result::Result<nlohmann::json> AuthService::refreshToken(
 
     // Blacklist the old refresh token's jti to prevent reuse (token rotation)
     if (!payload.jti.empty()) {
-        // Check if this refresh token has already been used
-        if (common::util::TokenBlacklist::instance().isBlacklisted(payload.jti)) {
+        // Fix #313: Use atomic check-and-add to close the TOCTOU race where
+        // two concurrent requests could both pass isBlacklisted() before
+        // either called add(). tryAddIfNotBlacklisted returns true only for
+        // the first caller.
+        if (!common::util::TokenBlacklist::instance().tryAddIfNotBlacklisted(payload.jti, payload.exp)) {
             return common::result::Result<nlohmann::json>::failure(
                 "Refresh token has already been used");
         }
-        common::util::TokenBlacklist::instance().add(payload.jti, payload.exp);
     }
 
     // Generate new tokens (only access token is returned in response)
