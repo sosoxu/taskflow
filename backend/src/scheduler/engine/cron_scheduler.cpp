@@ -133,9 +133,11 @@ void CronScheduler::triggerCronJob(const common::models::CronJob& cron_job) {
 
     const auto& workflow = workflow_result.value();
 
-    // Create a WorkflowInstance
+    // Create a WorkflowInstance. Fix #152: pass dag_snapshot so the instance
+    // uses the DAG definition current at trigger time.
     auto instance_result = workflow_instance_dao_.create(
-        workflow.id, workflow.version, "cron", workflow.creator_id);
+        workflow.id, workflow.version, "cron", workflow.creator_id,
+        nlohmann::json::object(), workflow.dag_json);
     if (!instance_result.ok()) {
         spdlog::error("CronScheduler: failed to create workflow instance: {}",
                       instance_result.error());

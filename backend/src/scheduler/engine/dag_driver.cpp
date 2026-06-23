@@ -97,16 +97,31 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
         node_to_instance[ti.node_id] = ti;
     }
 
-    // 3. Get the Workflow by workflow_id to get dag_json and schedule_strategy
+    // 3. Get the DAG definition. Fix #152: prefer the instance's dag_snapshot
+    // (captured at trigger time) over the live workflow's dag_json, so that
+    // in-flight instances are not affected by concurrent workflow edits.
+    nlohmann::json dag_json;
+    if (!instance.dag_snapshot.is_null() && instance.dag_snapshot.is_object()) {
+        dag_json = instance.dag_snapshot;
+    } else {
+        // Fallback: no snapshot (e.g. instances created before the migration).
+        auto workflow_result = workflow_dao_.findById(instance.workflow_id);
+        if (!workflow_result.ok()) {
+            spdlog::error("DagDriver: failed to find workflow {}: {}",
+                          instance.workflow_id, workflow_result.error());
+            return;
+        }
+        dag_json = workflow_result.value().dag_json;
+    }
+
+    // We still need the workflow for schedule_strategy and param_overrides.
     auto workflow_result = workflow_dao_.findById(instance.workflow_id);
     if (!workflow_result.ok()) {
         spdlog::error("DagDriver: failed to find workflow {}: {}",
                       instance.workflow_id, workflow_result.error());
         return;
     }
-
     const auto& workflow = workflow_result.value();
-    const auto& dag_json = workflow.dag_json;
 
     // Fix #155: Build node_id -> param_overrides map so timeout detection can
     // honour node-level timeout overrides (验收标准 4.3).
@@ -304,7 +319,7 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
             continue;
         }
 
-        auto dispatch_result = dispatchTask(it->second, workflow);
+        auto dispatch_result = dispatchTask(it->second, workflow, dag_json);
         if (!dispatch_result.ok()) {
             spdlog::error("DagDriver: failed to dispatch task instance {} (node {}): {}",
                           it->second.id, node_id, dispatch_result.error());
@@ -385,7 +400,8 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
 
 common::result::Result<void> DagDriver::dispatchTask(
     const common::models::TaskInstance& task_instance,
-    const common::models::Workflow& workflow) {
+    const common::models::Workflow& workflow,
+    const nlohmann::json& dag_json) {
     // 1. Get task info from task_dao_
     auto task_result = task_dao_.findById(task_instance.task_id);
     if (!task_result.ok()) {
@@ -499,9 +515,9 @@ common::result::Result<void> DagDriver::dispatchTask(
 
     // Merge param_overrides from DAG node
     try {
-        const auto& dag = workflow.dag_json;
-        if (dag.contains("nodes") && dag["nodes"].is_array()) {
-            for (const auto& node : dag["nodes"]) {
+        // Fix #152: use dag_json (from snapshot) instead of workflow.dag_json
+        if (dag_json.contains("nodes") && dag_json["nodes"].is_array()) {
+            for (const auto& node : dag_json["nodes"]) {
                 if (node.contains("id") && node["id"].is_string() &&
                     node["id"].get<std::string>() == task_instance.node_id) {
                     if (node.contains("param_overrides") && node["param_overrides"].is_object()) {
@@ -542,9 +558,9 @@ common::result::Result<void> DagDriver::dispatchTask(
 
         // Merge DAG node param_overrides into params (override default parameters)
         try {
-            const auto& dag = workflow.dag_json;
-            if (dag.contains("nodes") && dag["nodes"].is_array()) {
-                for (const auto& node : dag["nodes"]) {
+            // Fix #152: use dag_json (from snapshot) instead of workflow.dag_json
+            if (dag_json.contains("nodes") && dag_json["nodes"].is_array()) {
+                for (const auto& node : dag_json["nodes"]) {
                     if (node.contains("id") && node["id"].is_string() &&
                         node["id"].get<std::string>() == task_instance.node_id) {
                         if (node.contains("param_overrides") && node["param_overrides"].is_object()) {

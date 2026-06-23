@@ -13,7 +13,8 @@ public:
         int workflow_version,
         const std::string& trigger_type,
         const std::string& creator_id,
-        const nlohmann::json& param_overrides = nlohmann::json::object());
+        const nlohmann::json& param_overrides = nlohmann::json::object(),
+        const nlohmann::json& dag_snapshot = nlohmann::json());
 
     common::result::Result<common::models::WorkflowInstance> findById(const std::string& id);
 

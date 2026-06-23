@@ -238,14 +238,21 @@ common::result::Result<void> InstanceService::retryTask(
         node_to_instance[ti.node_id] = ti;
     }
 
-    // Get the workflow's dag_json to traverse downstream nodes
-    auto workflow_result = workflow_dao_.findById(instance.workflow_id);
-    if (workflow_result.ok()) {
-        const auto& dag_json = workflow_result.value().dag_json;
-        resetDownstreamTasks(dag_json, task_instance.node_id, node_to_instance);
+    // Fix #152: Use dag_snapshot from the instance (captured at trigger time)
+    // instead of the live workflow's dag_json, so retry uses the same DAG
+    // definition that was active when the instance was created.
+    if (!instance.dag_snapshot.is_null() && instance.dag_snapshot.is_object()) {
+        resetDownstreamTasks(instance.dag_snapshot, task_instance.node_id, node_to_instance);
     } else {
-        spdlog::warn("InstanceService: failed to get workflow {} for DAG traversal: {}",
-                     instance.workflow_id, workflow_result.error());
+        // Fallback for instances created before dag_snapshot migration
+        auto workflow_result = workflow_dao_.findById(instance.workflow_id);
+        if (workflow_result.ok()) {
+            const auto& dag_json = workflow_result.value().dag_json;
+            resetDownstreamTasks(dag_json, task_instance.node_id, node_to_instance);
+        } else {
+            spdlog::warn("InstanceService: failed to get workflow {} for DAG traversal: {}",
+                         instance.workflow_id, workflow_result.error());
+        }
     }
 
     // If the workflow instance was in a terminal state, reset it to RUNNING

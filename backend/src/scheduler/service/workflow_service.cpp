@@ -430,13 +430,16 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
             instance_id = common::util::generateUuid();
 
+            // Fix #152: Save dag_snapshot so the instance uses the DAG
+            // definition that was current at trigger time.
             auto instRes = txn.exec_params(
                 "INSERT INTO workflow_instances "
-                "(id, workflow_id, workflow_version, status, trigger_type, param_overrides, creator_id) "
-                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6) "
+                "(id, workflow_id, workflow_version, status, trigger_type, "
+                "param_overrides, dag_snapshot, creator_id) "
+                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6::jsonb, $7) "
                 "RETURNING id",
                 instance_id, workflow_id, workflow.version, "manual",
-                param_overrides.dump(), creator_id);
+                param_overrides.dump(), workflow.dag_json.dump(), creator_id);
 
             if (instRes.empty()) {
                 return common::result::Result<std::string>::failure("创建工作流实例失败");

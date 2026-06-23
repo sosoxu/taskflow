@@ -14,6 +14,7 @@ struct WorkflowInstance {
     std::string started_at;
     std::string finished_at;
     nlohmann::json param_overrides;
+    nlohmann::json dag_snapshot;  // Fix #152: snapshot of dag_json at instance creation time
     std::string creator_id;
     std::string created_at;
 
@@ -31,6 +32,8 @@ struct WorkflowInstance {
         instance.param_overrides = row["param_overrides"].is_null()
             ? nlohmann::json::object()
             : nlohmann::json::parse(row["param_overrides"].as<std::string>());
+        instance.dag_snapshot = row["dag_snapshot"].is_null()
+            ? nlohmann::json() : nlohmann::json::parse(row["dag_snapshot"].as<std::string>());
         instance.creator_id = row["creator_id"].as<std::string>();
         instance.created_at = row["created_at"].as<std::string>();
         return instance;
@@ -46,6 +49,7 @@ struct WorkflowInstance {
             {"started_at", started_at},
             {"finished_at", finished_at},
             {"param_overrides", param_overrides},
+            {"dag_snapshot", dag_snapshot},
             {"creator_id", creator_id},
             {"created_at", created_at}
         };

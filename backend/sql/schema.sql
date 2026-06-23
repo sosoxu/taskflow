@@ -82,6 +82,7 @@ CREATE TABLE workflow_instances (
     started_at          TIMESTAMPTZ,
     finished_at         TIMESTAMPTZ,
     param_overrides   JSONB NOT NULL DEFAULT '{}',
+    dag_snapshot       JSONB,
     creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

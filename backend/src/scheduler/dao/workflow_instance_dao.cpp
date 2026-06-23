@@ -10,19 +10,26 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
     int workflow_version,
     const std::string& trigger_type,
     const std::string& creator_id,
-    const nlohmann::json& param_overrides) {
+    const nlohmann::json& param_overrides,
+    const nlohmann::json& dag_snapshot) {
 
     auto id = common::util::generateUuid();
 
     auto result = common::database::DatabaseManager::instance().withTransaction<std::string>(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
+            // Fix #152: Save dag_snapshot so the instance uses the DAG definition
+            // that was current at creation time, not the live workflow's dag_json
+            // which may change while the instance is still executing.
             auto res = txn.exec_params(
                 "INSERT INTO workflow_instances "
-                "(id, workflow_id, workflow_version, status, trigger_type, param_overrides, creator_id) "
-                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6) "
+                "(id, workflow_id, workflow_version, status, trigger_type, "
+                "param_overrides, dag_snapshot, creator_id) "
+                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6::jsonb, $7) "
                 "RETURNING id",
                 id, workflow_id, workflow_version, trigger_type,
-                param_overrides.dump(), creator_id);
+                param_overrides.dump(),
+                dag_snapshot.is_null() ? "{}" : dag_snapshot.dump(),
+                creator_id);
 
             if (res.empty()) {
                 return common::result::Result<std::string>::failure("创建工作流实例失败");

@@ -422,7 +422,10 @@ async function fetchInstance() {
     if (instance.value?.workflow_id) {
       const wfRes = await getWorkflow(instance.value.workflow_id)
       workflowName.value = wfRes.data?.data?.name || ''
-      dag.value = wfRes.data?.data?.dag_json || null
+      // Fix #152: Prefer dag_snapshot from the instance (captured at trigger
+      // time) over the live workflow's dag_json, so the DAG graph reflects
+      // what was actually executed, not the current (possibly modified) DAG.
+      dag.value = instance.value?.dag_snapshot || wfRes.data?.data?.dag_json || null
     }
   } catch {
     ElMessage.error('获取实例详情失败')

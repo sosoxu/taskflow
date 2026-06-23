@@ -118,7 +118,8 @@ private:
     void driveInstance(const common::models::WorkflowInstance& instance);
     common::result::Result<void> dispatchTask(
         const common::models::TaskInstance& task_instance,
-        const common::models::Workflow& workflow);
+        const common::models::Workflow& workflow,
+        const nlohmann::json& dag_json);
 
     int drive_interval_;
     std::string aes_key_;
