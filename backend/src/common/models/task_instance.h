@@ -19,6 +19,7 @@ struct TaskInstance {
     std::string finished_at;
     int exit_code = 0;
     std::string error_message;
+    nlohmann::json resolved_config;  // Config after placeholder resolution
     std::string created_at;
 
     static TaskInstance fromRow(const pqxx::row& row) {
@@ -42,6 +43,8 @@ struct TaskInstance {
             ? 0 : row["exit_code"].as<int>();
         instance.error_message = row["error_message"].is_null()
             ? "" : row["error_message"].as<std::string>();
+        instance.resolved_config = row["resolved_config"].is_null()
+            ? nlohmann::json() : nlohmann::json::parse(row["resolved_config"].as<std::string>());
         instance.created_at = row["created_at"].as<std::string>();
         return instance;
     }
@@ -61,6 +64,7 @@ struct TaskInstance {
             {"finished_at", finished_at},
             {"exit_code", exit_code},
             {"error_message", error_message},
+            {"resolved_config", resolved_config},
             {"created_at", created_at}
         };
     }

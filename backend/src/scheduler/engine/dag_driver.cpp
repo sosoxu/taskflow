@@ -590,6 +590,20 @@ common::result::Result<void> DagDriver::dispatchTask(
             "Placeholder resolution failed for task instance " + task_instance.id);
     }
 
+    // Save the resolved config to the task instance for later inspection.
+    // This allows users to see the actual parameters used during execution.
+    try {
+        auto save_result = task_instance_dao_.updateResolvedConfig(
+            task_instance.id, config.dump());
+        if (!save_result.ok()) {
+            spdlog::warn("DagDriver: failed to save resolved_config for task instance {}: {}",
+                         task_instance.id, save_result.error());
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("DagDriver: exception saving resolved_config for task instance {}: {}",
+                     task_instance.id, e.what());
+    }
+
     request.set_workflow_instance_id(task_instance.workflow_instance_id);
     request.set_config_json(config.dump());
 

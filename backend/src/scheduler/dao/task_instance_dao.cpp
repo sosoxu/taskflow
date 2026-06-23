@@ -238,20 +238,31 @@ common::result::Result<void> TaskInstanceDao::resetForRetry(const std::string& i
 common::result::Result<bool> TaskInstanceDao::cancelIfActive(const std::string& id) {
     return common::database::DatabaseManager::instance().withTransaction<bool>(
         [&](pqxx::work& txn) -> common::result::Result<bool> {
-            // Fix #219: Atomically transition PENDING/DISPATCHED/RUNNING to
-            // CANCELLED. Returns true if the task was cancelled, false if it
-            // was already terminal (no-op). This eliminates the check-then-act
-            // race in cancelInstance where a PENDING snapshot could become
-            // DISPATCHED between the read and the unconditional updateStatus.
             auto res = txn.exec_params(
                 "UPDATE task_instances SET status = 'CANCELLED', "
                 "finished_at = NOW(), exit_code = -1, error_message = 'Cancelled by user' "
                 "WHERE id = $1 AND status IN ('PENDING', 'DISPATCHED', 'RUNNING')",
                 id);
 
-            // affected_rows == 0 means the task was already terminal or doesn't
-            // exist — either way, no cancellation needed.
             return res.affected_rows() > 0;
+        });
+}
+
+common::result::Result<void> TaskInstanceDao::updateResolvedConfig(
+    const std::string& id,
+    const std::string& resolved_config_json) {
+    return common::database::DatabaseManager::instance().withTransaction<void>(
+        [&](pqxx::work& txn) -> common::result::Result<void> {
+            auto res = txn.exec_params(
+                "UPDATE task_instances SET resolved_config = $1::jsonb WHERE id = $2",
+                resolved_config_json, id);
+
+            if (res.affected_rows() == 0) {
+                return common::result::Result<void>::failure(
+                    "任务实例不存在，更新 resolved_config 失败");
+            }
+
+            return common::result::Result<void>();
         });
 }
 

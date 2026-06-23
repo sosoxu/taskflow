@@ -131,6 +131,7 @@ CREATE TABLE task_instances (
     finished_at             TIMESTAMPTZ,
     exit_code               INTEGER,
     error_message           TEXT,
+    resolved_config         JSONB,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

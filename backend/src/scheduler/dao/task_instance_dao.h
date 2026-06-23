@@ -41,6 +41,10 @@ public:
     // CancelTask and leak the running_tasks counter.
     common::result::Result<bool> cancelIfActive(const std::string& id);
 
+    // Save the resolved config (after placeholder substitution) to the task instance.
+    common::result::Result<void> updateResolvedConfig(const std::string& id,
+                                                       const std::string& resolved_config_json);
+
     common::result::Result<std::vector<common::models::TaskInstance>> listByWorkflowInstance(
         const std::string& workflow_instance_id);
 

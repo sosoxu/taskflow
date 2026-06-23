@@ -51,6 +51,17 @@
           <el-descriptions-item label="创建时间">{{ formatTime(instance.created_at) }}</el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ formatTime(instance.finished_at) }}</el-descriptions-item>
         </el-descriptions>
+        <!-- Runtime parameter overrides -->
+        <template v-if="instanceParamOverrides && Object.keys(instanceParamOverrides).length > 0">
+          <el-divider content-position="left">运行时参数覆盖</el-divider>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item
+              v-for="(value, key) in instanceParamOverrides"
+              :key="String(key)"
+              :label="String(key)"
+            >{{ typeof value === 'string' ? value : JSON.stringify(value) }}</el-descriptions-item>
+          </el-descriptions>
+        </template>
       </el-card>
 
       <!-- DAG Visualization -->
@@ -123,7 +134,7 @@
           <el-table-column label="完成时间" min-width="160">
             <template #default="{ row }">{{ formatTime(row.finished_at) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="240" fixed="right">
             <template #default="{ row }">
               <el-button
                 v-if="row.status === 'SUCCESS' || row.status === 'FAILED' || row.status === 'TIMEOUT' || row.status === 'RUNNING'"
@@ -132,6 +143,13 @@
                 size="small"
                 @click="openLogDialog(row)"
               >查看日志</el-button>
+              <el-button
+                v-if="row.resolved_config && Object.keys(row.resolved_config).length > 0"
+                type="info"
+                link
+                size="small"
+                @click="openConfigDialog(row)"
+              >执行参数</el-button>
               <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
               <el-button
                 v-if="userStore.isOperator && (row.status === 'FAILED' || row.status === 'TIMEOUT' || row.status === 'UPSTREAM_FAILED')"
@@ -181,6 +199,24 @@
         <pre><code>{{ logContent }}</code></pre>
       </div>
     </el-dialog>
+
+    <!-- Resolved Config Dialog -->
+    <el-dialog v-model="configDialogVisible" title="任务执行参数" width="600px" destroy-on-close>
+      <template v-if="currentConfigTask">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item
+            v-for="(value, key) in currentConfigTask.resolved_config"
+            :key="String(key)"
+            :label="String(key)"
+          >
+            <template v-if="typeof value === 'object' && value !== null">
+              <pre class="config-json">{{ JSON.stringify(value, null, 2) }}</pre>
+            </template>
+            <template v-else>{{ String(value) }}</template>
+          </el-descriptions-item>
+        </el-descriptions>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -206,12 +242,24 @@ const instance = ref<WorkflowInstance | null>(null)
 const workflowName = ref('')
 const dag = ref<DagGraph | null>(null)
 
+// Computed: extract param_overrides from the workflow instance
+const instanceParamOverrides = computed(() => {
+  if (!instance.value?.param_overrides) return null
+  const po = instance.value.param_overrides as Record<string, unknown>
+  if (typeof po !== 'object' || Object.keys(po).length === 0) return null
+  return po
+})
+
 const logDialogVisible = ref(false)
 const logContent = ref('')
 const currentLogTask = ref<TaskInstance | null>(null)
 const autoScroll = ref(true)
 const logStreaming = ref(false)
 const logContainerRef = ref<HTMLElement | null>(null)
+
+// Resolved config dialog state
+const configDialogVisible = ref(false)
+const currentConfigTask = ref<TaskInstance | null>(null)
 let eventSource: EventSource | null = null
 // Fix #192: SSE 重连计数器，最多重连 3 次（间隔 2s/4s/6s）
 let sseReconnectCount = 0
@@ -497,6 +545,11 @@ async function openLogDialog(task: TaskInstance) {
   await fetchLog()
 }
 
+function openConfigDialog(task: TaskInstance) {
+  currentConfigTask.value = task
+  configDialogVisible.value = true
+}
+
 async function fetchLog() {
   if (!instance.value || !currentLogTask.value) return
   try {
@@ -739,5 +792,17 @@ onUnmounted(() => {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.config-json {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #f5f7fa;
+  padding: 8px;
+  border-radius: 4px;
 }
 </style>

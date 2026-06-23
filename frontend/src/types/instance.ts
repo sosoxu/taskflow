@@ -30,6 +30,8 @@ export interface WorkflowInstance {
   // created_at and toJson() returns it. The "创建时间" columns in list views
   // should bind to created_at (not started_at, which is null until RUNNING).
   created_at: string | null
+  // Runtime parameter overrides passed when triggering the workflow
+  param_overrides: Record<string, unknown>
   // Fix #224: Backend returns "task_instances" (instance_service.cpp:423),
   // not "tasks". The old field name caused instance.tasks to be undefined at
   // runtime, breaking the task table, DAG visualization, and retry button.
@@ -52,4 +54,6 @@ export interface TaskInstance {
   finished_at: string | null
   exit_code: number | null
   error_message: string | null
+  // Resolved config after placeholder substitution — shows actual parameters used
+  resolved_config: Record<string, unknown> | null
 }
