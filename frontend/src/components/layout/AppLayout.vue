@@ -21,6 +21,11 @@
           <el-menu-item index="/workflows">
             <span>工作流管理</span>
           </el-menu-item>
+          <!-- Fix #310: Add nav entry for the instance list page so users can
+               browse all workflow instances, not just via workflow detail. -->
+          <el-menu-item index="/instances">
+            <span>执行实例</span>
+          </el-menu-item>
           <el-menu-item index="/workers">
             <span>执行节点</span>
           </el-menu-item>
@@ -52,7 +57,7 @@ const activeMenu = computed(() => {
   // /tasks/123, /workflows/create) keep their parent menu item highlighted.
   // '/' is matched exactly so it doesn't shadow every other route.
   if (path === '/') return '/'
-  const menuIndices = ['/tasks', '/workflows', '/workers', '/users']
+  const menuIndices = ['/tasks', '/workflows', '/instances', '/workers', '/users']
   for (const idx of menuIndices) {
     if (path === idx || path.startsWith(idx + '/')) {
       return idx

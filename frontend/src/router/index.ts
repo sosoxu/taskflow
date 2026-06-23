@@ -55,6 +55,14 @@ const router = createRouter({
           meta: { requireOperator: true },
         },
         {
+          // Fix #310: Add instance list page so users can browse all
+          // workflow instances from the UI. The backend already exposes
+          // GET /api/v1/instances, but there was no route/page to consume it.
+          path: 'instances',
+          name: 'instance-list',
+          component: () => import('../views/instance/InstanceListView.vue'),
+        },
+        {
           path: 'instances/:id',
           name: 'instance-detail',
           component: () => import('../views/instance/InstanceDetailView.vue'),
