@@ -12,6 +12,16 @@
 
 namespace taskflow::scheduler::service {
 
+// Fix #316: Reject names containing ASCII control characters (0x00-0x1F, 0x7F).
+// Control characters can cause storage/display issues, C-string truncation
+// at NUL, and log injection.
+static bool hasControlChars(const std::string& s) {
+    for (unsigned char c : s) {
+        if (c < 0x20 || c == 0x7F) return true;
+    }
+    return false;
+}
+
 WorkflowService::WorkflowService() = default;
 
 common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
@@ -29,6 +39,10 @@ common::result::Result<nlohmann::json> WorkflowService::createWorkflow(
     }
     if (name.length() > 64) {
         return common::result::Result<nlohmann::json>::failure("Workflow name cannot exceed 64 characters");
+    }
+    // Fix #316: Reject control characters in name
+    if (hasControlChars(name)) {
+        return common::result::Result<nlohmann::json>::failure("Workflow name contains invalid control characters");
     }
 
     // 1. Validate DAG structure
@@ -200,6 +214,10 @@ common::result::Result<nlohmann::json> WorkflowService::updateWorkflow(
 
     // Use existing values for fields not provided
     std::string effective_name = name.empty() ? existing_workflow.name : name;
+    // Fix #316: Reject control characters in name
+    if (hasControlChars(effective_name)) {
+        return common::result::Result<nlohmann::json>::failure("Workflow name contains invalid control characters");
+    }
     std::string effective_strategy = schedule_strategy.empty() ? existing_workflow.schedule_strategy : schedule_strategy;
     // Fix #119: target_worker_id must also fall back to existing value when not provided,
     // otherwise specified-strategy updates fail or overwrite the bound worker with empty string.

@@ -93,9 +93,17 @@ common::result::Result<void> WorkerDao::updateHeartbeat(
 
     return common::database::DatabaseManager::instance().withTransaction<void>(
         [&](pqxx::work& txn) -> common::result::Result<void> {
+            // Fix #315: Set status = 'online' when a heartbeat is received.
+            // Without this, a worker marked 'offline' (e.g. after a scheduler
+            // restart or transient network partition) can never recover its
+            // 'online' status, because HeartbeatChecker only inspects workers
+            // that are already 'online'. This left workers permanently offline
+            // even though they were actively sending heartbeats, causing
+            // DagDriver to find zero online workers and fail every task.
             auto res = txn.exec_params(
                 "UPDATE workers SET cpu_usage = $1, memory_usage = $2, "
-                "running_tasks = $3, last_heartbeat = NOW() WHERE id = $4",
+                "running_tasks = $3, last_heartbeat = NOW(), status = 'online' "
+                "WHERE id = $4",
                 cpu_usage, memory_usage, running_tasks, id);
 
             if (res.affected_rows() == 0) {

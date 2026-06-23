@@ -2,6 +2,14 @@
 
 namespace taskflow::scheduler::service {
 
+// Fix #316: Reject names containing ASCII control characters (0x00-0x1F, 0x7F).
+static bool hasControlChars(const std::string& s) {
+    for (unsigned char c : s) {
+        if (c < 0x20 || c == 0x7F) return true;
+    }
+    return false;
+}
+
 TaskService::TaskService(const std::string& aes_key)
     : aes_key_(aes_key) {}
 
@@ -18,6 +26,10 @@ common::result::Result<nlohmann::json> TaskService::createTask(
     }
     if (name.length() > 64) {
         return common::result::Result<nlohmann::json>::failure("Task name cannot exceed 64 characters");
+    }
+    // Fix #316: Reject control characters in name
+    if (hasControlChars(name)) {
+        return common::result::Result<nlohmann::json>::failure("Task name contains invalid control characters");
     }
 
     // Validate type
@@ -148,6 +160,10 @@ common::result::Result<nlohmann::json> TaskService::updateTask(
     // Use existing values for fields not provided
     std::string effective_type = type.empty() ? existing_task.type : type;
     std::string effective_name = name.empty() ? existing_task.name : name;
+    // Fix #316: Reject control characters in name
+    if (hasControlChars(effective_name)) {
+        return common::result::Result<nlohmann::json>::failure("Task name contains invalid control characters");
+    }
     nlohmann::json effective_config = config_json.is_null() ? existing_task.config_json : config_json;
     nlohmann::json effective_parameters = parameters_json.is_null() ? existing_task.parameters_json : parameters_json;
 
