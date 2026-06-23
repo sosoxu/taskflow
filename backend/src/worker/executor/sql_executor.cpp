@@ -229,8 +229,24 @@ TaskResult SqlExecutor::execute(const std::string& task_instance_id,
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - start).count();
         if (timeout > 0 && elapsed >= timeout) {
-            // Fix #206: Kill the whole process group (negative pid).
-            // Fix #302: 检查 kill 返回值，失败时回退到 kill(pid)
+            // Fix #319: Send SIGTERM first for graceful shutdown, then SIGKILL
+            if (kill(-pid, SIGTERM) < 0) {
+                kill(pid, SIGTERM);
+            }
+            // Wait up to 2 seconds for graceful exit
+            for (int i = 0; i < 20; ++i) {
+                pid_t ret = waitpid(pid, &status, WNOHANG);
+                if (ret == pid) {
+                    result.status = "TIMEOUT";
+                    result.exit_code = -1;
+                    result.error_message = "Task timed out after " +
+                                           std::to_string(timeout) + " seconds";
+                    return result;
+                }
+                if (ret < 0 && errno != EINTR) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            // Force kill if still alive
             if (kill(-pid, SIGKILL) < 0) {
                 kill(pid, SIGKILL);
             }

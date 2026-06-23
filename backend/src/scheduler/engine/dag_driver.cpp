@@ -24,6 +24,43 @@
 
 namespace taskflow::scheduler::engine {
 
+// Fix #317: Parse PostgreSQL TIMESTAMPTZ timestamps robustly.
+// PostgreSQL returns formats like "2026-06-23 22:30:46.488827+00" which
+// std::get_time("%Y-%m-%d %H:%M:%S") cannot parse (fails at the '.').
+// This function strips the timezone suffix and tries both with/without
+// fractional seconds. Returns time_t(-1) on failure.
+static time_t parsePgTimestamp(const std::string& ts) {
+    if (ts.empty()) return static_cast<time_t>(-1);
+
+    std::string s = ts;
+
+    // Strip timezone suffix: "+00", "-08", "Z", etc.
+    // Find the last '+' or '-' after the seconds portion (position >= 19).
+    if (s.size() > 19) {
+        for (size_t i = 19; i < s.size(); ++i) {
+            if (s[i] == '+' || s[i] == '-' || s[i] == 'Z') {
+                s = s.substr(0, i);
+                break;
+            }
+        }
+    }
+
+    // Try with fractional seconds: "%Y-%m-%d %H:%M:%S.%f"
+    // std::get_time does not support %f, but we can strip the fraction.
+    auto dot_pos = s.find('.');
+    if (dot_pos != std::string::npos) {
+        s = s.substr(0, dot_pos);
+    }
+
+    std::tm tm{};
+    std::istringstream iss(s);
+    iss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    if (iss.fail()) {
+        return static_cast<time_t>(-1);
+    }
+    return timegm(&tm);
+}
+
 DagDriver::DagDriver(int drive_interval, const std::string& aes_key,
                      std::shared_ptr<grpc::LeaderElection> leader_election,
                      common::config::TlsConfig worker_tls)
@@ -156,54 +193,42 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     // 4. 检查超时的 RUNNING 任务
     for (const auto& ti : task_instances) {
         if (ti.status == "RUNNING" && !ti.started_at.empty()) {
-            // 解析 started_at 并检查是否超时
-            try {
-                std::tm tm_started{};
-                std::istringstream iss(ti.started_at);
-                iss >> std::get_time(&tm_started, "%Y-%m-%d %H:%M:%S");
-                if (!iss.fail()) {
-                    // Fix #303: 检查 timegm 返回值，失败时跳过超时检测
-                    // timegm 失败返回 -1，from_time_t(-1) 为 1969 年，elapsed 会是 50+ 年，
-                    // 恒大于 timeout，导致任务被误标为 TIMEOUT
-                    auto started_time_t = timegm(&tm_started);
-                    if (started_time_t == static_cast<time_t>(-1)) {
-                        spdlog::warn("DagDriver: task instance {} has invalid started_at '{}', skipping timeout check",
-                                     ti.id, ti.started_at);
-                        continue;
-                    }
-                    auto started_tp = std::chrono::system_clock::from_time_t(started_time_t);
-                    auto now_tp = std::chrono::system_clock::now();
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - started_tp).count();
+            // Fix #317: Use robust PostgreSQL timestamp parser instead of
+            // std::get_time which fails on TIMESTAMPTZ format with milliseconds.
+            auto started_time_t = parsePgTimestamp(ti.started_at);
+            if (started_time_t == static_cast<time_t>(-1)) {
+                spdlog::warn("DagDriver: task instance {} has invalid started_at '{}', skipping timeout check",
+                             ti.id, ti.started_at);
+                continue;
+            }
+            auto started_tp = std::chrono::system_clock::from_time_t(started_time_t);
+            auto now_tp = std::chrono::system_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - started_tp).count();
 
-                    // 获取任务超时时间 (Fix #168: read from cache instead of N+1 DB query)
-                    int timeout = 3600;  // 默认超时
-                    auto cache_it = task_cache.find(ti.task_id);
-                    if (cache_it != task_cache.end()) {
-                        timeout = cache_it->second.timeout;
-                    }
-                    // Fix #155: Apply node-level timeout override from param_overrides.
-                    auto npo_it = node_param_overrides.find(ti.node_id);
-                    if (npo_it != node_param_overrides.end()) {
-                        const auto& overrides = npo_it->second;
-                        if (overrides.contains("timeout") && overrides["timeout"].is_number_integer()) {
-                            timeout = overrides["timeout"].get<int>();
-                        }
-                    }
-
-                    if (elapsed > timeout) {
-                        spdlog::warn("DagDriver: task instance {} timed out (elapsed={}s, timeout={}s)",
-                                     ti.id, elapsed, timeout);
-                        auto timeout_result = task_instance_dao_.markFinished(
-                            ti.id, "TIMEOUT", -1, "Task execution timed out");
-                        if (!timeout_result.ok()) {
-                            spdlog::error("DagDriver: failed to mark task instance {} as TIMEOUT: {}",
-                                          ti.id, timeout_result.error());
-                        }
-                    }
+            // 获取任务超时时间 (Fix #168: read from cache instead of N+1 DB query)
+            int timeout = 3600;  // 默认超时
+            auto cache_it = task_cache.find(ti.task_id);
+            if (cache_it != task_cache.end()) {
+                timeout = cache_it->second.timeout;
+            }
+            // Fix #155: Apply node-level timeout override from param_overrides.
+            auto npo_it = node_param_overrides.find(ti.node_id);
+            if (npo_it != node_param_overrides.end()) {
+                const auto& overrides = npo_it->second;
+                if (overrides.contains("timeout") && overrides["timeout"].is_number_integer()) {
+                    timeout = overrides["timeout"].get<int>();
                 }
-            } catch (const std::exception& e) {
-                spdlog::warn("DagDriver: failed to parse started_at for task instance {}: {}",
-                             ti.id, e.what());
+            }
+
+            if (elapsed > timeout) {
+                spdlog::warn("DagDriver: task instance {} timed out (elapsed={}s, timeout={}s)",
+                             ti.id, elapsed, timeout);
+                auto timeout_result = task_instance_dao_.markFinished(
+                    ti.id, "TIMEOUT", -1, "Task execution timed out");
+                if (!timeout_result.ok()) {
+                    spdlog::error("DagDriver: failed to mark task instance {} as TIMEOUT: {}",
+                                  ti.id, timeout_result.error());
+                }
             }
         }
     }
@@ -226,24 +251,19 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
 
             // Check if enough time has passed since last failure
             if (!ti.finished_at.empty()) {
-                try {
-                    std::tm tm_finished{};
-                    std::istringstream iss(ti.finished_at);
-                    iss >> std::get_time(&tm_finished, "%Y-%m-%d %H:%M:%S");
-                    if (!iss.fail()) {
-                        auto finished_tp = std::chrono::system_clock::from_time_t(timegm(&tm_finished));
-                        auto now_tp = std::chrono::system_clock::now();
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - finished_tp).count();
+                // Fix #317: Use robust PostgreSQL timestamp parser (also fixes
+                // D2: timegm return value was not checked in retry path).
+                auto finished_time_t = parsePgTimestamp(ti.finished_at);
+                if (finished_time_t != static_cast<time_t>(-1)) {
+                    auto finished_tp = std::chrono::system_clock::from_time_t(finished_time_t);
+                    auto now_tp = std::chrono::system_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - finished_tp).count();
 
-                        if (elapsed < retry_interval) {
-                            spdlog::info("DagDriver: task instance {} waiting for retry interval ({}s remaining)",
-                                         ti.id, retry_interval - elapsed);
-                            continue;  // Not yet time to retry
-                        }
+                    if (elapsed < retry_interval) {
+                        spdlog::info("DagDriver: task instance {} waiting for retry interval ({}s remaining)",
+                                     ti.id, retry_interval - elapsed);
+                        continue;  // Not yet time to retry
                     }
-                } catch (const std::exception& e) {
-                    spdlog::warn("DagDriver: failed to parse finished_at for task instance {}: {}",
-                                 ti.id, e.what());
                 }
             }
 

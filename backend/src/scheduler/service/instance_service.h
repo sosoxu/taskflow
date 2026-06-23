@@ -67,9 +67,11 @@ public:
         const std::string& user_id = "", const std::string& role = "");
 
     // Get task log content (read from Worker via gRPC)
+    // Fix #318: follow parameter enables real-time log streaming
     common::result::Result<std::string> getTaskLog(
         const std::string& instance_id, const std::string& task_instance_id,
-        const std::string& user_id = "", const std::string& role = "");
+        const std::string& user_id = "", const std::string& role = "",
+        bool follow = false);
 
     // Validate that a task instance belongs to the given workflow instance
     common::result::Result<void> validateTaskInstance(

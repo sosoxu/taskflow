@@ -242,6 +242,12 @@ int TaskExecutor::runningCount() const {
     return running_count_.load();
 }
 
+// Fix #318: Check if a specific task is still running.
+bool TaskExecutor::isRunning(const std::string& task_instance_id) const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mutex_));
+    return running_processes_.find(task_instance_id) != running_processes_.end();
+}
+
 void TaskExecutor::shutdown(int timeout_seconds) {
     // Fix #124: Reject new submissions so running tasks can drain.
     {

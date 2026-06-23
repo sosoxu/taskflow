@@ -159,10 +159,11 @@ public:
         return grpc::Status::OK;
     }
 
-    grpc::Status GetTaskLog(grpc::ServerContext* /*context*/,
+    grpc::Status GetTaskLog(grpc::ServerContext* context,
                             const TaskLogRequest* request,
                             grpc::ServerWriter<LogChunk>* writer) override {
-        spdlog::info("收到日志请求: task_instance_id={}", request->task_instance_id());
+        spdlog::info("收到日志请求: task_instance_id={}, follow={}",
+                     request->task_instance_id(), request->follow());
 
         // Fix #298: 校验 task_instance_id 防止路径穿越
         // 若含 ../，可逃逸日志目录读取任意文件
@@ -194,6 +195,15 @@ public:
             log_path = log_dir_ + "/" + target_filename;
         }
 
+        // Fix #318: Implement follow mode (tail -f) for real-time log streaming.
+        // When follow=true, keep reading new content until the task completes
+        // (detected via executor_.isRunning() returning false) or the gRPC
+        // context is cancelled.
+        if (request->follow()) {
+            return streamFollowLog(context, request, writer, log_path);
+        }
+
+        // Non-follow mode: read existing content once
         std::ifstream ifs(log_path, std::ios::binary);
 
         if (!ifs.is_open()) {
@@ -225,6 +235,88 @@ public:
     }
 
 private:
+    // Fix #318: Stream log file with follow mode (tail -f behavior).
+    // Reads existing content, then polls for new content until the task
+    // completes or the client disconnects.
+    grpc::Status streamFollowLog(grpc::ServerContext* context,
+                                 const TaskLogRequest* request,
+                                 grpc::ServerWriter<LogChunk>* writer,
+                                 const std::string& log_path) {
+        constexpr size_t chunk_size = 4096;
+        std::vector<char> buffer(chunk_size);
+
+        // Wait for the log file to appear (task may not have started yet)
+        for (int i = 0; i < 30 && !std::filesystem::exists(log_path); ++i) {
+            if (context->IsCancelled()) {
+                return grpc::Status(grpc::StatusCode::CANCELLED, "Client cancelled");
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        std::ifstream ifs(log_path, std::ios::binary);
+        if (!ifs.is_open()) {
+            LogChunk chunk;
+            chunk.set_task_instance_id(request->task_instance_id());
+            chunk.set_data("日志文件不存在\n");
+            chunk.set_eof(true);
+            writer->Write(chunk);
+            return grpc::Status::OK;
+        }
+
+        // Phase 1: Read existing content
+        while (ifs.read(buffer.data(), chunk_size) || ifs.gcount() > 0) {
+            LogChunk chunk;
+            chunk.set_task_instance_id(request->task_instance_id());
+            chunk.set_data(buffer.data(), static_cast<size_t>(ifs.gcount()));
+            chunk.set_eof(false);
+            if (!writer->Write(chunk)) {
+                return grpc::Status::OK;  // Client disconnected
+            }
+        }
+
+        // Phase 2: Follow new content until task completes
+        // Check if the task is still running via the executor
+        while (!context->IsCancelled()) {
+            // Check if task is still running
+            bool task_running = executor_.isRunning(request->task_instance_id());
+
+            // Try to read new content
+            ifs.clear();
+            while (ifs.read(buffer.data(), chunk_size) || ifs.gcount() > 0) {
+                LogChunk chunk;
+                chunk.set_task_instance_id(request->task_instance_id());
+                chunk.set_data(buffer.data(), static_cast<size_t>(ifs.gcount()));
+                chunk.set_eof(false);
+                if (!writer->Write(chunk)) {
+                    return grpc::Status::OK;  // Client disconnected
+                }
+            }
+
+            if (!task_running) {
+                // Task finished; do one final read to catch any remaining output
+                ifs.clear();
+                while (ifs.read(buffer.data(), chunk_size) || ifs.gcount() > 0) {
+                    LogChunk chunk;
+                    chunk.set_task_instance_id(request->task_instance_id());
+                    chunk.set_data(buffer.data(), static_cast<size_t>(ifs.gcount()));
+                    chunk.set_eof(false);
+                    writer->Write(chunk);
+                }
+                break;
+            }
+
+            // Wait before next poll
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        // Send EOF marker
+        LogChunk eof_chunk;
+        eof_chunk.set_task_instance_id(request->task_instance_id());
+        eof_chunk.set_eof(true);
+        writer->Write(eof_chunk);
+
+        return grpc::Status::OK;
+    }
     taskflow::worker::executor::TaskExecutor& executor_;
     taskflow::worker::grpc::WorkerClient& client_;
     std::string log_dir_;

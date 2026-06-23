@@ -55,6 +55,10 @@ public:
 
     int runningCount() const;
 
+    // Fix #318: Check if a specific task is still running.
+    // Used by GetTaskLog follow mode to know when to stop streaming.
+    bool isRunning(const std::string& task_instance_id) const;
+
     // Fix #124: Graceful shutdown — reject new submissions and wait for
     // running tasks to finish (up to timeout_seconds). If tasks are still
     // running after the timeout, they are cancelled. This is distinct from

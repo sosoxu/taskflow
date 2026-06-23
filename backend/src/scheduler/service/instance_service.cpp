@@ -572,7 +572,7 @@ common::result::Result<nlohmann::json> InstanceService::listInstancesByTaskId(
 
 common::result::Result<std::string> InstanceService::getTaskLog(
     const std::string& instance_id, const std::string& task_instance_id,
-    const std::string& user_id, const std::string& role) {
+    const std::string& user_id, const std::string& role, bool follow) {
 
     auto access_result = checkInstanceAccess(instance_id, user_id, role);
     if (!access_result.ok()) {
@@ -619,7 +619,8 @@ common::result::Result<std::string> InstanceService::getTaskLog(
 
     taskflow::v1::TaskLogRequest request;
     request.set_task_instance_id(task_instance_id);
-    request.set_follow(false);
+    // Fix #318: Transparently pass follow parameter to enable real-time streaming
+    request.set_follow(follow);
 
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(300));

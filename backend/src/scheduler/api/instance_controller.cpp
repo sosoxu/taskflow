@@ -482,7 +482,8 @@ void InstanceController::streamTaskLog(
     httpResp->addHeader("Connection", "keep-alive");
 
     // Fetch log content via gRPC and send as SSE events
-    auto log_result = instance_service_->getTaskLog(id, taskInstanceId, user_id, role);
+    // Fix #318: Use follow=true for SSE streaming to get real-time log updates
+    auto log_result = instance_service_->getTaskLog(id, taskInstanceId, user_id, role, true);
 
     if (!log_result.ok()) {
         // Fix #137: use error event instead of data event for errors
