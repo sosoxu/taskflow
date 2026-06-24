@@ -310,7 +310,6 @@ int main(int argc, char* argv[]) {
     spdlog::info("TaskFlow Scheduler 启动完成");
 
     // Install signal handlers for graceful shutdown
-    std::atomic<bool> shutdown_requested{false};
     std::signal(SIGTERM, [](int) {
         spdlog::info("Received SIGTERM, initiating graceful shutdown...");
         drogon::app().quit();

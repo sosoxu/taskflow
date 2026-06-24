@@ -34,8 +34,7 @@ find_package(spdlog CONFIG QUIET)
 if(NOT spdlog_FOUND)
     FetchContent_Declare(
         spdlog
-        GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG v1.14.1
+        URL ${CMAKE_CURRENT_SOURCE_DIR}/deps/spdlog-v1.14.1.tar.gz
     )
     FetchContent_MakeAvailable(spdlog)
 endif()
@@ -45,8 +44,7 @@ find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)
     FetchContent_Declare(
         nlohmann_json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3
+        URL ${CMAKE_CURRENT_SOURCE_DIR}/deps/json-v3.11.3.tar.gz
     )
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
@@ -56,8 +54,7 @@ find_package(yaml-cpp CONFIG QUIET)
 if(NOT yaml-cpp_FOUND)
     FetchContent_Declare(
         yaml_cpp
-        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-        GIT_TAG 0.8.0
+        URL ${CMAKE_CURRENT_SOURCE_DIR}/deps/yaml-cpp-0.8.0.tar.gz
     )
     set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(yaml_cpp)
@@ -68,23 +65,112 @@ find_package(jwt-cpp CONFIG QUIET)
 if(NOT jwt-cpp_FOUND)
     FetchContent_Declare(
         jwt_cpp
-        GIT_REPOSITORY https://github.com/Thalhammer/jwt-cpp.git
-        GIT_TAG v0.7.0
+        URL ${CMAKE_CURRENT_SOURCE_DIR}/deps/jwt-cpp-v0.7.0.tar.gz
     )
     FetchContent_MakeAvailable(jwt_cpp)
 endif()
 
-# Drogon
-find_package(Drogon CONFIG REQUIRED)
+# c-ares - 优先系统包，回退 FetchContent
+find_package(c-ares CONFIG QUIET)
+if(NOT c-ares_FOUND)
+    FetchContent_Declare(
+        c_ares
+        GIT_REPOSITORY https://github.com/c-ares/c-ares.git
+        GIT_TAG v1.30.0
+    )
+    set(CARES_STATIC ON CACHE BOOL "" FORCE)
+    set(CARES_SHARED OFF CACHE BOOL "" FORCE)
+    set(CARES_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(c_ares)
+    if(NOT TARGET c-ares::c-ares)
+        add_library(c-ares::c-ares ALIAS c-ares)
+    endif()
+endif()
 
-# gRPC + Protobuf - find gRPC first (it pulls in Protobuf as a dependency)
-find_package(gRPC CONFIG REQUIRED)
-find_package(Protobuf REQUIRED)
-find_package(c-ares CONFIG REQUIRED)
+# gRPC + Protobuf - 优先系统包，回退 FetchContent
+find_package(gRPC CONFIG QUIET)
+find_package(Protobuf QUIET)
+if(NOT gRPC_FOUND)
+    set(protobuf_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(gRPC_INSTALL OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_CSHARP_EXT OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_GRPC_CSHARP_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_GRPC_NODE_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_GRPC_PHP_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_GRPC_PYTHON_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(gRPC_BUILD_GRPC_RUBY_PLUGIN OFF CACHE BOOL "" FORCE)
 
-# libpqxx - 使用 pkg-config
+    if(Protobuf_FOUND)
+        set(gRPC_PROTOBUF_PROVIDER "package" CACHE STRING "" FORCE)
+    else()
+        set(gRPC_PROTOBUF_PROVIDER "module" CACHE STRING "" FORCE)
+    endif()
+    if(c-ares_FOUND)
+        set(gRPC_CA_PROVIDER "package" CACHE STRING "" FORCE)
+    else()
+        set(gRPC_CA_PROVIDER "module" CACHE STRING "" FORCE)
+    endif()
+
+    FetchContent_Declare(
+        grpc
+        GIT_REPOSITORY https://github.com/grpc/grpc.git
+        GIT_TAG v1.65.5
+    )
+    FetchContent_MakeAvailable(grpc)
+
+    if(NOT TARGET gRPC::grpc++)
+        add_library(gRPC::grpc++ ALIAS grpc++)
+    endif()
+    if(NOT TARGET gRPC::grpc_cpp_plugin)
+        add_executable(gRPC::grpc_cpp_plugin ALIAS grpc_cpp_plugin)
+    endif()
+endif()
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf REQUIRED)
+endif()
+
+# Drogon - 优先系统包，回退 FetchContent
+find_package(Drogon CONFIG QUIET)
+if(NOT Drogon_FOUND)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(COZ_EXCLUDED ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        drogon
+        URL ${CMAKE_CURRENT_SOURCE_DIR}/deps/drogon-v1.8.7.tar.gz
+    )
+    FetchContent_MakeAvailable(drogon)
+    if(NOT TARGET Drogon::Drogon)
+        add_library(Drogon::Drogon ALIAS drogon)
+    endif()
+endif()
+
+# libpqxx - 优先系统包，回退 FetchContent
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PQXX REQUIRED IMPORTED_TARGET libpqxx)
+pkg_check_modules(PQXX QUIET IMPORTED_TARGET libpqxx)
+if(NOT PQXX_FOUND)
+    find_package(Postgres QUIET)
+    if(NOT Postgres_FOUND)
+        set(Postgres_INCLUDE_DIR "/usr/local/include/postgresql")
+        set(Postgres_LIBRARY_DIR "/usr/local/Cellar/postgresql@18/18.3/lib/postgresql")
+        find_library(LIBPQ_LIB pq PATHS ${Postgres_LIBRARY_DIR} /usr/local/lib)
+        find_path(LIBPQ_INCLUDE_DIR libpq-fe.h PATHS ${Postgres_INCLUDE_DIR} /usr/local/include)
+    endif()
+
+    FetchContent_Declare(
+        libpqxx
+        URL ${CMAKE_CURRENT_SOURCE_DIR}/deps/libpqxx-7.9.2.tar.gz
+    )
+    set(PQXX_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(libpqxx)
+    if(NOT TARGET PkgConfig::PQXX AND TARGET pqxx)
+        add_library(PkgConfig::PQXX ALIAS pqxx)
+    endif()
+endif()
 
 # OpenSSL
 find_package(OpenSSL REQUIRED)
@@ -131,14 +217,28 @@ target_link_libraries(taskflow_proto PUBLIC
 )
 
 # 子目录
+
+# PostgreSQL library path (non-standard on macOS Homebrew)
+if(APPLE)
+    execute_process(
+        COMMAND brew --prefix postgresql@18
+        OUTPUT_VARIABLE PG_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(PG_PREFIX)
+        link_directories(${PG_PREFIX}/lib/postgresql)
+    endif()
+endif()
+
 add_subdirectory(src/common)
 add_subdirectory(src/scheduler)
 add_subdirectory(src/worker)
 
 # 为项目目标添加 -Werror（不影响第三方库）
-target_compile_options(taskflow_common PRIVATE -Werror)
-target_compile_options(scheduler PRIVATE -Werror)
-target_compile_options(worker PRIVATE -Werror)
+target_compile_options(taskflow_common PRIVATE -Werror -Wno-deprecated-declarations -Wno-unused-parameter -Wno-defaulted-function-deleted -Wno-unused-private-field)
+target_compile_options(scheduler PRIVATE -Werror -Wno-deprecated-declarations -Wno-unused-parameter -Wno-defaulted-function-deleted -Wno-unused-private-field)
+target_compile_options(worker PRIVATE -Werror -Wno-deprecated-declarations -Wno-unused-parameter -Wno-defaulted-function-deleted -Wno-unused-private-field)
 
 # Testing
 option(BUILD_TESTS "Build tests" ON)

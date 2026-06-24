@@ -33,9 +33,11 @@ target_include_directories(taskflow_tests PRIVATE
 target_link_libraries(taskflow_tests PRIVATE
     taskflow_common
     Catch2::Catch2WithMain
-    crypt
     PkgConfig::PQXX
 )
+if(LINUX)
+    target_link_libraries(taskflow_tests PRIVATE crypt)
+endif()
 
 # Register tests
 include(CTest)
@@ -61,11 +63,13 @@ target_include_directories(perf_tests PRIVATE
 target_link_libraries(perf_tests PRIVATE
     taskflow_common
     Catch2::Catch2WithMain
-    crypt
     PkgConfig::PQXX
     OpenSSL::Crypto
     OpenSSL::SSL
 )
+if(LINUX)
+    target_link_libraries(perf_tests PRIVATE crypt)
+endif()
 
 catch_discover_tests(perf_tests
     TEST_PREFIX "perf:"

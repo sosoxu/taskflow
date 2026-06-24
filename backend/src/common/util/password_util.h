@@ -9,8 +9,11 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
-#include <unistd.h>  // for crypt_r
+#ifdef __linux__
 #include <crypt.h>   // for crypt_r
+#elif defined(__APPLE__)
+#include <unistd.h>  // for crypt on macOS
+#endif
 
 #include "common/result/result.h"
 
@@ -21,10 +24,10 @@ public:
     PasswordUtil() = delete;
 
     static common::result::Result<std::string> hashPassword(const std::string& password) {
-        // Generate bcrypt salt using crypt_r with $2b$ cost factor 10
+#ifdef __linux__
+        // Linux: use crypt_r with bcrypt
         constexpr int cost = 10;
 
-        // Generate 16 random bytes for the salt
         unsigned char salt_bytes[16];
         if (RAND_bytes(salt_bytes, sizeof(salt_bytes)) != 1) {
             std::random_device rd;
@@ -35,20 +38,18 @@ public:
             }
         }
 
-        // Encode salt in bcrypt base64 format (different from standard base64)
         std::string bcrypt_salt = "$2b$" + std::to_string(cost) + "$" +
                                   encodeBcryptBase64(salt_bytes, 16);
 
         struct crypt_data data;
         memset(&data, 0, sizeof(data));
-
         char* result = crypt_r(password.c_str(), bcrypt_salt.c_str(), &data);
-        if (!result || result[0] == '*') {
-            // Fallback: if bcrypt not available, use PBKDF2
-            return hashPasswordPBKDF2(password);
+        if (result && result[0] != '*') {
+            return std::string(result);
         }
-
-        return std::string(result);
+#endif
+        // macOS or bcrypt unavailable: use PBKDF2
+        return hashPasswordPBKDF2(password);
     }
 
     static common::result::Result<bool> verifyPassword(const std::string& password,
@@ -61,16 +62,18 @@ public:
         if (stored_hash.substr(0, 4) == "$2a$" ||
             stored_hash.substr(0, 4) == "$2b$" ||
             stored_hash.substr(0, 4) == "$2y$") {
+#ifdef __linux__
             struct crypt_data data;
             memset(&data, 0, sizeof(data));
-
             char* result = crypt_r(password.c_str(), stored_hash.c_str(), &data);
             if (!result) {
                 return common::result::Result<bool>::failure("bcrypt verification failed");
             }
-
-            // Constant-time comparison
             return constantTimeCompare(result, stored_hash);
+#else
+            // macOS does not support bcrypt in crypt(), cannot verify
+            return common::result::Result<bool>::failure("bcrypt not supported on this platform");
+#endif
         }
 
         // Legacy PBKDF2 format: $pbkdf2-sha256$i=...
