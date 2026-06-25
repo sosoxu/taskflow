@@ -23,6 +23,7 @@ logs/
 # Dependencies
 node_modules/
 backend/deps/
+backend/thirdparty/
 
 # OS
 .DS_Store
