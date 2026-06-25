@@ -2,7 +2,8 @@
 -- 用于从零初始化数据库
 -- 版本: 1.0.0
 -- Fix #167: 与 schema.sql 完全对齐（补齐 deleted_at/parameters_json/param_overrides/node_id
---           列、workers.address UNIQUE 约束、统一 bcrypt 管理员密码）
+--           dag_snapshot/resolved_config 列、workers.address UNIQUE 约束、统一 bcrypt 管理员密码）
+-- Fix #152: dag_snapshot 列（原在 migrations/001_add_dag_snapshot.sql，合并至此）
 
 -- 迁移版本跟踪表
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -94,6 +95,8 @@ BEGIN
         finished_at         TIMESTAMPTZ,
         -- Fix #167: param_overrides 列（WorkflowInstanceDao::create 插入，fromRow 读取）
         param_overrides     JSONB NOT NULL DEFAULT '{}',
+        -- Fix #152: dag_snapshot 列（合并自 migrations/001_add_dag_snapshot.sql）
+        dag_snapshot        JSONB,
         creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -141,6 +144,8 @@ BEGIN
         finished_at             TIMESTAMPTZ,
         exit_code               INTEGER,
         error_message           TEXT,
+        -- resolved_config 列（schema.sql 有，TaskInstanceDao 使用）
+        resolved_config         JSONB,
         created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -162,9 +167,9 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 
-    -- Fix #167: 初始管理员用户（密码: admin123，bcrypt hash，与 schema.sql 一致）
+    -- Fix #309: 初始管理员用户（密码: admin123，bcrypt $2b$ hash，与 schema.sql 一致）
     INSERT INTO users (username, password_hash, role)
-    VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin')
+    VALUES ('admin', '$2b$10$ueg7X6rg6l88Nt3Hcshq8.GYTQvwJWgufhC25dvYfKJJ7vPokQaBa', 'admin')
     ON CONFLICT (username) DO NOTHING;
 
     -- 记录迁移版本
