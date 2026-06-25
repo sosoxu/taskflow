@@ -16,6 +16,7 @@ cmake-build-*/
 # Config (contain secrets)
 *.yaml
 !*.yaml.example
+!docs/openapi.yaml
 
 # Logs
 logs/

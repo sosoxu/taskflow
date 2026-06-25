@@ -1,0 +1,1474 @@
+openapi: 3.0.3
+info:
+  title: TaskFlow API
+  description: |
+    TaskFlow 是一个分布式任务调度与工作流编排平台，支持 DAG 工作流、定时调度、
+    多 Worker 负载均衡和实时日志流。
+
+    ## 认证方式
+    除健康检查和认证接口外，所有 API 均需在请求头中携带 JWT Token：
+    ```
+    Authorization: Bearer <token>
+    ```
+
+    ## 角色权限
+    - `admin` - 全部权限
+    - `operator` - 创建/编辑/触发任务和工作流
+    - `viewer` - 只读权限
+  version: 1.0.0
+  contact:
+    name: TaskFlow
+    url: https://github.com/your-org/taskflow
+
+servers:
+  - url: http://localhost:8080
+    description: 本地开发环境
+
+tags:
+  - name: Auth
+    description: 认证与授权
+  - name: Tasks
+    description: 任务管理
+  - name: Workflows
+    description: 工作流管理
+  - name: Instances
+    description: 工作流实例与任务实例
+  - name: Users
+    description: 用户管理
+  - name: Workers
+    description: Worker 节点
+  - name: Dashboard
+    description: 仪表盘统计
+  - name: Health
+    description: 健康检查
+
+security: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  # Health
+  # ---------------------------------------------------------------------------
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: 健康检查
+      operationId: healthCheck
+      security: []
+      responses:
+        "200":
+          description: 服务健康
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            example: ok
+                          timestamp:
+                            type: string
+                            format: date-time
+
+  # ---------------------------------------------------------------------------
+  # Auth
+  # ---------------------------------------------------------------------------
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: 用户注册
+      operationId: registerUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  example: admin
+                password:
+                  type: string
+                  minLength: 8
+                  format: password
+                  example: "12345678"
+      responses:
+        "200":
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: admin
+                password:
+                  type: string
+                  format: password
+                  example: "12345678"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                            description: JWT 访问令牌
+                          user:
+                            $ref: "#/components/schemas/User"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新令牌
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+                          refresh_token:
+                            type: string
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 用户登出
+      operationId: logout
+      responses:
+        "200":
+          description: 登出成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ---------------------------------------------------------------------------
+  # Tasks
+  # ---------------------------------------------------------------------------
+  /api/v1/tasks:
+    post:
+      tags: [Tasks]
+      summary: 创建任务
+      operationId: createTask
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCreate"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Task"
+
+    get:
+      tags: [Tasks]
+      summary: 获取任务列表
+      operationId: listTasks
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: keyword
+          in: query
+          description: 按名称模糊搜索
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PagedData_Task"
+
+  /api/v1/tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: 获取任务详情
+      operationId: getTask
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Task"
+
+    put:
+      tags: [Tasks]
+      summary: 更新任务
+      operationId: updateTask
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUpdate"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Task"
+
+    delete:
+      tags: [Tasks]
+      summary: 删除任务（软删除）
+      operationId: deleteTask
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ---------------------------------------------------------------------------
+  # Workflows
+  # ---------------------------------------------------------------------------
+  /api/v1/workflows:
+    post:
+      tags: [Workflows]
+      summary: 创建工作流
+      operationId: createWorkflow
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowCreate"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workflow"
+
+    get:
+      tags: [Workflows]
+      summary: 获取工作流列表
+      operationId: listWorkflows
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: keyword
+          in: query
+          description: 按名称模糊搜索
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PagedData_Workflow"
+
+  /api/v1/workflows/{id}:
+    get:
+      tags: [Workflows]
+      summary: 获取工作流详情
+      operationId: getWorkflow
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workflow"
+
+    put:
+      tags: [Workflows]
+      summary: 更新工作流
+      operationId: updateWorkflow
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkflowUpdate"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Workflow"
+
+    delete:
+      tags: [Workflows]
+      summary: 删除工作流（软删除）
+      operationId: deleteWorkflow
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/workflows/{id}/trigger:
+    post:
+      tags: [Workflows]
+      summary: 手动触发工作流
+      operationId: triggerWorkflow
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                param_overrides:
+                  type: object
+                  description: 参数覆盖（key-value 对）
+                  additionalProperties: {}
+                  example:
+                    input_path: /data/input.csv
+      responses:
+        "200":
+          description: 触发成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkflowInstance"
+
+  # ---------------------------------------------------------------------------
+  # Instances
+  # ---------------------------------------------------------------------------
+  /api/v1/instances:
+    get:
+      tags: [Instances]
+      summary: 获取所有工作流实例
+      operationId: listAllInstances
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          description: 按状态过滤
+          schema:
+            type: string
+            enum: [PENDING, RUNNING, PAUSED, SUCCESS, FAILED, CANCELLED]
+        - name: trigger_type
+          in: query
+          description: 按触发类型过滤
+          schema:
+            type: string
+            enum: [manual, cron]
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PagedData_WorkflowInstance"
+
+  /api/v1/workflows/{id}/instances:
+    get:
+      tags: [Instances]
+      summary: 获取指定工作流的实例列表
+      operationId: listInstances
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PagedData_WorkflowInstance"
+
+  /api/v1/instances/{id}:
+    get:
+      tags: [Instances]
+      summary: 获取工作流实例详情
+      operationId: getInstance
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/WorkflowInstanceDetail"
+
+  /api/v1/instances/{id}/pause:
+    post:
+      tags: [Instances]
+      summary: 暂停工作流实例
+      operationId: pauseInstance
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "200":
+          description: 暂停成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/instances/{id}/resume:
+    post:
+      tags: [Instances]
+      summary: 恢复工作流实例
+      operationId: resumeInstance
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "200":
+          description: 恢复成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/instances/{id}/cancel:
+    post:
+      tags: [Instances]
+      summary: 取消工作流实例
+      operationId: cancelInstance
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "200":
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/instances/{id}/tasks/{taskInstanceId}/retry:
+    post:
+      tags: [Instances]
+      summary: 重试失败的任务实例
+      operationId: retryTask
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+        - $ref: "#/components/parameters/TaskInstanceId"
+      responses:
+        "200":
+          description: 重试成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/instances/{id}/tasks/{taskInstanceId}/kill:
+    post:
+      tags: [Instances]
+      summary: 终止运行中的任务实例
+      operationId: killTask
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+        - $ref: "#/components/parameters/TaskInstanceId"
+      responses:
+        "200":
+          description: 终止成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/instances/{id}/tasks/{taskInstanceId}/logs:
+    get:
+      tags: [Instances]
+      summary: 获取任务实例日志
+      operationId: getTaskLog
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+        - $ref: "#/components/parameters/TaskInstanceId"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          log_content:
+                            type: string
+                          is_complete:
+                            type: boolean
+
+  /api/v1/instances/{id}/tasks/{taskInstanceId}/logs/stream:
+    get:
+      tags: [Instances]
+      summary: 流式获取任务实例日志（SSE）
+      operationId: streamTaskLog
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+        - $ref: "#/components/parameters/TaskInstanceId"
+      responses:
+        "200":
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events 流
+
+  # ---------------------------------------------------------------------------
+  # Users
+  # ---------------------------------------------------------------------------
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: 获取当前用户信息
+      operationId: getCurrentUser
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: 获取用户列表
+      operationId: listUsers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PagedData_User"
+
+    post:
+      tags: [Users]
+      summary: 创建用户
+      operationId: createUser
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                password:
+                  type: string
+                  minLength: 8
+                  format: password
+                role:
+                  type: string
+                  enum: [admin, operator, viewer]
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+
+  /api/v1/users/{id}/role:
+    put:
+      tags: [Users]
+      summary: 更新用户角色
+      operationId: updateUserRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [admin, operator, viewer]
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/users/{id}:
+    delete:
+      tags: [Users]
+      summary: 删除用户
+      operationId: deleteUser
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ---------------------------------------------------------------------------
+  # Workers
+  # ---------------------------------------------------------------------------
+  /api/v1/workers:
+    get:
+      tags: [Workers]
+      summary: 获取 Worker 节点列表
+      operationId: listWorkers
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/WorkerInfo"
+
+  # ---------------------------------------------------------------------------
+  # Dashboard
+  # ---------------------------------------------------------------------------
+  /api/v1/dashboard/stats:
+    get:
+      tags: [Dashboard]
+      summary: 获取仪表盘统计数据
+      operationId: getDashboardStats
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DashboardStats"
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TaskId:
+      name: id
+      in: path
+      required: true
+      description: 任务 ID
+      schema:
+        type: string
+        format: uuid
+
+    WorkflowId:
+      name: id
+      in: path
+      required: true
+      description: 工作流 ID
+      schema:
+        type: string
+        format: uuid
+
+    InstanceId:
+      name: id
+      in: path
+      required: true
+      description: 工作流实例 ID
+      schema:
+        type: string
+        format: uuid
+
+    TaskInstanceId:
+      name: taskInstanceId
+      in: path
+      required: true
+      description: 任务实例 ID
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    # -------------------------------------------------------------------------
+    # 通用响应
+    # -------------------------------------------------------------------------
+    ApiResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 状态码，0 表示成功
+          example: 0
+        message:
+          type: string
+          example: success
+        data:
+          description: 响应数据
+
+    PagedData_Task:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        total:
+          type: integer
+          example: 100
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+
+    PagedData_Workflow:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workflow"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    PagedData_WorkflowInstance:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowInstance"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    PagedData_User:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+
+    # -------------------------------------------------------------------------
+    # 数据模型
+    # -------------------------------------------------------------------------
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        role:
+          type: string
+          enum: [admin, operator, viewer]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [command, script, sql]
+          description: |
+            任务类型：
+            - `command`: Shell 命令
+            - `script`: 脚本执行（支持 shell/python）
+            - `sql`: SQL 查询
+        config_json:
+          type: object
+          description: |
+            任务配置，根据 type 不同而不同：
+            - command: `{"command": "echo hello"}`
+            - script: `{"interpreter": "python3", "script": "print('hello')"}`
+            - sql: `{"connection": "db_name", "sql": "SELECT 1"}`
+          additionalProperties: {}
+        description:
+          type: string
+        timeout:
+          type: integer
+          description: 超时时间（秒）
+          default: 3600
+        max_retries:
+          type: integer
+          default: 0
+        retry_interval:
+          type: integer
+          description: 重试间隔（秒）
+          default: 60
+        resource_tags:
+          type: object
+          description: 资源标签，用于匹配 Worker
+          additionalProperties:
+            type: string
+          example:
+            gpu: "true"
+            os: linux
+        parameters_json:
+          type: object
+          description: 任务参数定义
+          additionalProperties: {}
+        creator_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          description: 任务版本号
+        deleted:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TaskCreate:
+      type: object
+      required: [name, type, config_json]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [command, script, sql]
+        config_json:
+          type: object
+          additionalProperties: {}
+        description:
+          type: string
+        timeout:
+          type: integer
+          default: 3600
+        max_retries:
+          type: integer
+          default: 0
+        retry_interval:
+          type: integer
+          default: 60
+        resource_tags:
+          type: object
+          additionalProperties:
+            type: string
+        parameters_json:
+          type: object
+          additionalProperties: {}
+
+    TaskUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [command, script, sql]
+        config_json:
+          type: object
+          additionalProperties: {}
+        description:
+          type: string
+        timeout:
+          type: integer
+        max_retries:
+          type: integer
+        retry_interval:
+          type: integer
+        resource_tags:
+          type: object
+          additionalProperties:
+            type: string
+        parameters_json:
+          type: object
+          additionalProperties: {}
+
+    Workflow:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        dag_json:
+          $ref: "#/components/schemas/DagJson"
+        schedule_strategy:
+          type: string
+          enum: [random, load_balance, specified]
+          description: |
+            调度策略：
+            - `random`: 随机选择 Worker
+            - `load_balance`: 负载均衡（选择负载最低的 Worker）
+            - `specified`: 指定 Worker
+        target_worker_id:
+          type: string
+          format: uuid
+          description: 当 schedule_strategy 为 specified 时的目标 Worker ID
+        cron_expression:
+          type: string
+          description: Cron 表达式（5 字段格式：分 时 日 月 周）
+          example: "0 8 * * 1-5"
+        cron_enabled:
+          type: boolean
+          default: false
+        creator_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        deleted:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WorkflowCreate:
+      type: object
+      required: [name, dag_json]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        dag_json:
+          $ref: "#/components/schemas/DagJson"
+        schedule_strategy:
+          type: string
+          enum: [random, load_balance, specified]
+          default: load_balance
+        target_worker_id:
+          type: string
+          format: uuid
+        cron_expression:
+          type: string
+        cron_enabled:
+          type: boolean
+          default: false
+
+    WorkflowUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        dag_json:
+          $ref: "#/components/schemas/DagJson"
+        schedule_strategy:
+          type: string
+          enum: [random, load_balance, specified]
+        target_worker_id:
+          type: string
+          format: uuid
+        cron_expression:
+          type: string
+        cron_enabled:
+          type: boolean
+
+    DagJson:
+      type: object
+      description: DAG 工作流定义
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DagNode"
+          minItems: 1
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/DagEdge"
+
+    DagNode:
+      type: object
+      required: [id, task_id]
+      properties:
+        id:
+          type: string
+          description: 节点 ID（工作流内唯一）
+          example: node_1
+        task_id:
+          type: string
+          format: uuid
+          description: 关联的任务 ID
+
+    DagEdge:
+      type: object
+      required: [source, target]
+      properties:
+        source:
+          type: string
+          description: 上游节点 ID
+          example: node_1
+        target:
+          type: string
+          description: 下游节点 ID
+          example: node_2
+
+    WorkflowInstance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflow_id:
+          type: string
+          format: uuid
+        workflow_version:
+          type: integer
+        status:
+          type: string
+          enum: [PENDING, RUNNING, PAUSED, SUCCESS, FAILED, CANCELLED]
+        trigger_type:
+          type: string
+          enum: [manual, cron]
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        param_overrides:
+          type: object
+          additionalProperties: {}
+        dag_snapshot:
+          $ref: "#/components/schemas/DagJson"
+        creator_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    WorkflowInstanceDetail:
+      allOf:
+        - $ref: "#/components/schemas/WorkflowInstance"
+        - type: object
+          properties:
+            task_instances:
+              type: array
+              items:
+                $ref: "#/components/schemas/TaskInstance"
+
+    TaskInstance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflow_instance_id:
+          type: string
+          format: uuid
+        task_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+        task_version:
+          type: integer
+        task_name:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, DISPATCHED, RUNNING, SUCCESS, FAILED, UPSTREAM_FAILED, TIMEOUT, CANCELLED, NODE_OFFLINE]
+        worker_id:
+          type: string
+          format: uuid
+          nullable: true
+        retry_count:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        exit_code:
+          type: integer
+        error_message:
+          type: string
+          nullable: true
+        resolved_config:
+          type: object
+          additionalProperties: {}
+          description: 占位符解析后的任务配置
+        created_at:
+          type: string
+          format: date-time
+
+    WorkerInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+          description: Worker 的 gRPC 地址
+          example: "localhost:50051"
+        status:
+          type: string
+          enum: [online, offline]
+        cpu_usage:
+          type: number
+          format: double
+          description: CPU 使用率 (0.0 - 1.0)
+        memory_usage:
+          type: number
+          format: double
+          description: 内存使用率 (0.0 - 1.0)
+        running_tasks:
+          type: integer
+          description: 当前运行中的任务数
+        max_tasks:
+          type: integer
+          description: 最大并发任务数
+          default: 10
+        resource_tags:
+          type: object
+          additionalProperties:
+            type: string
+          description: Worker 资源标签
+          example:
+            gpu: "true"
+            os: linux
+        last_heartbeat:
+          type: string
+          format: date-time
+        registered_at:
+          type: string
+          format: date-time
+
+    DashboardStats:
+      type: object
+      properties:
+        total_workflows:
+          type: integer
+        total_tasks:
+          type: integer
+        running_instances:
+          type: integer
+        online_workers:
+          type: integer
+        recent_instances:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowInstance"
