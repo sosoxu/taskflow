@@ -108,12 +108,17 @@ endif()
 
 # ============================================================================
 # c-ares
-# 注意: 离线模式下优先使用系统包
+# GRPC_FROM_SOURCE=ON 时，c-ares 由 gRPC 的 module 模式构建
+# 不在此处单独构建，避免与 gRPC 子模块构建冲突
 # ============================================================================
 set(CARES_STATIC ON CACHE BOOL "" FORCE)
 set(CARES_SHARED OFF CACHE BOOL "" FORCE)
 set(CARES_INSTALL OFF CACHE BOOL "" FORCE)
-if(OFFLINE_BUILD)
+if(GRPC_FROM_SOURCE)
+    # c-ares 将由 gRPC 的 module 模式自动构建
+    # 只需在系统已安装时使用系统包
+    find_package(c-ares CONFIG QUIET)
+elseif(OFFLINE_BUILD)
     find_package(c-ares CONFIG QUIET)
     if(NOT c-ares_FOUND)
         FetchContent_Declare(c_ares URL ${TP_DIR}/c-ares-v1.30.0.tar.gz)
