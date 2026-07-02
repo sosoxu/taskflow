@@ -245,9 +245,10 @@ if(GRPC_FROM_SOURCE)
         file(COPY ${googletest_grpc_SOURCE_DIR}/ DESTINATION ${grpc_SOURCE_DIR}/third_party/googletest)
     endif()
 
-    # 创建空目录占位（gRPC CMake 可能检查这些目录是否存在）
+    # 创建空目录占位（gRPC CMake 检查这些目录是否存在来决定是否下载）
+    # 注意: opencensus-proto 的检查路径是 third_party/opencensus-proto/src
     file(MAKE_DIRECTORY ${grpc_SOURCE_DIR}/third_party/envoy-api)
-    file(MAKE_DIRECTORY ${grpc_SOURCE_DIR}/third_party/opencensus-proto)
+    file(MAKE_DIRECTORY ${grpc_SOURCE_DIR}/third_party/opencensus-proto/src)
     file(MAKE_DIRECTORY ${grpc_SOURCE_DIR}/third_party/xds)
     file(MAKE_DIRECTORY ${grpc_SOURCE_DIR}/third_party/opentelemetry)
     file(MAKE_DIRECTORY ${grpc_SOURCE_DIR}/third_party/googleapis)
@@ -263,6 +264,8 @@ if(GRPC_FROM_SOURCE)
     set(gRPC_BUILD_GRPC_PHP_PLUGIN OFF CACHE BOOL "" FORCE)
     set(gRPC_BUILD_GRPC_PYTHON_PLUGIN OFF CACHE BOOL "" FORCE)
     set(gRPC_BUILD_GRPC_RUBY_PLUGIN OFF CACHE BOOL "" FORCE)
+    # 禁止 gRPC 在线下载 proto 依赖（离线构建必需）
+    set(gRPC_DOWNLOAD_ARCHIVES OFF CACHE BOOL "" FORCE)
 
     # 所有依赖使用 module 模式（从 third_party/ 子目录构建）
     set(gRPC_ABSL_PROVIDER "module" CACHE STRING "" FORCE)
@@ -272,6 +275,16 @@ if(GRPC_FROM_SOURCE)
     set(gRPC_SSL_PROVIDER "module" CACHE STRING "" FORCE)
     set(gRPC_ZLIB_PROVIDER "module" CACHE STRING "" FORCE)
     set(gRPC_BENCHMARK_PROVIDER "none" CACHE STRING "" FORCE)
+
+    # 双重保险：替换 gRPC 的 download_archive.cmake 为离线安全版本
+    # 即使 gRPC_DOWNLOAD_ARCHIVES 未生效，任何下载尝试也会立即报错
+    file(WRITE ${grpc_SOURCE_DIR}/cmake/download_archive.cmake
+        "# Patched for offline build: any download attempt is a fatal error\n"
+        "function(download_archive destination url hash strip_prefix)\n"
+        "  message(FATAL_ERROR \"Offline build: download_archive called for \${url}. \"\n"
+        "    \"Set gRPC_DOWNLOAD_ARCHIVES=OFF and pre-populate third_party/ directories.\")\n"
+        "endfunction()\n"
+    )
 
     # 构建 gRPC（包含所有子模块），EXCLUDE_FROM_ALL 防止第三方库被安装
     add_subdirectory(${grpc_SOURCE_DIR} ${grpc_BINARY_DIR} EXCLUDE_FROM_ALL)
