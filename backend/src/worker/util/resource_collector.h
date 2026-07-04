@@ -5,6 +5,7 @@
 #include <sstream>
 #include <vector>
 #include <unistd.h>
+#include <spdlog/spdlog.h>
 
 namespace taskflow::worker::util {
 
@@ -54,22 +55,51 @@ private:
             return {total, idle_total};
         };
 
-        auto [total1, idle1] = readCpuTimes();
-        if (total1 == 0) {
+        // Fix #323: 用跨调用 delta 计算替代阻塞 sleep(100ms)。
+        // 旧实现每次调用 usleep(100000) 阻塞心跳线程 100ms，且 100ms 窗口在
+        // HZ=100 的系统上只有 ~10 ticks，低负载 (<5%) 时 delta_idle ≈ delta_total，
+        // 结果被舍入为 0，导致前端"始终显示 0"。
+        // 新实现用静态变量保存上次采样，每次调用（间隔 ~10s 心跳）的 delta
+        // 约 1000 ticks，能稳定检测到 0.1% 级别的 CPU 活动，且不阻塞心跳线程。
+        static unsigned long long last_total = 0;
+        static unsigned long long last_idle = 0;
+        static bool initialized = false;
+
+        auto [total, idle] = readCpuTimes();
+        if (total == 0) {
+            spdlog::warn("ResourceCollector: failed to read /proc/stat");
             return 0.0;
         }
 
-        usleep(100000);  // 100ms
-
-        auto [total2, idle2] = readCpuTimes();
-        if (total2 == 0) {
-            return 0.0;
+        if (!initialized) {
+            // 第一次调用：sleep 100ms 后再采样一次，建立基线
+            usleep(100000);
+            auto [total2, idle2] = readCpuTimes();
+            if (total2 == 0) {
+                spdlog::warn("ResourceCollector: failed to read /proc/stat on second attempt");
+                return 0.0;
+            }
+            last_total = total2;
+            last_idle = idle2;
+            initialized = true;
+            unsigned long long dt = total2 - total;
+            unsigned long long di = idle2 - idle;
+            if (dt == 0) return 0.0;
+            return (1.0 - static_cast<double>(di) / static_cast<double>(dt)) * 100.0;
         }
 
-        unsigned long long delta_total = total2 - total1;
-        unsigned long long delta_idle = idle2 - idle1;
+        unsigned long long delta_total = total - last_total;
+        unsigned long long delta_idle = idle - last_idle;
+        last_total = total;
+        last_idle = idle;
 
         if (delta_total == 0) {
+            return 0.0;
+        }
+
+        // 防御：计数器回绕（极罕见）
+        if (delta_total > 1000000000ULL) {
+            spdlog::warn("ResourceCollector: suspicious delta_total={}, resetting baseline", delta_total);
             return 0.0;
         }
 
@@ -79,6 +109,7 @@ private:
     static double getMemoryUsage() {
         std::ifstream ifs("/proc/meminfo");
         if (!ifs.is_open()) {
+            spdlog::warn("ResourceCollector: failed to open /proc/meminfo");
             return 0.0;
         }
 
@@ -107,6 +138,7 @@ private:
         }
 
         if (mem_total == 0) {
+            spdlog::warn("ResourceCollector: MemTotal not found in /proc/meminfo");
             return 0.0;
         }
 
@@ -119,6 +151,7 @@ private:
             mem_used = mem_total - mem_free;
         } else {
             // 无法采集可用内存信息，返回 0 表示无法确定
+            spdlog::warn("ResourceCollector: cannot determine available memory (no MemAvailable and MemFree=0)");
             return 0.0;
         }
 

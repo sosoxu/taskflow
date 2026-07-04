@@ -99,8 +99,8 @@ message DeregisterResponse {
 // 心跳请求
 message HeartbeatRequest {
     string worker_id = 1;         // Worker ID
-    double cpu_usage = 2;         // CPU 使用率 (0.0-1.0)
-    double memory_usage = 3;      // 内存使用率 (0.0-1.0)
+    double cpu_usage = 2;         // CPU 使用率 (0.0-100.0，百分比)
+    double memory_usage = 3;      // 内存使用率 (0.0-100.0，百分比)
     int32 running_tasks = 4;      // 当前运行任务数
 }
 
