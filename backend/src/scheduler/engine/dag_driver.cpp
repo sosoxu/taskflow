@@ -191,6 +191,8 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     }
 
     // 4. 检查超时的 RUNNING 任务
+    // Fix #322: Also check DISPATCHED tasks that have been stuck too long
+    // (e.g. worker crashed after receiving dispatch but before markRunning).
     for (const auto& ti : task_instances) {
         if (ti.status == "RUNNING" && !ti.started_at.empty()) {
             // Fix #317: Use robust PostgreSQL timestamp parser instead of
@@ -233,9 +235,41 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
         }
     }
 
-    // 5. Check for FAILED/TIMEOUT tasks that can be retried
+    // Fix #322: Check for DISPATCHED tasks stuck too long. A task in DISPATCHED
+    // means the worker received the dispatch RPC but never called markRunning.
+    // This can happen if the worker crashes between DispatchTask and actual
+    // execution. Use a fixed dispatch timeout (5 minutes) as safety net —
+    // normal heartbeat-based NODE_OFFLINE detection (~30s) handles most cases,
+    // but this catches edge cases where the worker stays online.
     for (const auto& ti : task_instances) {
-        if (ti.status == "FAILED" || ti.status == "TIMEOUT") {
+        if (ti.status == "DISPATCHED" && !ti.created_at.empty()) {
+            auto created_time_t = parsePgTimestamp(ti.created_at);
+            if (created_time_t == static_cast<time_t>(-1)) {
+                continue;
+            }
+            auto created_tp = std::chrono::system_clock::from_time_t(created_time_t);
+            auto now_tp = std::chrono::system_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now_tp - created_tp).count();
+            // Use a 5-minute dispatch timeout (configurable via task timeout as upper bound)
+            int dispatch_timeout = 300;
+            auto cache_it = task_cache.find(ti.task_id);
+            if (cache_it != task_cache.end()) {
+                dispatch_timeout = std::min(300, cache_it->second.timeout);
+            }
+            if (elapsed > dispatch_timeout) {
+                spdlog::warn("DagDriver: task instance {} stuck in DISPATCHED for {}s, marking as FAILED",
+                             ti.id, elapsed);
+                task_instance_dao_.markFinished(ti.id, "FAILED", -1,
+                    "Task stuck in DISPATCHED state for " + std::to_string(elapsed) + " seconds");
+            }
+        }
+    }
+
+    // 5. Check for FAILED/TIMEOUT/NODE_OFFLINE tasks that can be retried
+    // Fix #320: Include NODE_OFFLINE so tasks on crashed workers are
+    // automatically rescheduled to other workers when max_retries > 0.
+    for (const auto& ti : task_instances) {
+        if (ti.status == "FAILED" || ti.status == "TIMEOUT" || ti.status == "NODE_OFFLINE") {
             // Get task info for max_retries and retry_interval (Fix #168: cache)
             auto cache_it = task_cache.find(ti.task_id);
             if (cache_it == task_cache.end()) {
@@ -376,7 +410,10 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
     for (const auto& ti : updated_tasks_result.value()) {
         updated_statuses[ti.node_id] = ti.status;
         // Check if any failed task still has retries remaining
-        if ((ti.status == "FAILED" || ti.status == "TIMEOUT")) {
+        // Fix #320: Include NODE_OFFLINE so a crashed worker doesn't cause
+        // the workflow to be marked FAILED prematurely — the task should be
+        // retried (per the retry loop above) and the workflow kept alive.
+        if ((ti.status == "FAILED" || ti.status == "TIMEOUT" || ti.status == "NODE_OFFLINE")) {
             // Fix #168: read from cache instead of N+1 DB query
             auto cache_it = task_cache.find(ti.task_id);
             if (cache_it != task_cache.end() && ti.retry_count < cache_it->second.max_retries) {

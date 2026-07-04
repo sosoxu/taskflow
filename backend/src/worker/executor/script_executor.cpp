@@ -7,6 +7,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#include <time.h>
+#endif
 #include <chrono>
 #include <fstream>
 #include <spdlog/spdlog.h>
@@ -110,6 +114,31 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
         if (setpgid(0, 0) != 0) {
             _exit(127);
         }
+
+        // Fix #321: Ensure the whole process group is cleaned up when the
+        // worker dies. PR_SET_PDEATHSIG kills only the direct child (this
+        // process), not grandchildren. So we also fork a watchdog that
+        // monitors this process: when it is reparented to init (parent died),
+        // it kills the entire process group with SIGKILL.
+#ifdef __linux__
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+
+        pid_t watchdog_pid = fork();
+        if (watchdog_pid < 0) {
+            _exit(127);
+        }
+        if (watchdog_pid == 0) {
+            while (getppid() != 1) {
+                struct timespec ts;
+                ts.tv_sec = 0;
+                ts.tv_nsec = 100 * 1000 * 1000;  // 100ms
+                nanosleep(&ts, nullptr);
+            }
+            kill(0, SIGKILL);
+            _exit(0);
+        }
+#endif
+
         int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd < 0) {
             _exit(127);
