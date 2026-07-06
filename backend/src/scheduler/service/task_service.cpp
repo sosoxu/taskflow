@@ -79,7 +79,8 @@ common::result::Result<nlohmann::json> TaskService::createTask(
     return taskJson;
 }
 
-common::result::Result<nlohmann::json> TaskService::getTask(const std::string& id) {
+common::result::Result<nlohmann::json> TaskService::getTask(
+    const std::string& id, const std::string& user_id, const std::string& role) {
     auto taskResult = task_dao_.findById(id);
     if (!taskResult.ok()) {
         return common::result::Result<nlohmann::json>::failure(
@@ -89,6 +90,12 @@ common::result::Result<nlohmann::json> TaskService::getTask(const std::string& i
     const auto& task = taskResult.value();
     if (task.deleted) {
         return common::result::Result<nlohmann::json>::failure("任务不存在或已删除");
+    }
+
+    // Fix #324: resource-level permission check - non-admin users can only
+    // view their own tasks. Mirrors WorkflowService::getWorkflow (Fix #159).
+    if (role != "admin" && task.creator_id != user_id) {
+        return common::result::Result<nlohmann::json>::failure("权限不足，只能查看自己创建的任务");
     }
 
     auto taskJson = task.toJson();

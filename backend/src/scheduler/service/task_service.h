@@ -22,7 +22,10 @@ public:
         const std::string& creator_id);
 
     // Get task by ID (SQL password masked as "***")
-    common::result::Result<nlohmann::json> getTask(const std::string& id);
+    // Fix #324: resource-level permission check - non-admin users can only
+    // view their own tasks.
+    common::result::Result<nlohmann::json> getTask(
+        const std::string& id, const std::string& user_id, const std::string& role);
 
     // List tasks with pagination and filters
     common::result::Result<nlohmann::json> listTasks(

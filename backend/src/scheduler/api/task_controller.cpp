@@ -181,7 +181,7 @@ void TaskController::listTasks(
 }
 
 void TaskController::getTask(
-    const drogon::HttpRequestPtr&,
+    const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
     const std::string& id) {
 
@@ -190,10 +190,19 @@ void TaskController::getTask(
         return;
     }
 
-    auto result = task_service_->getTask(id);
+    // Fix #324: pass user_id/role for resource-level permission check.
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = task_service_->getTask(id, user_id, role);
 
     if (!result.ok()) {
-        sendError(std::move(callback), 404, 40401, result.error());
+        // Distinguish "not found" from "permission denied" by error message.
+        const std::string& err = result.error();
+        if (err.find("权限不足") != std::string::npos) {
+            sendError(std::move(callback), 403, 40301, err);
+        } else {
+            sendError(std::move(callback), 404, 40401, err);
+        }
         return;
     }
 
