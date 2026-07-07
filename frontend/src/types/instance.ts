@@ -1,3 +1,5 @@
+import type { DagGraph } from './workflow'
+
 export type WorkflowInstanceStatus =
   | 'PENDING'
   | 'RUNNING'
@@ -34,7 +36,7 @@ export interface WorkflowInstance {
   param_overrides: Record<string, unknown>
   // Fix #152: DAG snapshot captured at trigger time, so the instance uses the
   // DAG definition that was current when it was created, not the live workflow.
-  dag_snapshot: Record<string, unknown> | null
+  dag_snapshot: DagGraph | null
   // Fix #224: Backend returns "task_instances" (instance_service.cpp:423),
   // not "tasks". The old field name caused instance.tasks to be undefined at
   // runtime, breaking the task table, DAG visualization, and retry button.
