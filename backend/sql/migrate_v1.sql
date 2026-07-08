@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     version     VARCHAR(32) PRIMARY KEY,
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE schema_migrations OWNER TO taskflow;
 
 -- 检查是否已执行
 DO $$
@@ -34,7 +35,7 @@ BEGIN
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE users OWNER TO taskflow;
     CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
     -- 2. 任务表
@@ -56,7 +57,7 @@ BEGIN
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE tasks OWNER TO taskflow;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_name_active ON tasks(name) WHERE deleted = FALSE;
     CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type) WHERE deleted = FALSE;
@@ -78,7 +79,7 @@ BEGIN
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE workflows OWNER TO taskflow;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_workflows_name_active ON workflows(name) WHERE deleted = FALSE;
     CREATE INDEX IF NOT EXISTS idx_workflows_creator ON workflows(creator_id);
 
@@ -100,7 +101,7 @@ BEGIN
         creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE workflow_instances OWNER TO taskflow;
     CREATE INDEX IF NOT EXISTS idx_wf_instances_workflow ON workflow_instances(workflow_id);
     CREATE INDEX IF NOT EXISTS idx_wf_instances_status ON workflow_instances(status);
     CREATE INDEX IF NOT EXISTS idx_wf_instances_created ON workflow_instances(created_at DESC);
@@ -121,7 +122,7 @@ BEGIN
         last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         registered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE workers OWNER TO taskflow;
     CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_name ON workers(name);
 
@@ -148,7 +149,7 @@ BEGIN
         resolved_config         JSONB,
         created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE task_instances OWNER TO taskflow;
     CREATE INDEX IF NOT EXISTS idx_task_instances_wf_instance ON task_instances(workflow_instance_id);
     CREATE INDEX IF NOT EXISTS idx_task_instances_status ON task_instances(status);
     CREATE INDEX IF NOT EXISTS idx_task_instances_worker ON task_instances(worker_id);
@@ -163,7 +164,7 @@ BEGIN
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
+    ALTER TABLE cron_jobs OWNER TO taskflow;
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 

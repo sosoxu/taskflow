@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     version     VARCHAR(32) PRIMARY KEY,
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE schema_migrations OWNER TO taskflow;
 
 -- ============================================================
 -- 1. 用户表
