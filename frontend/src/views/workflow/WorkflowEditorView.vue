@@ -263,7 +263,7 @@ const tasksLoading = ref(false)
 async function fetchTasks() {
   tasksLoading.value = true
   try {
-    const { data: resp } = await getTasks({ page: 1, page_size: 200 })
+    const { data: resp } = await getTasks({ page: 1, page_size: 100 })
     const data = resp.data
     availableTasks.value = data.items || []
   } catch {

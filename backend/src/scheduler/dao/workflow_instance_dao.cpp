@@ -15,20 +15,47 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
 
     auto id = common::util::generateUuid();
 
-    auto result = common::database::DatabaseManager::instance().withTransaction<std::string>(
+    // Fix #152: Save dag_snapshot so the instance uses the DAG definition
+    // that was current at creation time, not the live workflow's dag_json
+    // which may change while the instance is still executing.
+    // Graceful fallback: if dag_snapshot column doesn't exist (old DB),
+    // retry INSERT without it.
+    try {
+        auto result = common::database::DatabaseManager::instance().withTransaction<std::string>(
+            [&](pqxx::work& txn) -> common::result::Result<std::string> {
+                auto res = txn.exec_params(
+                    "INSERT INTO workflow_instances "
+                    "(id, workflow_id, workflow_version, status, trigger_type, "
+                    "param_overrides, dag_snapshot, creator_id) "
+                    "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6::jsonb, $7) "
+                    "RETURNING id",
+                    id, workflow_id, workflow_version, trigger_type,
+                    param_overrides.dump(),
+                    dag_snapshot.is_null() ? "{}" : dag_snapshot.dump(),
+                    creator_id);
+
+                if (res.empty()) {
+                    return common::result::Result<std::string>::failure("创建工作流实例失败");
+                }
+
+                return std::string(res[0][0].as<std::string>());
+            });
+        return result;
+    } catch (const pqxx::undefined_column&) {
+        // dag_snapshot column doesn't exist yet — retry without it
+    }
+
+    // Fallback: INSERT without dag_snapshot column
+    return common::database::DatabaseManager::instance().withTransaction<std::string>(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
-            // Fix #152: Save dag_snapshot so the instance uses the DAG definition
-            // that was current at creation time, not the live workflow's dag_json
-            // which may change while the instance is still executing.
             auto res = txn.exec_params(
                 "INSERT INTO workflow_instances "
                 "(id, workflow_id, workflow_version, status, trigger_type, "
-                "param_overrides, dag_snapshot, creator_id) "
-                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6::jsonb, $7) "
+                "param_overrides, creator_id) "
+                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6) "
                 "RETURNING id",
                 id, workflow_id, workflow_version, trigger_type,
                 param_overrides.dump(),
-                dag_snapshot.is_null() ? "{}" : dag_snapshot.dump(),
                 creator_id);
 
             if (res.empty()) {
@@ -37,8 +64,6 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
 
             return std::string(res[0][0].as<std::string>());
         });
-
-    return result;
 }
 
 common::result::Result<common::models::WorkflowInstance> WorkflowInstanceDao::findById(const std::string& id) {
@@ -174,7 +199,8 @@ common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowIn
                 auto res = txn.exec_params(
                     "SELECT DISTINCT wi.id, wi.workflow_id, wi.workflow_version, "
                     "wi.status, wi.trigger_type, wi.param_overrides, "
-                    "wi.started_at, wi.finished_at, wi.creator_id, wi.created_at "
+                    "wi.dag_snapshot, wi.started_at, wi.finished_at, "
+                    "wi.creator_id, wi.created_at "
                     "FROM workflow_instances wi "
                     "JOIN task_instances ti ON ti.workflow_instance_id = wi.id "
                     "WHERE ti.task_id = $1 "
@@ -188,7 +214,8 @@ common::result::Result<std::vector<common::models::WorkflowInstance>> WorkflowIn
                 auto res = txn.exec_params(
                     "SELECT DISTINCT wi.id, wi.workflow_id, wi.workflow_version, "
                     "wi.status, wi.trigger_type, wi.param_overrides, "
-                    "wi.started_at, wi.finished_at, wi.creator_id, wi.created_at "
+                    "wi.dag_snapshot, wi.started_at, wi.finished_at, "
+                    "wi.creator_id, wi.created_at "
                     "FROM workflow_instances wi "
                     "JOIN task_instances ti ON ti.workflow_instance_id = wi.id "
                     "WHERE ti.task_id = $1 AND wi.creator_id = $2 "

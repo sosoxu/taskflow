@@ -32,8 +32,13 @@ struct WorkflowInstance {
         instance.param_overrides = row["param_overrides"].is_null()
             ? nlohmann::json::object()
             : nlohmann::json::parse(row["param_overrides"].as<std::string>());
-        instance.dag_snapshot = row["dag_snapshot"].is_null()
-            ? nlohmann::json() : nlohmann::json::parse(row["dag_snapshot"].as<std::string>());
+        // dag_snapshot 列可能不存在（旧数据库未执行迁移），容错处理
+        try {
+            instance.dag_snapshot = row["dag_snapshot"].is_null()
+                ? nlohmann::json() : nlohmann::json::parse(row["dag_snapshot"].as<std::string>());
+        } catch (const pqxx::argument_error&) {
+            instance.dag_snapshot = nlohmann::json();
+        }
         instance.creator_id = row["creator_id"].as<std::string>();
         instance.created_at = row["created_at"].as<std::string>();
         return instance;
