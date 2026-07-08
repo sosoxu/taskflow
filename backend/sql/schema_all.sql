@@ -1,7 +1,7 @@
 -- TaskFlow 数据库完整建表脚本
 -- PostgreSQL 15+
 -- 合并自 schema.sql、migrate_v1.sql、migrations/001_add_dag_snapshot.sql
--- 适用于全新环境一次性初始化
+-- 适用于全新环境一次性初始化，支持重复执行（IF NOT EXISTS）
 
 -- 启用 UUID 扩展
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -16,7 +16,7 @@ ALTER TABLE schema_migrations OWNER TO taskflow;
 -- ============================================================
 -- 1. 用户表
 -- ============================================================
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username        VARCHAR(32) NOT NULL UNIQUE,
     password_hash   VARCHAR(128) NOT NULL,
@@ -26,13 +26,13 @@ CREATE TABLE users (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_users_username ON users(username);
+ALTER TABLE users OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- ============================================================
 -- 2. 任务表
 -- ============================================================
-CREATE TABLE tasks (
+CREATE TABLE IF NOT EXISTS tasks (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(128) NOT NULL,
     type            VARCHAR(16) NOT NULL CHECK (type IN ('command', 'script', 'sql')),
@@ -49,15 +49,15 @@ CREATE TABLE tasks (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE UNIQUE INDEX idx_tasks_name_active ON tasks(name) WHERE deleted = FALSE;
-CREATE INDEX idx_tasks_creator ON tasks(creator_id);
-CREATE INDEX idx_tasks_type ON tasks(type) WHERE deleted = FALSE;
+ALTER TABLE tasks OWNER TO taskflow;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_name_active ON tasks(name) WHERE deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type) WHERE deleted = FALSE;
 
 -- ============================================================
 -- 3. 工作流表
 -- ============================================================
-CREATE TABLE workflows (
+CREATE TABLE IF NOT EXISTS workflows (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name                VARCHAR(128) NOT NULL,
     description         TEXT DEFAULT '',
@@ -73,14 +73,14 @@ CREATE TABLE workflows (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE UNIQUE INDEX idx_workflows_name_active ON workflows(name) WHERE deleted = FALSE;
-CREATE INDEX idx_workflows_creator ON workflows(creator_id);
+ALTER TABLE workflows OWNER TO taskflow;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflows_name_active ON workflows(name) WHERE deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_workflows_creator ON workflows(creator_id);
 
 -- ============================================================
 -- 4. 工作流执行实例表
 -- ============================================================
-CREATE TABLE workflow_instances (
+CREATE TABLE IF NOT EXISTS workflow_instances (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id         UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
     workflow_version    INTEGER NOT NULL,
@@ -95,15 +95,15 @@ CREATE TABLE workflow_instances (
     creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_wf_instances_workflow ON workflow_instances(workflow_id);
-CREATE INDEX idx_wf_instances_status ON workflow_instances(status);
-CREATE INDEX idx_wf_instances_created ON workflow_instances(created_at DESC);
+ALTER TABLE workflow_instances OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_wf_instances_workflow ON workflow_instances(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_wf_instances_status ON workflow_instances(status);
+CREATE INDEX IF NOT EXISTS idx_wf_instances_created ON workflow_instances(created_at DESC);
 
 -- ============================================================
 -- 5. 执行节点表（必须在 task_instances 之前，因为 FK 引用）
 -- ============================================================
-CREATE TABLE workers (
+CREATE TABLE IF NOT EXISTS workers (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(64) NOT NULL,
     address         VARCHAR(256) NOT NULL UNIQUE,
@@ -117,14 +117,14 @@ CREATE TABLE workers (
     last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     registered_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_workers_status ON workers(status);
-CREATE UNIQUE INDEX idx_workers_name ON workers(name);
+ALTER TABLE workers OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_workers_status ON workers(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_name ON workers(name);
 
 -- ============================================================
 -- 6. 任务执行实例表
 -- ============================================================
-CREATE TABLE task_instances (
+CREATE TABLE IF NOT EXISTS task_instances (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_instance_id    UUID NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
     task_id                 UUID NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
@@ -144,15 +144,15 @@ CREATE TABLE task_instances (
     resolved_config         JSONB,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_task_instances_wf_instance ON task_instances(workflow_instance_id);
-CREATE INDEX idx_task_instances_status ON task_instances(status);
-CREATE INDEX idx_task_instances_worker ON task_instances(worker_id);
+ALTER TABLE task_instances OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_task_instances_wf_instance ON task_instances(workflow_instance_id);
+CREATE INDEX IF NOT EXISTS idx_task_instances_status ON task_instances(status);
+CREATE INDEX IF NOT EXISTS idx_task_instances_worker ON task_instances(worker_id);
 
 -- ============================================================
 -- 7. 定时任务表
 -- ============================================================
-CREATE TABLE cron_jobs (
+CREATE TABLE IF NOT EXISTS cron_jobs (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id         UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
     cron_expression     VARCHAR(64) NOT NULL,
@@ -161,9 +161,9 @@ CREATE TABLE cron_jobs (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE INDEX idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
-CREATE INDEX idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
+ALTER TABLE cron_jobs OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 
 -- ============================================================
 -- 初始管理员用户（密码: admin123，bcrypt hash）
@@ -210,7 +210,6 @@ BEGIN
         ALTER INDEX idx_task_instances_worker OWNER TO taskflow;
         ALTER INDEX idx_cron_jobs_enabled OWNER TO taskflow;
         ALTER INDEX idx_cron_jobs_next_trigger OWNER TO taskflow;
-        -- 序列（users_id_seq 等 UUID 列使用 gen_random_uuid() 无序列，但 username 等 UNIQUE 约束可能有隐式索引）
         RAISE NOTICE 'All tables and indexes ownership set to taskflow';
     ELSE
         RAISE NOTICE 'Current user is not superuser, skipping ownership transfer';
