@@ -145,11 +145,8 @@ common::result::Result<nlohmann::json> WorkflowService::getWorkflow(
     if (result.value().deleted) {
         return common::result::Result<nlohmann::json>::failure("工作流不存在或已删除");
     }
-    // Fix #159: resource-level permission check - non-admin users can only
-    // view their own workflows.
-    if (role != "admin" && result.value().creator_id != user_id) {
-        return common::result::Result<nlohmann::json>::failure("权限不足，只能查看自己创建的工作流");
-    }
+    // All authenticated users can view any non-deleted workflow.
+    // Write operations (update/delete) still enforce ownership checks.
     return result.value().toJson();
 }
 
@@ -410,11 +407,8 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
             "工作流不存在或已删除");
     }
 
-    // Fix #159: resource-level permission check - non-admin users can only
-    // trigger their own workflows.
-    if (role != "admin" && workflow.creator_id != creator_id) {
-        return common::result::Result<nlohmann::json>::failure("权限不足，只能触发自己创建的工作流");
-    }
+    // All authenticated users can trigger any non-deleted workflow.
+    // Write operations (update/delete) still enforce ownership checks.
 
     // 2. Parse dag_json to get all nodes
     const auto& dag = workflow.dag_json;

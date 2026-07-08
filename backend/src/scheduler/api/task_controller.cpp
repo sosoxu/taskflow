@@ -158,16 +158,10 @@ void TaskController::listTasks(
     std::string type_filter = std::string(req->getParameter("type"));
     std::string keyword = std::string(req->getParameter("keyword"));
 
-    // Resource-level permission: non-admin users can only see their own tasks
-    std::string user_id = req->getAttributes()->get<std::string>("user_id");
-    std::string role = req->getAttributes()->get<std::string>("role");
-    std::string creator_id;
-    if (role != "admin") {
-        creator_id = user_id;
-    } else {
-        // Admin can optionally filter by creator_id
-        creator_id = std::string(req->getParameter("creator_id"));
-    }
+    // All authenticated users can view all tasks (read-only for non-owners).
+    // creator_id is an optional filter, no longer forced for non-admin users.
+    // Write operations (update/delete) still enforce ownership checks.
+    std::string creator_id = std::string(req->getParameter("creator_id"));
 
     auto result = task_service_->listTasks(
         page, page_size, type_filter, keyword, creator_id);
