@@ -7,6 +7,8 @@
 #include <atomic>
 #include <sstream>
 #include <vector>
+#include <limits.h>
+#include <unistd.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -206,6 +208,35 @@ int main(int argc, char* argv[]) {
         .addListener("0.0.0.0", config.server.http_port)
         .setThreadNum(config.server.thread_num);
 
+    // 配置静态资源服务
+    std::string static_files_path;
+    if (config.static_files.enabled) {
+        static_files_path = config.static_files.path;
+        if (static_files_path.empty()) {
+            // 默认为 scheduler 可执行程序所在目录
+            char exe_path[PATH_MAX];
+            ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+            if (len > 0) {
+                exe_path[len] = '\0';
+                std::string exe_dir(exe_path);
+                auto last_slash = exe_dir.rfind('/');
+                if (last_slash != std::string::npos) {
+                    static_files_path = exe_dir.substr(0, last_slash);
+                } else {
+                    static_files_path = ".";
+                }
+            } else {
+                static_files_path = ".";
+            }
+        }
+        drogon::app().setDocumentRoot(static_files_path);
+        // 保持 uploads 目录在当前工作目录，避免污染静态资源目录
+        drogon::app().setUploadPath("./uploads");
+        spdlog::info("静态资源服务已启用, document_root: {}", static_files_path);
+    } else {
+        spdlog::info("静态资源服务已禁用");
+    }
+
     // Fix #182: Parse allowed CORS origins from config (comma-separated).
     // If the list is non-empty and the request Origin is in it, echo that
     // Origin; otherwise default to "*" (dev-friendly). Replaces the previous
@@ -253,6 +284,44 @@ int main(int argc, char* argv[]) {
             }
             accb();
         });
+
+    // SPA fallback: 对于非 /api/ 且无文件扩展名的 GET 请求，返回 index.html
+    // 支持 Vue Router history 模式，前端路由如 /dashboard、/workflows 等不会 404
+    if (config.static_files.enabled) {
+        drogon::app().registerPreRoutingAdvice(
+            [&static_files_path](const drogon::HttpRequestPtr& req,
+               drogon::AdviceCallback&& acb,
+               drogon::AdviceChainCallback&& accb) {
+                // 只处理 GET 请求
+                if (req->method() != drogon::Get) {
+                    accb();
+                    return;
+                }
+                const auto& path = req->path();
+                // /api/ 路径走正常认证流程
+                if (path.size() >= 5 && path.substr(0, 5) == "/api/") {
+                    accb();
+                    return;
+                }
+                // 有文件扩展名的请求（如 .js, .css, .png）交给 Drogon 静态文件处理
+                auto dot_pos = path.rfind('.');
+                auto slash_pos = path.rfind('/');
+                if (dot_pos != std::string::npos && dot_pos > slash_pos) {
+                    accb();
+                    return;
+                }
+                // SPA 路由（如 /, /dashboard, /workflows/123），返回 index.html
+                std::string index_path = static_files_path + "/index.html";
+                std::ifstream ifs(index_path);
+                if (ifs.good()) {
+                    auto resp = drogon::HttpResponse::newFileResponse(index_path);
+                    acb(resp);
+                    return;
+                }
+                // index.html 不存在，继续正常处理（返回 404）
+                accb();
+            });
+    }
 
     // 注册全局 Filter（认证 → 权限）
     auto auth_filter = std::make_shared<taskflow::scheduler::middleware::AuthFilter>(

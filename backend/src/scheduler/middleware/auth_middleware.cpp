@@ -15,6 +15,12 @@ void AuthFilter::doFilter(
 
     const auto& path = req->path();
 
+    // 非 /api/ 路径免认证（静态资源、前端页面等）
+    if (path.size() < 5 || path.substr(0, 5) != "/api/") {
+        fccb();
+        return;
+    }
+
     // register/login/refresh 免认证（completed-features.md 2.11）。
     // - register/login: 公开接口
     // - refresh: 使用 body 中的 refresh_token 换取新 access_token，调用时

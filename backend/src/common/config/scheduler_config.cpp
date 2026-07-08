@@ -89,6 +89,13 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         if (tls["ca_path"]) config.worker_client.tls.ca_path = tls["ca_path"].as<std::string>();
     }
 
+    // static_files
+    if (root["static_files"]) {
+        auto sf = root["static_files"];
+        if (sf["enabled"]) config.static_files.enabled = sf["enabled"].as<bool>();
+        if (sf["path"]) config.static_files.path = sf["path"].as<std::string>();
+    }
+
     config.validate();
     return config;
 }

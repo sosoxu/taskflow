@@ -11,6 +11,14 @@ void RoleFilter::doFilter(
     drogon::FilterChainCallback&& fccb) {
 
     auto attrs = req->getAttributes();
+    const auto& path = req->path();
+
+    // 非 /api/ 路径免鉴权（静态资源、前端页面等）
+    if (path.size() < 5 || path.substr(0, 5) != "/api/") {
+        fccb();
+        return;
+    }
+
     if (!attrs->find("role")) {
         // Fix #299: 改为 fail-closed 设计 —— 若 role 属性不存在（AuthFilter 未执行），
         // 返回 403 Forbidden 而非放行。安全系统应默认拒绝。
@@ -25,7 +33,6 @@ void RoleFilter::doFilter(
     }
 
     const std::string& role = attrs->get<std::string>("role");
-    const auto& path = req->path();
     auto method = req->method();
 
     // admin 拥有全部权限

@@ -92,6 +92,12 @@ struct WorkerClientConfig {
     TlsConfig tls;
 };
 
+struct StaticFilesConfig {
+    bool enabled = true;
+    // 静态资源目录路径。为空时默认为 scheduler 可执行程序所在目录。
+    std::string path;
+};
+
 class SchedulerConfig {
 public:
     ServerConfig server;
@@ -101,6 +107,7 @@ public:
     LogConfig log;
     ScheduleConfig schedule;
     WorkerClientConfig worker_client;
+    StaticFilesConfig static_files;
 
     static SchedulerConfig load(const std::string& config_path);
 
