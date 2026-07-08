@@ -5,7 +5,12 @@
 #include <sstream>
 #include <vector>
 #include <unistd.h>
+#ifdef __linux__
 #include <sys/sysinfo.h>
+#elif __APPLE__
+#include <sys/sysctl.h>
+#include <mach/mach.h>
+#endif
 #include <spdlog/spdlog.h>
 
 namespace taskflow::worker::util {
@@ -181,6 +186,7 @@ private:
 
     // 使用 sysinfo() 系统调用回退，不依赖 /proc 文件系统
     static double getMemoryUsageFromSysinfo() {
+#ifdef __linux__
         struct sysinfo si;
         if (sysinfo(&si) != 0) {
             return 0.0;
@@ -203,6 +209,34 @@ private:
         }
 
         return (static_cast<double>(used_ram) / static_cast<double>(total_ram)) * 100.0;
+#elif __APPLE__
+        // macOS: use sysctl to get memory info
+        int64_t total_ram = 0;
+        size_t len = sizeof(total_ram);
+        if (sysctlbyname("hw.memsize", &total_ram, &len, nullptr, 0) != 0 || total_ram == 0) {
+            return 0.0;
+        }
+
+        // Get vm statistics via host_statistics
+        vm_size_t page_size = 0;
+        len = sizeof(page_size);
+        sysctlbyname("vm.pagesize", &page_size, &len, nullptr, 0);
+
+        vm_statistics64_data_t vm_stats;
+        mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+        if (host_statistics64(mach_host_self(), HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&vm_stats), &count) != KERN_SUCCESS) {
+            return 0.0;
+        }
+
+        int64_t free_ram = static_cast<int64_t>(vm_stats.free_count) * page_size;
+        int64_t used_ram = total_ram - free_ram;
+        if (used_ram < 0) used_ram = 0;
+
+        return (static_cast<double>(used_ram) / static_cast<double>(total_ram)) * 100.0;
+#else
+        // Other platforms: not supported
+        return 0.0;
+#endif
     }
 };
 
