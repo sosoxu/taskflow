@@ -5,6 +5,7 @@
 #include <sstream>
 #include <vector>
 #include <unistd.h>
+#include <sys/sysinfo.h>
 #include <spdlog/spdlog.h>
 
 namespace taskflow::worker::util {
@@ -64,10 +65,14 @@ private:
         static unsigned long long last_total = 0;
         static unsigned long long last_idle = 0;
         static bool initialized = false;
+        static bool proc_stat_unavailable = false;
 
         auto [total, idle] = readCpuTimes();
         if (total == 0) {
-            spdlog::warn("ResourceCollector: failed to read /proc/stat");
+            if (!proc_stat_unavailable) {
+                spdlog::warn("ResourceCollector: failed to read /proc/stat (unavailable in this environment, CPU usage will report 0)");
+                proc_stat_unavailable = true;
+            }
             return 0.0;
         }
 
@@ -76,7 +81,10 @@ private:
             usleep(100000);
             auto [total2, idle2] = readCpuTimes();
             if (total2 == 0) {
-                spdlog::warn("ResourceCollector: failed to read /proc/stat on second attempt");
+                if (!proc_stat_unavailable) {
+                    spdlog::warn("ResourceCollector: failed to read /proc/stat on second attempt");
+                    proc_stat_unavailable = true;
+                }
                 return 0.0;
             }
             last_total = total2;
@@ -107,10 +115,26 @@ private:
     }
 
     static double getMemoryUsage() {
+        // 首选 /proc/meminfo（更精确，包含 MemAvailable）
+        auto result = getMemoryUsageFromProc();
+        if (result >= 0.0) {
+            return result;
+        }
+
+        // 回退到 sysinfo() 系统调用（不依赖 /proc 文件系统）
+        static bool proc_fallback_logged = false;
+        if (!proc_fallback_logged) {
+            spdlog::info("ResourceCollector: /proc/meminfo unavailable, falling back to sysinfo()");
+            proc_fallback_logged = true;
+        }
+        return getMemoryUsageFromSysinfo();
+    }
+
+    // 返回 >= 0 表示成功，< 0 表示失败
+    static double getMemoryUsageFromProc() {
         std::ifstream ifs("/proc/meminfo");
         if (!ifs.is_open()) {
-            spdlog::warn("ResourceCollector: failed to open /proc/meminfo");
-            return 0.0;
+            return -1.0;
         }
 
         unsigned long long mem_total = 0;
@@ -138,8 +162,7 @@ private:
         }
 
         if (mem_total == 0) {
-            spdlog::warn("ResourceCollector: MemTotal not found in /proc/meminfo");
-            return 0.0;
+            return -1.0;
         }
 
         // Fix #292: 若系统不支持 MemAvailable（内核 < 3.14），回退使用 MemFree
@@ -150,12 +173,36 @@ private:
         } else if (mem_free > 0) {
             mem_used = mem_total - mem_free;
         } else {
-            // 无法采集可用内存信息，返回 0 表示无法确定
-            spdlog::warn("ResourceCollector: cannot determine available memory (no MemAvailable and MemFree=0)");
-            return 0.0;
+            return -1.0;
         }
 
         return (static_cast<double>(mem_used) / static_cast<double>(mem_total)) * 100.0;
+    }
+
+    // 使用 sysinfo() 系统调用回退，不依赖 /proc 文件系统
+    static double getMemoryUsageFromSysinfo() {
+        struct sysinfo si;
+        if (sysinfo(&si) != 0) {
+            return 0.0;
+        }
+
+        unsigned long long total_ram = static_cast<unsigned long long>(si.totalram) * si.mem_unit;
+        unsigned long long free_ram = static_cast<unsigned long long>(si.freeram) * si.mem_unit;
+        unsigned long long buffer_ram = static_cast<unsigned long long>(si.bufferram) * si.mem_unit;
+
+        if (total_ram == 0) {
+            return 0.0;
+        }
+
+        // sysinfo 只有 freeram（含 buffer/cache），Linux 空闲内存 = free + buffer + cache
+        // sharedram 在新版内核中为 Shmem（共享内存，属于已用内存）
+        // 实际已用 = total - free - buffer（buffer/cache 可回收，类似 MemAvailable 的近似）
+        unsigned long long used_ram = total_ram - free_ram - buffer_ram;
+        if (used_ram > total_ram) {
+            used_ram = total_ram - free_ram;  // buffer 为 0 或计算异常时回退
+        }
+
+        return (static_cast<double>(used_ram) / static_cast<double>(total_ram)) * 100.0;
     }
 };
 
