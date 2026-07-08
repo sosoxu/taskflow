@@ -174,3 +174,44 @@ ON CONFLICT (username) DO NOTHING;
 -- 记录迁移版本
 INSERT INTO schema_migrations (version) VALUES ('1.0.0')
 ON CONFLICT (version) DO NOTHING;
+
+-- ============================================================
+-- 确保所有表归 taskflow 用户所有
+-- 当使用 postgres 超级用户执行此脚本时，表默认归 postgres 所有，
+-- 但应用以 taskflow 用户连接，需要所有权才能创建索引等操作。
+-- ============================================================
+DO $$
+BEGIN
+    -- 仅当当前用户不是表所有者时才修改（避免非超级用户报错）
+    IF current_user = 'postgres' OR (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) = true THEN
+        ALTER TABLE schema_migrations OWNER TO taskflow;
+        ALTER TABLE users OWNER TO taskflow;
+        ALTER TABLE tasks OWNER TO taskflow;
+        ALTER TABLE workflows OWNER TO taskflow;
+        ALTER TABLE workflow_instances OWNER TO taskflow;
+        ALTER TABLE workers OWNER TO taskflow;
+        ALTER TABLE task_instances OWNER TO taskflow;
+        ALTER TABLE cron_jobs OWNER TO taskflow;
+        -- 索引和序列也需一并修改所有权
+        ALTER INDEX idx_users_username OWNER TO taskflow;
+        ALTER INDEX idx_tasks_name_active OWNER TO taskflow;
+        ALTER INDEX idx_tasks_creator OWNER TO taskflow;
+        ALTER INDEX idx_tasks_type OWNER TO taskflow;
+        ALTER INDEX idx_workflows_name_active OWNER TO taskflow;
+        ALTER INDEX idx_workflows_creator OWNER TO taskflow;
+        ALTER INDEX idx_wf_instances_workflow OWNER TO taskflow;
+        ALTER INDEX idx_wf_instances_status OWNER TO taskflow;
+        ALTER INDEX idx_wf_instances_created OWNER TO taskflow;
+        ALTER INDEX idx_workers_status OWNER TO taskflow;
+        ALTER INDEX idx_workers_name OWNER TO taskflow;
+        ALTER INDEX idx_task_instances_wf_instance OWNER TO taskflow;
+        ALTER INDEX idx_task_instances_status OWNER TO taskflow;
+        ALTER INDEX idx_task_instances_worker OWNER TO taskflow;
+        ALTER INDEX idx_cron_jobs_enabled OWNER TO taskflow;
+        ALTER INDEX idx_cron_jobs_next_trigger OWNER TO taskflow;
+        -- 序列（users_id_seq 等 UUID 列使用 gen_random_uuid() 无序列，但 username 等 UNIQUE 约束可能有隐式索引）
+        RAISE NOTICE 'All tables and indexes ownership set to taskflow';
+    ELSE
+        RAISE NOTICE 'Current user is not superuser, skipping ownership transfer';
+    END IF;
+END $$;
