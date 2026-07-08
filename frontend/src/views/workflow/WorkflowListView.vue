@@ -42,7 +42,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="creator_id" label="创建者" width="120" />
+      <el-table-column prop="creator_name" label="创建者" width="120" />
       <el-table-column label="创建时间" width="180">
         <template #default="{ row }">
           {{ formatTime(row.created_at) }}

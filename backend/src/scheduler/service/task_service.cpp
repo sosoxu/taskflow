@@ -1,4 +1,5 @@
 #include "scheduler/service/task_service.h"
+#include <algorithm>
 
 namespace taskflow::scheduler::service {
 
@@ -101,6 +102,14 @@ common::result::Result<nlohmann::json> TaskService::getTask(
     auto taskJson = task.toJson();
     taskJson["config_json"] = maskSensitiveFields(taskJson["config_json"], task.type);
 
+    // Add creator_name
+    if (!task.creator_id.empty()) {
+        auto userResult = user_dao_.findById(task.creator_id);
+        taskJson["creator_name"] = userResult.ok() ? userResult.value().username : "";
+    } else {
+        taskJson["creator_name"] = "";
+    }
+
     return taskJson;
 }
 
@@ -121,10 +130,32 @@ common::result::Result<nlohmann::json> TaskService::listTasks(
     }
 
     const auto& tasks = listResult.value();
+
+    // Batch fetch creator names
+    std::vector<std::string> creator_ids;
+    for (const auto& task : tasks) {
+        if (!task.creator_id.empty()) {
+            creator_ids.push_back(task.creator_id);
+        }
+    }
+    // Deduplicate
+    std::sort(creator_ids.begin(), creator_ids.end());
+    creator_ids.erase(std::unique(creator_ids.begin(), creator_ids.end()), creator_ids.end());
+
+    std::unordered_map<std::string, std::string> creator_names;
+    if (!creator_ids.empty()) {
+        auto namesResult = user_dao_.findByIds(creator_ids);
+        if (namesResult.ok()) {
+            creator_names = namesResult.value();
+        }
+    }
+
     nlohmann::json items = nlohmann::json::array();
     for (const auto& task : tasks) {
         auto taskJson = task.toJson();
         taskJson["config_json"] = maskSensitiveFields(taskJson["config_json"], task.type);
+        auto it = creator_names.find(task.creator_id);
+        taskJson["creator_name"] = (it != creator_names.end()) ? it->second : "";
         items.push_back(taskJson);
     }
 

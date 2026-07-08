@@ -29,7 +29,7 @@
               </template>
               <span v-else>-</span>
             </el-descriptions-item>
-            <el-descriptions-item label="创建者">{{ task.creator_id }}</el-descriptions-item>
+            <el-descriptions-item label="创建者">{{ task.creator_name || task.creator_id }}</el-descriptions-item>
             <el-descriptions-item label="创建时间">{{ formatTime(task.created_at) }}</el-descriptions-item>
             <el-descriptions-item label="更新时间">{{ formatTime(task.updated_at) }}</el-descriptions-item>
           </el-descriptions>

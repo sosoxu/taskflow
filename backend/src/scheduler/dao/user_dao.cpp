@@ -44,6 +44,59 @@ common::result::Result<common::models::User> UserDao::findById(const std::string
         });
 }
 
+common::result::Result<std::unordered_map<std::string, std::string>> UserDao::findByIds(
+    const std::vector<std::string>& ids) {
+
+    if (ids.empty()) {
+        return std::unordered_map<std::string, std::string>{};
+    }
+
+    return common::database::DatabaseManager::instance().withReadTransaction<std::unordered_map<std::string, std::string>>(
+        [&](pqxx::nontransaction& txn) -> common::result::Result<std::unordered_map<std::string, std::string>> {
+            // Build parameterized IN clause: WHERE id IN ($1, $2, ...)
+            std::string sql = "SELECT id, username FROM users WHERE id IN (";
+            for (size_t i = 0; i < ids.size(); ++i) {
+                if (i > 0) sql += ", ";
+                sql += "$" + std::to_string(i + 1);
+            }
+            sql += ")";
+
+            // pqxx doesn't support variadic exec_params with vector,
+            // so we use exec with escaped values for this safe UUID list.
+            // Alternatively, build the query string with params.
+            std::unordered_map<std::string, std::string> result;
+            pqxx::result res;
+            switch (ids.size()) {
+                case 1: res = txn.exec_params(sql, ids[0]); break;
+                case 2: res = txn.exec_params(sql, ids[0], ids[1]); break;
+                case 3: res = txn.exec_params(sql, ids[0], ids[1], ids[2]); break;
+                case 4: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3]); break;
+                case 5: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3], ids[4]); break;
+                case 6: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3], ids[4], ids[5]); break;
+                case 7: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6]); break;
+                case 8: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7]); break;
+                case 9: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7], ids[8]); break;
+                case 10: res = txn.exec_params(sql, ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6], ids[7], ids[8], ids[9]); break;
+                default: {
+                    // For larger sets, use a temporary table approach
+                    // Simple fallback: query one by one (unlikely to have >10 unique creators per page)
+                    for (const auto& uid : ids) {
+                        auto r = txn.exec_params("SELECT id, username FROM users WHERE id = $1", uid);
+                        if (!r.empty()) {
+                            result[r[0][0].as<std::string>()] = r[0][1].as<std::string>();
+                        }
+                    }
+                    return result;
+                }
+            }
+
+            for (const auto& row : res) {
+                result[row[0].as<std::string>()] = row[1].as<std::string>();
+            }
+            return result;
+        });
+}
+
 common::result::Result<common::models::User> UserDao::findByUsername(const std::string& username) {
     return common::database::DatabaseManager::instance().withReadTransaction<common::models::User>(
         [&](pqxx::nontransaction& txn) -> common::result::Result<common::models::User> {

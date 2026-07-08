@@ -2,6 +2,8 @@
 
 #include <string>
 #include <optional>
+#include <unordered_map>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include "common/result/result.h"
 #include "scheduler/dao/workflow_dao.h"
@@ -10,6 +12,7 @@
 #include "scheduler/dao/task_dao.h"
 #include "scheduler/dao/cron_job_dao.h"
 #include "scheduler/dao/worker_dao.h"
+#include "scheduler/dao/user_dao.h"
 
 namespace taskflow::scheduler::service {
 
@@ -64,6 +67,7 @@ private:
     dao::TaskDao task_dao_;
     dao::CronJobDao cron_job_dao_;
     dao::WorkerDao worker_dao_;
+    dao::UserDao user_dao_;
 };
 
 }  // namespace taskflow::scheduler::service

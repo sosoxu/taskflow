@@ -36,7 +36,7 @@
       <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
       <el-table-column prop="timeout" label="超时(s)" width="100" />
       <el-table-column prop="max_retries" label="最大重试" width="100" />
-      <el-table-column prop="creator_id" label="创建者" width="120" show-overflow-tooltip />
+      <el-table-column prop="creator_name" label="创建者" width="120" show-overflow-tooltip />
       <el-table-column label="创建时间" width="180">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
       </el-table-column>

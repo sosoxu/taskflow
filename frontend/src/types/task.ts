@@ -10,6 +10,7 @@ export interface TaskItem {
   resource_tags: string[]
   parameters_json: Record<string, unknown>
   creator_id: string
+  creator_name?: string
   version: number
   created_at: string
   updated_at: string

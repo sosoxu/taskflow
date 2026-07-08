@@ -8,6 +8,7 @@ export interface WorkflowItem {
   cron_expression: string | null
   cron_enabled: boolean
   creator_id: string
+  creator_name?: string
   version: number
   // Fix #164: deleted is returned by the backend but was missing from the type,
   // causing untyped access and potential runtime confusion in list views.

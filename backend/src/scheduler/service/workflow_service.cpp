@@ -147,7 +147,18 @@ common::result::Result<nlohmann::json> WorkflowService::getWorkflow(
     }
     // All authenticated users can view any non-deleted workflow.
     // Write operations (update/delete) still enforce ownership checks.
-    return result.value().toJson();
+    auto wfJson = result.value().toJson();
+
+    // Add creator_name
+    const auto& wf = result.value();
+    if (!wf.creator_id.empty()) {
+        auto userResult = user_dao_.findById(wf.creator_id);
+        wfJson["creator_name"] = userResult.ok() ? userResult.value().username : "";
+    } else {
+        wfJson["creator_name"] = "";
+    }
+
+    return wfJson;
 }
 
 common::result::Result<nlohmann::json> WorkflowService::listWorkflows(
@@ -166,9 +177,31 @@ common::result::Result<nlohmann::json> WorkflowService::listWorkflows(
     }
 
     const auto& workflows = listResult.value();
+
+    // Batch fetch creator names
+    std::vector<std::string> creator_ids;
+    for (const auto& wf : workflows) {
+        if (!wf.creator_id.empty()) {
+            creator_ids.push_back(wf.creator_id);
+        }
+    }
+    std::sort(creator_ids.begin(), creator_ids.end());
+    creator_ids.erase(std::unique(creator_ids.begin(), creator_ids.end()), creator_ids.end());
+
+    std::unordered_map<std::string, std::string> creator_names;
+    if (!creator_ids.empty()) {
+        auto namesResult = user_dao_.findByIds(creator_ids);
+        if (namesResult.ok()) {
+            creator_names = namesResult.value();
+        }
+    }
+
     nlohmann::json items = nlohmann::json::array();
     for (const auto& wf : workflows) {
-        items.push_back(wf.toJson());
+        auto wfJson = wf.toJson();
+        auto it = creator_names.find(wf.creator_id);
+        wfJson["creator_name"] = (it != creator_names.end()) ? it->second : "";
+        items.push_back(wfJson);
     }
 
     // Get total count with same filters

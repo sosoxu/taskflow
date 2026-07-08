@@ -1,11 +1,13 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "common/result/result.h"
 #include "common/models/task.h"
 #include "common/util/crypto_util.h"
 #include "scheduler/dao/task_dao.h"
+#include "scheduler/dao/user_dao.h"
 
 namespace taskflow::scheduler::service {
 
@@ -47,6 +49,7 @@ public:
 private:
     std::string aes_key_;
     dao::TaskDao task_dao_;
+    dao::UserDao user_dao_;
 
     // Validate task config based on type
     common::result::Result<void> validateConfig(const std::string& type, const nlohmann::json& config);

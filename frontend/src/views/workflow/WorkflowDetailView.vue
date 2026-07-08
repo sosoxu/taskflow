@@ -27,7 +27,7 @@
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="Cron 表达式">{{ workflow?.cron_enabled ? (workflow?.cron_expression || '-') : '-' }}</el-descriptions-item>
-        <el-descriptions-item label="创建者">{{ workflow?.creator_id }}</el-descriptions-item>
+        <el-descriptions-item label="创建者">{{ workflow?.creator_name || workflow?.creator_id }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ formatTime(workflow?.created_at) }}</el-descriptions-item>
       </el-descriptions>
     </el-card>

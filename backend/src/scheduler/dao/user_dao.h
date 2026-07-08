@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "common/result/result.h"
 #include "common/models/user.h"
 
@@ -15,6 +16,10 @@ public:
 
     // 按 ID 查找
     common::result::Result<common::models::User> findById(const std::string& id);
+
+    // 批量按 ID 查找，返回 id → username 映射
+    common::result::Result<std::unordered_map<std::string, std::string>> findByIds(
+        const std::vector<std::string>& ids);
 
     // 按用户名查找
     common::result::Result<common::models::User> findByUsername(const std::string& username);
