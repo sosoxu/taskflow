@@ -132,8 +132,12 @@ download https://github.com/madler/zlib/archive/09155eaa2f9270dc4ed1fa13e2b4b261
 echo "[15/17] googletest (gRPC 子模块，使用 gRPC v1.65.5 锁定的 commit)"
 download https://github.com/google/googletest/archive/2dd1c131950043a8ad5ab0d2dda0e0970596586a.tar.gz googletest-2dd1c13.tar.gz
 
-echo "[16/17] boringssl (gRPC 子模块，使用 gRPC v1.65.5 锁定的 commit)"
-download https://github.com/google/boringssl/archive/16c8d3db1af20fcc04b5190b25242aadcb1fbb30.tar.gz boringssl-16c8d3d.tar.gz
+echo "[16/17] boringssl (可选：仅 -DGRPC_USE_BORINGSSL=ON 时需要，默认用系统 OpenSSL)"
+if [ "$DOWNLOAD_BORINGSSL" = true ]; then
+    download https://github.com/google/boringssl/archive/16c8d3db1af20fcc04b5190b25242aadcb1fbb30.tar.gz boringssl-16c8d3d.tar.gz
+else
+    echo "  跳过（默认使用系统 OpenSSL，如需 BoringSSL 设 DOWNLOAD_BORINGSSL=true）"
+fi
 
 # ============================================================================
 # 测试依赖

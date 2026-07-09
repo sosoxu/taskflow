@@ -238,103 +238,71 @@ private:
         return diff == 0;
     }
 
-    static std::string base64Encode(const unsigned char* data, int len) {
+    static std::string base64Encode(const unsigned char* data, size_t len) {
         static const char kTable[] =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
         std::string result;
-        result.reserve(static_cast<size_t>(len) * 4 / 3 + 4);
+        result.reserve(((len + 2) / 3) * 4);
 
-        for (int i = 0; i < len; i += 3) {
+        for (size_t i = 0; i < len; i += 3) {
             unsigned int n = static_cast<unsigned int>(data[i]) << 16;
-            if (i + 1 < len) {
-                n |= static_cast<unsigned int>(data[i + 1]) << 8;
-            }
-            if (i + 2 < len) {
-                n |= static_cast<unsigned int>(data[i + 2]);
-            }
+            if (i + 1 < len) n |= static_cast<unsigned int>(data[i + 1]) << 8;
+            if (i + 2 < len) n |= static_cast<unsigned int>(data[i + 2]);
 
             result += kTable[(n >> 18) & 0x3F];
             result += kTable[(n >> 12) & 0x3F];
             result += (i + 1 < len) ? kTable[(n >> 6) & 0x3F] : '=';
             result += (i + 2 < len) ? kTable[n & 0x3F] : '=';
         }
-
         return result;
     }
 
-    static common::result::Result<std::vector<unsigned char>> base64Decode(const std::string& encoded) {
-        static const int kTable[256] = {
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
-            52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
-            -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-            15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-            -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
-            41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-            -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    static common::result::Result<std::vector<unsigned char>> base64Decode(const std::string& input) {
+        static const int kDecodingTable[256] = {
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,
+            52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1,
+            -1,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
+            15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1,
+            -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+            41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+            -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
         };
 
-        if (encoded.empty()) {
-            return std::vector<unsigned char>{};
-        }
+        std::vector<unsigned char> output;
+        output.reserve((input.size() / 4) * 3);
 
-        // Fix #286: 校验 encoded.size() <= INT_MAX，防止 static_cast<int> 截断为负数导致越界读
-        if (encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
-            return common::result::Result<std::vector<unsigned char>>::failure(
-                "Invalid base64: input too large");
-        }
+        int accumulation = 0;
+        int bits = 0;
 
-        auto len = static_cast<int>(encoded.size());
-        if (len % 4 != 0) {
-            return common::result::Result<std::vector<unsigned char>>::failure(
-                "Invalid base64 length");
-        }
+        for (char c : input) {
+            if (c == '=') break;
 
-        int padding = 0;
-        if (encoded[static_cast<size_t>(len - 1)] == '=') padding++;
-        if (encoded[static_cast<size_t>(len - 2)] == '=') padding++;
+            int value = kDecodingTable[static_cast<unsigned char>(c)];
+            if (value == -1) continue;
 
-        auto out_len = static_cast<size_t>(len / 4 * 3 - padding);
-        std::vector<unsigned char> result(out_len);
+            accumulation = (accumulation << 6) | value;
+            bits += 6;
 
-        int j = 0;
-        for (int i = 0; i < len; i += 4) {
-            int a = kTable[static_cast<unsigned char>(encoded[static_cast<size_t>(i)])];
-            int b = kTable[static_cast<unsigned char>(encoded[static_cast<size_t>(i + 1)])];
-            int c = kTable[static_cast<unsigned char>(encoded[static_cast<size_t>(i + 2)])];
-            int d = kTable[static_cast<unsigned char>(encoded[static_cast<size_t>(i + 3)])];
-
-            if (a < 0 || b < 0) {
-                return common::result::Result<std::vector<unsigned char>>::failure(
-                    "Invalid base64 character");
+            if (bits >= 8) {
+                bits -= 8;
+                output.push_back(static_cast<unsigned char>((accumulation >> bits) & 0xFF));
             }
-            // c and d may be -1 for padding '=', treat as 0
-            if (c < 0) c = 0;
-            if (d < 0) d = 0;
-
-            unsigned int n = (static_cast<unsigned int>(a) << 18) |
-                             (static_cast<unsigned int>(b) << 12) |
-                             (static_cast<unsigned int>(c) << 6) |
-                             static_cast<unsigned int>(d);
-
-            if (j < static_cast<int>(out_len))
-                result[static_cast<size_t>(j++)] = static_cast<unsigned char>((n >> 16) & 0xFF);
-            if (j < static_cast<int>(out_len))
-                result[static_cast<size_t>(j++)] = static_cast<unsigned char>((n >> 8) & 0xFF);
-            if (j < static_cast<int>(out_len))
-                result[static_cast<size_t>(j++)] = static_cast<unsigned char>(n & 0xFF);
         }
 
-        return result;
+        if (output.empty()) {
+            return common::result::Result<std::vector<unsigned char>>::failure("Base64 decode failed: empty output");
+        }
+        return output;
     }
 };
 

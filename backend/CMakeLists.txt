@@ -184,11 +184,19 @@ else()
 endif()
 
 # ============================================================================
+# OpenSSL (系统库，离线环境需预装)
+# 必须在 gRPC 之前查找，因为 GRPC_FROM_SOURCE=ON 时 gRPC_SSL_PROVIDER=package
+# 需要 find_package(OpenSSL) 已执行
+# ============================================================================
+find_package(OpenSSL REQUIRED)
+
+# ============================================================================
 # gRPC
 # GRPC_FROM_SOURCE=ON: 从 thirdparty/ tarball 构建 gRPC
 #   - 填充所有子模块到 gRPC 源码目录
 #   - 使用 gRPC_*_PROVIDER=module 让 gRPC 从 third_party/ 子目录构建所有依赖
 #   - abseil-cpp 和 protobuf 由 gRPC 的 module 模式自动构建
+#   - SSL 使用系统 OpenSSL（package 模式），避免 BoringSSL 与系统 OpenSSL 符号冲突
 # GRPC_FROM_SOURCE=OFF: 使用系统 gRPC 包
 # ============================================================================
 if(GRPC_FROM_SOURCE)
@@ -231,11 +239,14 @@ if(GRPC_FROM_SOURCE)
         file(COPY ${zlib_grpc_src_SOURCE_DIR}/ DESTINATION ${grpc_SOURCE_DIR}/third_party/zlib)
     endif()
 
-    # 填充 boringssl 子模块
-    FetchContent_Declare(boringssl URL ${TP_DIR}/boringssl-16c8d3d.tar.gz)
-    FetchContent_Populate(boringssl)
-    if(EXISTS "${boringssl_SOURCE_DIR}/CMakeLists.txt")
-        file(COPY ${boringssl_SOURCE_DIR}/ DESTINATION ${grpc_SOURCE_DIR}/third_party/boringssl-with-bazel)
+    # 填充 boringssl 子模块（仅 SSL_PROVIDER=module 时需要，package 模式用系统 OpenSSL）
+    option(GRPC_USE_BORINGSSL "Use BoringSSL instead of system OpenSSL" OFF)
+    if(GRPC_USE_BORINGSSL)
+        FetchContent_Declare(boringssl URL ${TP_DIR}/boringssl-16c8d3d.tar.gz)
+        FetchContent_Populate(boringssl)
+        if(EXISTS "${boringssl_SOURCE_DIR}/CMakeLists.txt")
+            file(COPY ${boringssl_SOURCE_DIR}/ DESTINATION ${grpc_SOURCE_DIR}/third_party/boringssl-with-bazel)
+        endif()
     endif()
 
     # 填充 googletest 子模块
@@ -268,11 +279,17 @@ if(GRPC_FROM_SOURCE)
     set(gRPC_DOWNLOAD_ARCHIVES OFF CACHE BOOL "" FORCE)
 
     # 所有依赖使用 module 模式（从 third_party/ 子目录构建）
+    # 注意: SSL 使用 package 模式（系统 OpenSSL），避免 BoringSSL 与系统 OpenSSL 符号冲突
+    # 如需改用 BoringSSL，设 -DGRPC_USE_BORINGSSL=ON -DgRPC_SSL_PROVIDER=module
     set(gRPC_ABSL_PROVIDER "module" CACHE STRING "" FORCE)
     set(gRPC_PROTOBUF_PROVIDER "module" CACHE STRING "" FORCE)
     set(gRPC_RE2_PROVIDER "module" CACHE STRING "" FORCE)
     set(gRPC_CARES_PROVIDER "module" CACHE STRING "" FORCE)
-    set(gRPC_SSL_PROVIDER "module" CACHE STRING "" FORCE)
+    if(GRPC_USE_BORINGSSL)
+        set(gRPC_SSL_PROVIDER "module" CACHE STRING "" FORCE)
+    else()
+        set(gRPC_SSL_PROVIDER "package" CACHE STRING "" FORCE)
+    endif()
     set(gRPC_ZLIB_PROVIDER "module" CACHE STRING "" FORCE)
     set(gRPC_BENCHMARK_PROVIDER "none" CACHE STRING "" FORCE)
 
@@ -517,10 +534,7 @@ else()
     endif()
 endif()
 
-# ============================================================================
-# OpenSSL (系统库，离线环境需预装)
-# ============================================================================
-find_package(OpenSSL REQUIRED)
+# OpenSSL 已在 gRPC 配置之前 find_package(OpenSSL REQUIRED)
 
 # ============================================================================
 # Proto 生成
