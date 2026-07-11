@@ -128,6 +128,26 @@ common::result::Result<void> CronJobDao::updateNextTriggerTime(
         });
 }
 
+common::result::Result<bool> CronJobDao::tryClaimTrigger(
+    const std::string& id,
+    const std::string& old_trigger_time,
+    const std::string& new_trigger_time) {
+
+    return common::database::DatabaseManager::instance().withTransaction<bool>(
+        [&](pqxx::work& txn) -> common::result::Result<bool> {
+            // 乐观锁：仅当 next_trigger_time 仍等于 old_trigger_time 时才更新。
+            // 双 leader 并发时，只有一个 UPDATE 会命中（affected_rows=1），
+            // 另一个得到 0 行，从而避免重复创建 WorkflowInstance。
+            auto res = txn.exec_params(
+                "UPDATE cron_jobs SET next_trigger_time = $1::timestamptz, "
+                "updated_at = NOW() WHERE id = $2 "
+                "AND next_trigger_time = $3::timestamptz",
+                new_trigger_time, id, old_trigger_time);
+
+            return res.affected_rows() > 0;
+        });
+}
+
 common::result::Result<std::vector<common::models::CronJob>> CronJobDao::listDue(
     const std::string& current_time) {
 

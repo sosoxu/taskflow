@@ -113,13 +113,23 @@ void CronScheduler::triggerCronJob(const common::models::CronJob& cron_job) {
     // leave next_trigger_time unchanged, causing the job to fire again on the
     // next tick (duplicate triggers). Advancing first guarantees at-most-once
     // triggering even when subsequent steps fail.
+    //
+    // Fix #330: 使用乐观锁（tryClaimTrigger）替代无条件 UPDATE，
+    // 防止多实例部署时双 leader 并发触发同一 CronJob 导致重复创建 WorkflowInstance。
     std::string next_time = computeNextTriggerTime(cron_job.cron_expression);
-    auto update_result = cron_job_dao_.updateNextTriggerTime(cron_job.id, next_time);
-    if (!update_result.ok()) {
+    auto claim_result = cron_job_dao_.tryClaimTrigger(
+        cron_job.id, cron_job.next_trigger_time, next_time);
+    if (!claim_result.ok()) {
         spdlog::error(
-            "CronScheduler: failed to update next trigger time for cron job "
-            "{}: {}",
-            cron_job.id, update_result.error());
+            "CronScheduler: failed to claim trigger for cron job {}: {}",
+            cron_job.id, claim_result.error());
+        return;
+    }
+    if (!claim_result.value()) {
+        // 另一个 scheduler 实例已经抢占了触发权，跳过
+        spdlog::info(
+            "CronScheduler: cron job {} already claimed by another instance, skipping",
+            cron_job.id);
         return;
     }
 

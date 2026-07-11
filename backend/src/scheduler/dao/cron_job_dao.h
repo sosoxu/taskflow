@@ -28,6 +28,14 @@ public:
         const std::string& id,
         const std::string& next_trigger_time);
 
+    // 原子抢占触发权：仅当 next_trigger_time 仍等于 old_trigger_time 时才更新为新值。
+    // 返回 true 表示抢占成功，false 表示已被其他实例抢占。
+    // 用于多实例部署时防止重复触发 CronJob。
+    common::result::Result<bool> tryClaimTrigger(
+        const std::string& id,
+        const std::string& old_trigger_time,
+        const std::string& new_trigger_time);
+
     // 查询当前时间前应触发的 CronJob
     common::result::Result<std::vector<common::models::CronJob>> listDue(
         const std::string& current_time);
