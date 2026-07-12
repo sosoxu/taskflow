@@ -166,6 +166,17 @@ CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE ena
 CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 
 -- ============================================================
+-- 8. Token 黑名单表（多实例共享，登出/刷新时写入）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS token_blacklist (
+    jti             VARCHAR(64) PRIMARY KEY,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE token_blacklist OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);
+
+-- ============================================================
 -- 初始管理员用户（密码: admin123，bcrypt hash）
 -- ============================================================
 INSERT INTO users (username, password_hash, role)
@@ -193,6 +204,7 @@ BEGIN
         ALTER TABLE workers OWNER TO taskflow;
         ALTER TABLE task_instances OWNER TO taskflow;
         ALTER TABLE cron_jobs OWNER TO taskflow;
+        ALTER TABLE token_blacklist OWNER TO taskflow;
         -- 索引和序列也需一并修改所有权
         ALTER INDEX idx_users_username OWNER TO taskflow;
         ALTER INDEX idx_tasks_name_active OWNER TO taskflow;
@@ -210,6 +222,7 @@ BEGIN
         ALTER INDEX idx_task_instances_worker OWNER TO taskflow;
         ALTER INDEX idx_cron_jobs_enabled OWNER TO taskflow;
         ALTER INDEX idx_cron_jobs_next_trigger OWNER TO taskflow;
+        ALTER INDEX idx_token_blacklist_expires OWNER TO taskflow;
         RAISE NOTICE 'All tables and indexes ownership set to taskflow';
     ELSE
         RAISE NOTICE 'Current user is not superuser, skipping ownership transfer';

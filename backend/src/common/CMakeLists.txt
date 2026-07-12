@@ -3,6 +3,7 @@ add_library(taskflow_common STATIC
     config/worker_config.cpp
     database/database_manager.cpp
     util/crypto_util.cpp
+    util/token_blacklist.cpp
 )
 
 target_include_directories(taskflow_common PUBLIC
