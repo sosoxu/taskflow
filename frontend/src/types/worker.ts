@@ -11,3 +11,34 @@ export interface WorkerInfo {
   last_heartbeat: string
   registered_at: string
 }
+
+// 部署（新建 + 启动）worker 的请求参数
+export interface DeployWorkerRequest {
+  name: string
+  host: string
+  grpc_port: number
+  ssh_port?: number
+  ssh_username: string
+  ssh_password: string
+  max_tasks?: number
+  resource_tags?: string[]
+  worker_binary_path?: string
+  remote_dir?: string
+  scheduler_address: string
+  log_level?: string
+}
+
+export interface DeployStepLog {
+  step: string
+  success: boolean
+  message: string
+}
+
+export interface DeployWorkerResult {
+  success: boolean
+  worker_name: string
+  address: string
+  config_path: string
+  steps: DeployStepLog[]
+  message: string
+}

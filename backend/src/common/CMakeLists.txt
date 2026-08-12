@@ -4,6 +4,7 @@ add_library(taskflow_common STATIC
     database/database_manager.cpp
     util/crypto_util.cpp
     util/token_blacklist.cpp
+    util/ssh_executor.cpp
 )
 
 target_include_directories(taskflow_common PUBLIC

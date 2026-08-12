@@ -369,7 +369,8 @@ int main(int argc, char* argv[]) {
 
     auto worker_dao = std::make_shared<taskflow::scheduler::dao::WorkerDao>();
     auto worker_service = std::make_shared<taskflow::scheduler::service::WorkerService>(worker_dao);
-    auto workerCtrl = std::make_shared<taskflow::scheduler::api::WorkerController>(worker_service);
+    auto worker_deploy_service = std::make_shared<taskflow::scheduler::service::WorkerDeployService>();
+    auto workerCtrl = std::make_shared<taskflow::scheduler::api::WorkerController>(worker_service, worker_deploy_service);
     drogon::app().registerController(workerCtrl);
 
     auto dashboard_service = std::make_shared<taskflow::scheduler::service::DashboardService>();
