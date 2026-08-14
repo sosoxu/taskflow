@@ -104,9 +104,9 @@ configs:
     content: |
       server:
         grpc_port: 50052
-        # Fix #146: Advertise the Docker service hostname so the scheduler
-        # can dial back this worker container (not localhost).
-        advertise_address: "worker:50052"
+        # Each scaled worker registers its own container IP. The `worker`
+        # service name load-balances and cannot identify a specific replica.
+        advertise_address: "auto"
       scheduler:
         address: "scheduler:50051"
       worker:

@@ -105,6 +105,9 @@ schedule:
 ```yaml
 server:
   grpc_port: 50052          # gRPC 监听端口
+  # Docker 多 Worker 部署使用 "auto"，让每个副本注册自己的容器 IP。
+  # 远程主机部署时填写 Scheduler 可访问的 host:port。
+  # advertise_address: "auto"
   tls:                     # gRPC TLS 配置（可选）
     enabled: false
     cert_path: ""

@@ -418,7 +418,9 @@ schedule:
 ```yaml
 server:
   grpc_port: 50052
-  advertise_address: "worker:50052"  # 对外可达地址（Docker 中用服务名）
+  # Docker 多 Worker 部署使用 "auto"，每个副本会注册自己的容器 IP。
+  # 远程主机部署时填写 Scheduler 可访问的 host:port。
+  advertise_address: "auto"
 
 scheduler:
   address: "localhost:50051"

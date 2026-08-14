@@ -7,6 +7,12 @@
 #include <filesystem>
 #include <fstream>
 #include <csignal>
+#include <cstring>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -59,6 +65,42 @@ static void initLogger(const taskflow::common::config::WorkerLogConfig& log_conf
         std::cerr << "日志初始化失败: " << e.what() << std::endl;
         exit(1);
     }
+}
+
+static std::string localHostname() {
+    char hostname[256] = {};
+    if (::gethostname(hostname, sizeof(hostname) - 1) != 0) {
+        return "unknown";
+    }
+    return hostname;
+}
+
+// Docker's service DNS name load-balances across replicas, which is unsuitable
+// for scheduler-to-worker callbacks. Register this instance's own interface IP.
+static std::string localRoutableIpv4() {
+    ifaddrs* interfaces = nullptr;
+    if (::getifaddrs(&interfaces) != 0) {
+        return {};
+    }
+
+    std::string address;
+    for (auto* interface = interfaces; interface != nullptr; interface = interface->ifa_next) {
+        if (interface->ifa_addr == nullptr || interface->ifa_addr->sa_family != AF_INET ||
+            (interface->ifa_flags & IFF_UP) == 0 ||
+            (interface->ifa_flags & IFF_LOOPBACK) != 0) {
+            continue;
+        }
+
+        char buffer[INET_ADDRSTRLEN] = {};
+        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(interface->ifa_addr);
+        if (::inet_ntop(AF_INET, &ipv4->sin_addr, buffer, sizeof(buffer)) != nullptr) {
+            address = buffer;
+            break;
+        }
+    }
+
+    ::freeifaddrs(interfaces);
+    return address;
 }
 
 // WorkerService 实现 - 集成 TaskExecutor
@@ -389,14 +431,61 @@ int main(int argc, char* argv[]) {
     }
     taskflow::worker::grpc::WorkerClient scheduler_client(channel);
 
+    // Start accepting callbacks before registering the worker. Registration
+    // makes the worker immediately eligible for scheduling, so doing it first
+    // exposes a window where the scheduler can select an unreachable worker.
+    std::string server_address = "0.0.0.0:" + std::to_string(config.server.grpc_port);
+    WorkerServiceImpl service(executor, scheduler_client, config.task_log.dir);
+
+    ::grpc::ServerBuilder builder;
+    if (config.server.tls.enabled) {
+        grpc::SslServerCredentialsOptions ssl_opts;
+        std::ifstream cert_file(config.server.tls.cert_path);
+        std::ifstream key_file(config.server.tls.key_path);
+        std::string cert_str((std::istreambuf_iterator<char>(cert_file)),
+                             std::istreambuf_iterator<char>());
+        std::string key_str((std::istreambuf_iterator<char>(key_file)),
+                            std::istreambuf_iterator<char>());
+        grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert;
+        key_cert.private_key = key_str;
+        key_cert.cert_chain = cert_str;
+        ssl_opts.pem_key_cert_pairs.push_back(key_cert);
+        if (!config.server.tls.ca_path.empty()) {
+            std::ifstream ca_file(config.server.tls.ca_path);
+            std::string ca_str((std::istreambuf_iterator<char>(ca_file)),
+                               std::istreambuf_iterator<char>());
+            ssl_opts.pem_root_certs = ca_str;
+        }
+        builder.AddListeningPort(server_address, grpc::SslServerCredentials(ssl_opts));
+    } else {
+        builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
+    }
+    builder.RegisterService(&service);
+
+    std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());
+    if (!server) {
+        spdlog::error("gRPC 服务启动失败");
+        return 1;
+    }
+    spdlog::info("TaskFlow Worker 已监听, 等待向 Scheduler 注册: {}", server_address);
+
     // 向 Scheduler 注册（带重试）
     std::string worker_name = config.worker.name;
     if (worker_name.empty()) {
-        worker_name = "worker-" + std::to_string(config.server.grpc_port);
+        worker_name = "worker-" + localHostname() + "-" +
+                      std::to_string(config.server.grpc_port);
     }
 
     std::string worker_address = config.server.advertise_address;
-    if (worker_address.empty()) {
+    if (worker_address == "auto") {
+        auto interface_address = localRoutableIpv4();
+        if (interface_address.empty()) {
+            spdlog::error("无法自动检测可路由的 IPv4 地址; 请设置 server.advertise_address");
+            server->Shutdown();
+            return 1;
+        }
+        worker_address = interface_address + ":" + std::to_string(config.server.grpc_port);
+    } else if (worker_address.empty()) {
         // Fix #146: Fall back to localhost:<port> for single-host dev setups.
         // Operators must set server.advertise_address when running in Docker
         // or on a remote host so the scheduler can dial back this worker.
@@ -479,44 +568,6 @@ int main(int argc, char* argv[]) {
             }
         }
     });
-
-    // 启动 gRPC 服务
-    std::string server_address = "0.0.0.0:" + std::to_string(config.server.grpc_port);
-    WorkerServiceImpl service(executor, scheduler_client, config.task_log.dir);
-
-    ::grpc::ServerBuilder builder;
-    if (config.server.tls.enabled) {
-        grpc::SslServerCredentialsOptions ssl_opts;
-        std::ifstream cert_file(config.server.tls.cert_path);
-        std::ifstream key_file(config.server.tls.key_path);
-        std::string cert_str((std::istreambuf_iterator<char>(cert_file)),
-                              std::istreambuf_iterator<char>());
-        std::string key_str((std::istreambuf_iterator<char>(key_file)),
-                             std::istreambuf_iterator<char>());
-        grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert;
-        key_cert.private_key = key_str;
-        key_cert.cert_chain = cert_str;
-        ssl_opts.pem_key_cert_pairs.push_back(key_cert);
-        if (!config.server.tls.ca_path.empty()) {
-            std::ifstream ca_file(config.server.tls.ca_path);
-            std::string ca_str((std::istreambuf_iterator<char>(ca_file)),
-                                std::istreambuf_iterator<char>());
-            ssl_opts.pem_root_certs = ca_str;
-        }
-        builder.AddListeningPort(server_address, grpc::SslServerCredentials(ssl_opts));
-    } else {
-        builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
-    }
-    builder.RegisterService(&service);
-
-    std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());
-    if (!server) {
-        spdlog::error("gRPC 服务启动失败");
-        running.store(false);
-        heartbeat_thread.join();
-        log_cleanup_thread.join();
-        return 1;
-    }
 
     spdlog::info("TaskFlow Worker 启动完成, 监听: {}", server_address);
 

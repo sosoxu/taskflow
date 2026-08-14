@@ -1,5 +1,8 @@
 server:
   grpc_port: 50052
+  # Docker multi-worker deployment: use "auto" to register this worker's
+  # container IP. For remote hosts, set an explicitly reachable host:port.
+  # advertise_address: "auto"
   # tls:
   #   enabled: true
   #   cert_path: /path/to/cert.pem
