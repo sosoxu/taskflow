@@ -65,9 +65,15 @@ SshCommandResult runShell(const std::string& command,
     }
 
     if (pid == 0) {
-        // Child: put ourselves in a new process group so timeout kills all
-        // descendants (ssh + remote processes).
-        setpgid(0, 0);
+        // Child: start a new session via the libc setsid() call so we have no
+        // controlling terminal. This makes ssh use SSH_ASKPASS for the
+        // password instead of reading from a TTY — required on systems that
+        // predate SSH_ASKPASS_REQUIRE=force (e.g. CentOS 7 with OpenSSH 7.4),
+        // and avoids depending on the `setsid` *command*'s -w flag, which is
+        // missing on older util-linux. setsid() also makes us a session/
+        // process-group leader, so kill(-pid) below still reaches all
+        // descendants (ssh + remote processes) on timeout.
+        setsid();
 
         dup2(out_pipe[1], STDOUT_FILENO);
         dup2(out_pipe[1], STDERR_FILENO);  // merge stderr into stdout
@@ -264,11 +270,14 @@ void SshExecutor::cleanupAskpass() {
 
 std::string SshExecutor::buildSshPrefix(int connect_timeout) const {
     // Env vars are set inline (VAR=val ...) so they apply only to this
-    // invocation, keeping the call thread-safe.
+    // invocation, keeping the call thread-safe. Note: we do NOT use the
+    // `setsid` command here — its -w (wait) flag is missing on older
+    // util-linux (e.g. CentOS 7). Detaching from the controlling terminal is
+    // done in C via setsid() inside runShell's child instead.
     std::string prefix =
         "SSH_ASKPASS=" + askpass_path_ +
         " SSH_ASKPASS_REQUIRE=force DISPLAY=:0"
-        " setsid -w ssh"
+        " ssh"
         " -p " + std::to_string(port_) +
         " -o StrictHostKeyChecking=no"
         " -o UserKnownHostsFile=/dev/null"
