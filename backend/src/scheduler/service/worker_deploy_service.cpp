@@ -31,6 +31,22 @@ std::string yamlDoubleQuote(const std::string& s) {
     return "\"" + out + "\"";
 }
 
+// Escape a string so it can be safely embedded inside single quotes in a
+// POSIX shell command. Each single quote becomes '\'' (close quote, escaped
+// quote, reopen quote).
+std::string shellSingleQuote(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    return "'" + out + "'";
+}
+
 }  // namespace
 
 nlohmann::json WorkerDeployResult::toJson() const {
@@ -232,10 +248,16 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
     {
         DeployStepLog log{"启动 worker", false, ""};
         // cd into the working dir so relative log paths resolve correctly.
+        // CRITICAL: redirect stdin from /dev/null (in addition to stdout/stderr
+        // to the log file). If stdin is left attached to the SSH channel, the
+        // backgrounded worker inherits that fd and the SSH client hangs
+        // forever waiting for the channel to close — the deploy API then never
+        // returns and the frontend aborts with NS_BINDING_ABORTED. All three
+        // standard fds must point away from the SSH channel.
         std::string start_cmd =
             "cd " + req.remote_dir + " && "
             "nohup " + req.worker_binary_path + " --config " + config_path +
-            " >> " + req.remote_dir + "/logs/worker.log 2>&1 &"
+            " < /dev/null >> " + req.remote_dir + "/logs/worker.log 2>&1 &"
             " echo started_pid=$!";
         auto r = ssh.execute(start_cmd, 30);
         if (!r.ok()) {
@@ -264,35 +286,37 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
     }
 
     // Step 6: briefly verify the process is still alive (not crashed on boot).
+    // Non-fatal: this is a best-effort diagnostic. The worker self-registers
+    // via gRPC, so the worker list is the source of truth. A detection miss
+    // (race, unusual ps format) should NOT fail an otherwise-successful deploy.
     {
         DeployStepLog log{"检查进程存活", false, ""};
         // Give the worker a moment to either boot or crash.
         ssh.execute("sleep 2", 10);
-        // Match the binary path to avoid matching grep itself.
+        // Portable check: use `ps` + `grep` (works on CentOS 7 which lacks
+        // pgrep). Match on the worker binary path with fixed-string grep to
+        // avoid regex issues with paths, and exclude grep itself. `ps -e -o
+        // args=` is available on CentOS/RHEL/Ubuntu; fall back to `ps -ef` if
+        // the first form errors out.
         std::string check_cmd =
-            "pgrep -f " + req.worker_binary_path + " > /dev/null 2>&1 && echo alive || echo dead";
+            "ps -e -o args= 2>/dev/null | grep -F " + shellSingleQuote(req.worker_binary_path) +
+            " | grep -v grep | grep -q . && echo alive || "
+            "(ps -ef 2>/dev/null | grep -F " + shellSingleQuote(req.worker_binary_path) +
+            " | grep -v grep | grep -q . && echo alive || echo dead)";
         auto r = ssh.execute(check_cmd, 15);
-        std::string detail;
-        if (r.ok()) {
-            detail = r.value().output;
-        } else {
-            detail = r.error();
-        }
-        if (r.ok() && r.value().output.find("alive") != std::string::npos) {
+        bool alive = r.ok() && r.value().output.find("alive") != std::string::npos;
+        if (alive) {
             log.success = true;
             log.message = "worker 进程运行中";
         } else {
-            // Process not detected — could be a race or a crash. Surface the
-            // tail of the worker log to aid debugging rather than hard-failing.
+            // Detection failed — surface the tail of the worker log to aid
+            // debugging, but do NOT fail the deploy (the process may have
+            // started after our check, or ps output format differed).
             auto logtail = ssh.execute("tail -n 20 " + req.remote_dir + "/logs/worker.log 2>&1", 10);
             std::string tail = logtail.ok() ? logtail.value().output : "";
-            log.success = false;
-            log.message = "未检测到 worker 进程，可能启动失败或已退出。日志末尾:\n" + tail;
-            result.steps.push_back(log);
-            result.success = false;
-            result.message = "worker 启动后未检测到进程，请检查远程日志: " +
-                             req.remote_dir + "/logs/worker.log";
-            return result;
+            log.success = true;  // still mark success; this is informational
+            log.message = "未在 ps 中检测到 worker 进程（可能仍在启动或 ps 格式差异），"
+                           "请到节点列表确认是否注册成功。日志末尾:\n" + tail;
         }
         result.steps.push_back(log);
     }
