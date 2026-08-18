@@ -32,6 +32,26 @@ std::string shellSingleQuote(const std::string& s) {
     return "'" + out + "'";
 }
 
+// Wrap a remote command in `/bin/sh -c '...'` so it's always interpreted by
+// POSIX sh, regardless of the remote user's login shell. This is critical
+// when the remote shell is csh/tcsh (common on CentOS 7), which does NOT
+// support POSIX sh redirection syntax like `2>&1` or `2>/dev/null`.
+// Without this wrapping, csh silently misinterprets `2>&1` — stderr is NOT
+// redirected to the log file, stays attached to the SSH channel, and the
+// ssh client hangs waiting for channel EOF (causing exit=124 timeout).
+//
+// The wrapping uses two layers of single-quoting:
+//   1. Inner: shellSingleQuote(remote_command) → `'cmd'` for /bin/sh -c
+//   2. Outer: shellSingleQuote("/bin/sh -c 'cmd'") → for the local shell
+//      that invokes ssh
+// When the remote login shell (csh) receives `/bin/sh -c 'cmd'`, it simply
+// execs /bin/sh with the literal cmd string, which /bin/sh then interprets
+// with full POSIX sh syntax.
+std::string wrapForRemoteSh(const std::string& remote_command) {
+    std::string sh_wrapped = "/bin/sh -c " + shellSingleQuote(remote_command);
+    return shellSingleQuote(sh_wrapped);
+}
+
 // Run a shell command via /bin/sh -c, optionally feeding stdin_data, capturing
 // combined stdout+stderr, with a timeout. On timeout the child process group
 // is killed.
@@ -295,7 +315,9 @@ common::result::Result<void> SshExecutor::testConnection(int timeout_sec) {
         return ask;
     }
 
-    std::string cmd = buildSshPrefix(timeout_sec) + " 'echo taskflow_ssh_ok' 2>&1";
+    // Wrap in /bin/sh -c so the echo runs under POSIX sh even if the remote
+    // login shell is csh/tcsh.
+    std::string cmd = buildSshPrefix(timeout_sec) + " " + wrapForRemoteSh("echo taskflow_ssh_ok") + " 2>&1";
     auto res = runShell(cmd, "", timeout_sec + 5);
 
     if (res.timed_out) {
@@ -320,7 +342,9 @@ common::result::Result<SshCommandResult> SshExecutor::execute(
         return common::result::Result<SshCommandResult>::failure(ask.error());
     }
 
-    std::string cmd = buildSshPrefix(15) + " " + shellSingleQuote(remote_command) + " 2>&1";
+    // Wrap in /bin/sh -c so POSIX sh syntax (2>&1, 2>/dev/null, $!, etc.)
+    // works regardless of the remote user's login shell (csh/tcsh/bash).
+    std::string cmd = buildSshPrefix(15) + " " + wrapForRemoteSh(remote_command) + " 2>&1";
     auto res = runShell(cmd, "", timeout_sec);
 
     if (res.timed_out) {
@@ -340,10 +364,11 @@ common::result::Result<void> SshExecutor::writeFile(
     }
 
     // Feed content via SSH stdin to a remote `cat`, then chmod.
+    // Wrap in /bin/sh -c for shell-agnostic execution (see execute()).
     std::string remote_cmd =
         "cat > " + shellSingleQuote(remote_path) +
         " && chmod " + permissions + " " + shellSingleQuote(remote_path);
-    std::string cmd = buildSshPrefix(15) + " " + shellSingleQuote(remote_cmd) + " 2>&1";
+    std::string cmd = buildSshPrefix(15) + " " + wrapForRemoteSh(remote_cmd) + " 2>&1";
 
     auto res = runShell(cmd, content, timeout_sec);
 

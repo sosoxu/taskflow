@@ -242,24 +242,30 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
         result.steps.push_back(log);
     }
 
-    // Step 5: start the worker with nohup, detaching it from the SSH session.
+    // Step 5: start the worker with setsid, detaching it from the SSH session.
     // The worker reads its config via --config and self-registers with the
     // scheduler over gRPC on startup.
     {
         DeployStepLog log{"启动 worker", false, ""};
-        // cd into the working dir so relative log paths resolve correctly.
-        // CRITICAL: redirect stdin from /dev/null (in addition to stdout/stderr
-        // to the log file). If stdin is left attached to the SSH channel, the
-        // backgrounded worker inherits that fd and the SSH client hangs
-        // forever waiting for the channel to close — the deploy API then never
-        // returns and the frontend aborts with NS_BINDING_ABORTED. All three
-        // standard fds must point away from the SSH channel.
+        // setsid: create a new session so the worker detaches from the SSH
+        // session's process group and controlling terminal (CentOS 7's setsid
+        // command supports this basic usage; only -w is missing). Combined
+        // with redirecting all three standard fds away from the SSH channel
+        // (stdin=/dev/null, stdout/stderr=log file), this minimizes the chance
+        // that the worker keeps the SSH channel open.
+        //
+        // Tolerance for SSH hang: on some OpenSSH versions (e.g. CentOS 7's
+        // 7.4) the worker may still inherit a channel fd copy, so the ssh
+        // client hangs waiting for channel EOF. We handle this below: if ssh
+        // times out but the output already contains "started_pid=", the
+        // setsid launch succeeded and the worker is running remotely — killing
+        // the local ssh does NOT affect the detached worker.
         std::string start_cmd =
             "cd " + req.remote_dir + " && "
-            "nohup " + req.worker_binary_path + " --config " + config_path +
+            "setsid " + req.worker_binary_path + " --config " + config_path +
             " < /dev/null >> " + req.remote_dir + "/logs/worker.log 2>&1 &"
             " echo started_pid=$!";
-        auto r = ssh.execute(start_cmd, 30);
+        auto r = ssh.execute(start_cmd, 15);
         if (!r.ok()) {
             log.message = r.error();
             result.steps.push_back(log);
@@ -268,21 +274,29 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
             return result;
         }
         const auto& cr = r.value();
-        // nohup ... & returns immediately with exit code 0; the started_pid
-        // marker confirms the launch command ran.
-        if (cr.exit_code != 0) {
+        // Determine whether the worker actually launched:
+        //  - Normal: exit_code=0, output contains started_pid
+        //  - SSH hang timeout: timed_out=true, exit_code=124, but output still
+        //    contains started_pid (the launch command ran; only the ssh channel
+        //    failed to close). The detached worker keeps running on the node.
+        bool launched = cr.output.find("started_pid=") != std::string::npos;
+        if (launched) {
+            log.success = true;
+            log.message = "已启动: " + req.worker_binary_path + " --config " + config_path;
+            if (!cr.output.empty()) {
+                log.message += " (" + cr.output + ")";
+            }
+            if (cr.timed_out) {
+                log.message += " [SSH 通道未正常关闭，但 worker 已启动并运行]";
+            }
+            result.steps.push_back(log);
+        } else {
             log.message = "exit=" + std::to_string(cr.exit_code) + ": " + cr.output;
             result.steps.push_back(log);
             result.success = false;
             result.message = "启动 worker 失败: " + cr.output;
             return result;
         }
-        log.success = true;
-        log.message = "已启动: " + req.worker_binary_path + " --config " + config_path;
-        if (!cr.output.empty()) {
-            log.message += " (" + cr.output + ")";
-        }
-        result.steps.push_back(log);
     }
 
     // Step 6: briefly verify the process is still alive (not crashed on boot).
