@@ -1,5 +1,6 @@
 #include "scheduler/service/worker_deploy_service.h"
 
+#include <cctype>
 #include <spdlog/spdlog.h>
 #include <sstream>
 #include "common/util/ssh_executor.h"
@@ -45,6 +46,27 @@ std::string shellSingleQuote(const std::string& s) {
         }
     }
     return "'" + out + "'";
+}
+
+// Sanitize a worker name into a filesystem-safe filename component so each
+// worker gets its own config file on a shared remote node (avoiding
+// overwrites between multiple workers in the same remote_dir).
+// Allowed: letters, digits, '-', '_', '.'. Everything else becomes '_'.
+// Falls back to "worker" if the result is empty or all-unsafe chars.
+std::string sanitizeFileName(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.') {
+            out += c;
+        } else {
+            out += '_';
+        }
+    }
+    if (out.empty() || out.find_first_not_of("._-") == std::string::npos) {
+        return "worker";
+    }
+    return out;
 }
 
 }  // namespace
@@ -199,7 +221,10 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
     }
 
     // Step 3: write the worker config file.
-    std::string config_path = req.remote_dir + "/worker.yaml";
+    // Use the worker name as the filename so multiple workers in the same
+    // remote_dir don't overwrite each other's config (e.g. worker-1.yaml,
+    // worker-2.yaml).
+    std::string config_path = req.remote_dir + "/" + sanitizeFileName(req.name) + ".yaml";
     result.config_path = config_path;
     {
         DeployStepLog log{"写入配置文件", false, ""};
