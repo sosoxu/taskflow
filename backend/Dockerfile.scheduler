@@ -10,26 +10,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 # 安装编译工具（基础镜像已有开发头文件和 .so）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git ccache \
+    libssl-dev libjsoncpp-dev libpq-dev libpqxx-dev libspdlog-dev uuid-dev \
+    nlohmann-json3-dev libyaml-cpp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# 先复制 CMake 配置和公共模块（此层可被 Docker 缓存）
+# 顶层 CMake 在配置阶段需要所有子目录存在。
 COPY CMakeLists.txt .
-COPY src/proto/ src/proto/
-COPY src/common/ src/common/
-COPY src/pch.h src/pch.h
+COPY src/ src/
 
 RUN mkdir -p build && cd build && \
-    cmake .. -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build . -j$(nproc) --target taskflow_common
-
-# 源码变更时只需重编译此层
-COPY src/scheduler/ src/scheduler/
-COPY src/worker/ src/worker/
-
-RUN cd build && \
-    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF && \
     cmake --build . -j$(nproc) --target scheduler
 
 # 阶段2: 运行

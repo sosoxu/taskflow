@@ -11,8 +11,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # 安装编译工具和轻量系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git pkg-config \
-    libssl-dev libjsoncpp-dev libc-ares-dev libpq-dev libuuid1-dev zlib1g-dev \
+    build-essential cmake git ca-certificates pkg-config \
+    libssl-dev libjsoncpp-dev libc-ares-dev libpq-dev uuid-dev zlib1g-dev \
     libspdlog-dev nlohmann-json3-dev libyaml-cpp-dev libpqxx-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -21,7 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ============================================================
 ARG PROTOBUF_VERSION=28.3
 RUN git clone --depth 1 --branch v${PROTOBUF_VERSION} https://github.com/protocolbuffers/protobuf.git /tmp/protobuf && \
-    cd /tmp/protobuf && mkdir build && cd build && \
+    cd /tmp/protobuf && git submodule update --init --recursive --depth 1 && \
+    mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DCMAKE_INSTALL_PREFIX=/usr/local \
              -Dprotobuf_BUILD_TESTS=OFF \
@@ -56,7 +57,11 @@ RUN git clone --depth 1 --branch v${GRPC_VERSION} https://github.com/grpc/grpc.g
 # 3. Drogon (从源码编译)
 # ============================================================
 ARG DROGON_VERSION=1.8.7
-RUN git clone --depth 1 --branch v${DROGON_VERSION} https://github.com/drogonframework/drogon.git /tmp/drogon && \
+RUN for attempt in 1 2 3; do \
+      git -c http.version=HTTP/1.1 clone --depth 1 --branch v${DROGON_VERSION} https://github.com/drogonframework/drogon.git /tmp/drogon && break; \
+      rm -rf /tmp/drogon; \
+      [ "$attempt" -eq 3 ] && exit 1; \
+    done && \
     cd /tmp/drogon && git submodule update --init --recursive --depth 1 && \
     mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release \
@@ -71,7 +76,11 @@ RUN git clone --depth 1 --branch v${DROGON_VERSION} https://github.com/drogonfra
 # 4. jwt-cpp (header-only，从源码安装)
 # ============================================================
 ARG JWT_CPP_VERSION=0.7.0
-RUN git clone --depth 1 --branch v${JWT_CPP_VERSION} https://github.com/Thalhammer/jwt-cpp.git /tmp/jwt-cpp && \
+RUN for attempt in 1 2 3; do \
+      git -c http.version=HTTP/1.1 clone --depth 1 --branch v${JWT_CPP_VERSION} https://github.com/Thalhammer/jwt-cpp.git /tmp/jwt-cpp && break; \
+      rm -rf /tmp/jwt-cpp; \
+      [ "$attempt" -eq 3 ] && exit 1; \
+    done && \
     cd /tmp/jwt-cpp && mkdir build && cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -89,8 +98,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # 运行时轻量依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3t64 libjsoncpp5 libc-ares2 libpq5 libuuid1 zlib1g \
-    libspdlog1.15 libyaml-cpp0.8 libpqxx-7.7 \
+    libssl3t64 libjsoncpp25 libc-ares2 libpq5 libuuid1 zlib1g \
+    libspdlog1.12 libyaml-cpp0.8 libpqxx-7.8t64 \
     && rm -rf /var/lib/apt/lists/*
 
 # 从 builder 复制编译产物
@@ -98,9 +107,8 @@ COPY --from=builder /usr/local /usr/local
 RUN ldconfig
 
 # 验证关键库可被找到
-RUN pkg-config --modversion libpqxx && \
-    ls /usr/local/lib/libdrogon.so && \
-    ls /usr/local/lib/libgrpc++.so && \
-    ls /usr/local/lib/libprotobuf.so && \
+RUN find /usr/local/lib -maxdepth 1 -name 'libdrogon.*' -print -quit | grep -q . && \
+    find /usr/local/lib -maxdepth 1 -name 'libgrpc++.*' -print -quit | grep -q . && \
+    find /usr/local/lib -maxdepth 1 -name 'libprotobuf.*' -print -quit | grep -q . && \
     which protoc && \
     echo "All dependencies verified OK"

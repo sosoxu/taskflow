@@ -443,6 +443,14 @@ set_target_properties(Jsoncpp_lib PROPERTIES
     endif()
 endif()
 
+# gRPC's Findc-ares module exports c-ares::cares, while Trantor's exported
+# targets reference the older c-ares_lib target name.
+if(TARGET c-ares::cares AND NOT TARGET c-ares_lib)
+    add_library(c-ares_lib INTERFACE IMPORTED)
+    set_target_properties(c-ares_lib PROPERTIES
+        INTERFACE_LINK_LIBRARIES c-ares::cares)
+endif()
+
 # ============================================================================
 # libpqxx
 # ============================================================================
