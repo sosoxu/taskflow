@@ -1,27 +1,7 @@
+// Fix #355: 仅保留实际被使用的 setToken（其余 token 存取统一走
+// userStore/localStorage，避免两套 key 常量体系并存）。
 const TOKEN_KEY = 'access_token'
-const REFRESH_TOKEN_KEY = 'refresh_token'
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token)
-}
-
-export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY)
-}
-
-export function setRefreshToken(token: string): void {
-  localStorage.setItem(REFRESH_TOKEN_KEY, token)
-}
-
-export function clearTokens(): void {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(REFRESH_TOKEN_KEY)
-}
-
-export function isAuthenticated(): boolean {
-  return !!getToken()
 }

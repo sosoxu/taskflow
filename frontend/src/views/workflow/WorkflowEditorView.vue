@@ -186,11 +186,6 @@ interface DagNodeData {
   param_overrides?: Record<string, unknown>
 }
 
-interface DagEdgeData {
-  source: string
-  target: string
-}
-
 interface ApiDagNode {
   id: string
   task_id: string

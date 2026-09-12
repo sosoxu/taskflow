@@ -12,8 +12,7 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => role.value === 'admin')
   const isOperator = computed(() => role.value === 'operator' || role.value === 'admin')
-  // Fix #172: isViewer for hiding write-operation buttons
-  const isViewer = computed(() => role.value === 'viewer')
+  // Fix #355: 移除从未被引用的 isViewer（写操作按钮守卫用的是 isOperator 取反语义）
 
   // Fix #335: 以服务端签发的 JWT 声明刷新本地 role。
   // role 直接读 localStorage 可被手改解锁管理界面，登录/刷新后必须复核。
@@ -99,7 +98,6 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     isAdmin,
     isOperator,
-    isViewer,
     setUser,
     clearUser,
     validateFromServer,

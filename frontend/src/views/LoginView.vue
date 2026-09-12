@@ -190,14 +190,14 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push(safeRedirect())
   } catch (err: unknown) {
-    const errData = (err as { response?: { data?: { message?: string } } })?.response?.data
+    // Fix #355: 以后端业务错误码映射提示（40103=凭据无效），
+    // 替代脆弱的英文关键字匹配
+    const errData = (err as { response?: { data?: { code?: number; message?: string } } })?.response?.data
     let message = '登录失败，请检查用户名和密码'
-    if (errData?.message) {
-      if (errData.message.includes('Invalid') || errData.message.includes('invalid')) {
-        message = '用户名或密码错误'
-      } else {
-        message = errData.message
-      }
+    if (errData?.code === 40103) {
+      message = '用户名或密码错误'
+    } else if (errData?.message) {
+      message = errData.message
     }
     ElMessage.error(message)
   } finally {
@@ -221,9 +221,11 @@ async function handleRegister() {
     const errData = (err as { response?: { data?: { message?: string; code?: number } } })?.response?.data
     let message = '注册失败，请稍后重试'
     if (errData?.message) {
-      if (errData.message.includes('already exists') || errData.message.includes('已存在')) {
+      // Fix #355: 按后端实际返回的固定短语匹配（registerUser 的两类
+      // 校验失败消息是稳定的），并保留原文兜底
+      if (errData.message === 'Username already exists') {
         message = '用户名已存在'
-      } else if (errData.message.includes('short') || errData.message.includes('长度')) {
+      } else if (errData.message === 'Password must be at least 8 characters') {
         message = '密码长度至少8个字符'
       } else {
         message = errData.message

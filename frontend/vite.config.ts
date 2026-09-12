@@ -18,7 +18,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // Fix #355: 走环境变量，默认值保持本地开发不变
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8080',
         changeOrigin: true,
       },
     },

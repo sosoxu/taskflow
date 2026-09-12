@@ -49,7 +49,8 @@
           <!-- Fix #231: "创建时间" should bind to created_at, not started_at
                (which is null until the instance transitions to RUNNING). -->
           <el-descriptions-item label="创建时间">{{ formatTime(instance.created_at) }}</el-descriptions-item>
-          <el-descriptions-item label="更新时间">{{ formatTime(instance.finished_at) }}</el-descriptions-item>
+          <!-- Fix #355: label 语义修正——绑定的是 finished_at，实为结束时间 -->
+          <el-descriptions-item label="结束时间">{{ formatTime(instance.finished_at) }}</el-descriptions-item>
         </el-descriptions>
         <!-- Runtime parameter overrides -->
         <template v-if="instanceParamOverrides && Object.keys(instanceParamOverrides).length > 0">
@@ -264,6 +265,9 @@ let eventSource: EventSource | null = null
 // Fix #192: SSE 重连计数器，最多重连 3 次（间隔 2s/4s/6s）
 let sseReconnectCount = 0
 const SSE_MAX_RECONNECT = 3
+// Fix #355: 保存重连 setTimeout 句柄——关闭弹窗/卸载时清除，
+// 避免旧重连回调在新会话中再建孤儿 EventSource
+let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null
 // Fix #194: logContent 最大长度限制（约 100KB），避免无限增长导致卡顿
 const LOG_MAX_LENGTH = 100000
 
@@ -487,13 +491,16 @@ async function handleCancel() {
 
 async function handleRetryInstance() {
   if (!instance.value) return
-  // Retry the first failed/timed-out/upstream-failed task
-  const failedTask = instance.value.task_instances.find(
+  // Fix #355: 重试全部失败/超时/上游失败的任务（此前 find 只重试第一个，
+  // 多任务失败时与其余任务的状态不一致）
+  const failedTasks = instance.value.task_instances.filter(
     (t) => t.status === 'FAILED' || t.status === 'TIMEOUT' || t.status === 'UPSTREAM_FAILED'
   )
-  if (failedTask) {
-    await handleRetryTask(failedTask)
+  if (failedTasks.length === 0) return
+  for (const task of failedTasks) {
+    await handleRetryTask(task)
   }
+  ElMessage.success(`已重试 ${failedTasks.length} 个失败任务`)
 }
 
 async function handleRetryTask(task: TaskInstance) {
@@ -612,7 +619,9 @@ function createEventSource() {
       return
     }
     const delay = sseReconnectCount * 2000 // 2s, 4s, 6s
-    setTimeout(() => {
+    if (sseReconnectTimer) clearTimeout(sseReconnectTimer)
+    sseReconnectTimer = setTimeout(() => {
+      sseReconnectTimer = null
       // 仅在用户未主动停止时重连，避免死循环
       if (logStreaming.value) {
         createEventSource()
@@ -635,6 +644,11 @@ function stopLogStream() {
   if (eventSource) {
     eventSource.close()
     eventSource = null
+  }
+  // Fix #355: 同时取消挂起的重连定时器
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer)
+    sseReconnectTimer = null
   }
   logStreaming.value = false
 }

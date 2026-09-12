@@ -31,6 +31,10 @@
       </el-select>
       <el-button style="margin-left: 12px" @click="handleSearch">筛选</el-button>
       <el-button @click="handleReset">重置</el-button>
+      <!-- Fix #355: 明示过滤语义——当前为当前页内存过滤，避免与分页 total 混淆 -->
+      <span v-if="statusFilter || triggerFilter" class="filter-hint">
+        筛选仅作用于当前页（共 {{ total }} 条），完整筛选需后端支持查询参数
+      </span>
     </div>
 
     <el-table :data="filteredInstances" v-loading="loading" stripe>
@@ -205,6 +209,12 @@ onMounted(() => {
   margin-bottom: 16px;
   display: flex;
   align-items: center;
+}
+
+.filter-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #909399;
 }
 
 .pagination-wrapper {
