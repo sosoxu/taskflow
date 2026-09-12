@@ -73,6 +73,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # scheduler/worker 的 Dockerfile FROM taskflow-deps:latest（运行时镜像），
+      # 必须先构建它。gha 缓存复用 backend-unit-tests job 的编译层。
+      - name: 构建依赖运行时镜像（gha 缓存）
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile.deps
+          tags: taskflow-deps:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          load: true
+
       - name: 构建三个服务镜像（gha 缓存）
         run: |
           docker buildx build --cache-from type=gha --cache-to type=gha,mode=max \
