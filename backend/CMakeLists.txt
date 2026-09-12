@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # 兼容旧版第三方库的 cmake_minimum_required 要求
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
-project(taskflow VERSION 0.1.0 LANGUAGES CXX)
+project(taskflow VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
