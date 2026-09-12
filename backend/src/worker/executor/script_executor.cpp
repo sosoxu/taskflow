@@ -15,6 +15,8 @@
 #include <fstream>
 #include <spdlog/spdlog.h>
 
+#include "common/util/uuid.h"
+
 namespace taskflow::worker::executor {
 
 // Fix #287: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
@@ -71,30 +73,46 @@ TaskResult ScriptExecutor::execute(const std::string& task_instance_id,
         ext = ".rb";
     }
 
+    // Fix #351: 文件名加入随机后缀并以 O_CREAT|O_EXCL 原子创建、权限 0700。
+    // 此前为固定路径 /tmp/taskflow_script_<id>.ext + 0755：多用户共享主机上
+    // 路径可预测，存在符号链接替换/抢注竞态，且残留脚本全局可执行。
+    // 解释器按路径读取脚本内容，无需可执行位。
+    const std::string script_uniq = common::util::generateUuid().substr(0, 8);
     std::string script_path =
-        "/tmp/taskflow_script_" + task_instance_id + ext;
+        "/tmp/taskflow_script_" + task_instance_id + "_" + script_uniq + ext;
     std::string log_path = log_dir + "/" + task_instance_id + ".log";
 
-    // Write script to temp file
+    // Write script to temp file (O_EXCL: 已存在或遇符号链接即失败，无竞态窗口)
     {
-        std::ofstream ofs(script_path);
-        if (!ofs) {
+        int fd = ::open(script_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0700);
+        if (fd < 0) {
+            result.status = "FAILED";
+            result.exit_code = 1;
+            result.error_message = "Failed to create script file (O_EXCL): " + script_path;
+            return result;
+        }
+        bool write_ok = true;
+        size_t offset = 0;
+        while (offset < script_content.size()) {
+            ssize_t n = ::write(fd, script_content.data() + offset,
+                                script_content.size() - offset);
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                write_ok = false;
+                break;
+            }
+            offset += static_cast<size_t>(n);
+        }
+        if (::close(fd) != 0) {
+            write_ok = false;
+        }
+        if (!write_ok) {
             result.status = "FAILED";
             result.exit_code = 1;
             result.error_message = "Failed to write script file: " + script_path;
+            std::remove(script_path.c_str());
             return result;
         }
-        ofs << script_content;
-        ofs.close();
-    }
-
-    // Make executable
-    if (chmod(script_path.c_str(), 0755) != 0) {
-        result.status = "FAILED";
-        result.exit_code = 1;
-        result.error_message = "Failed to chmod script file: " + script_path;
-        std::remove(script_path.c_str());
-        return result;
     }
 
     pid_t pid = fork();
