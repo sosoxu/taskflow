@@ -334,3 +334,41 @@ TEST_CASE("CronParser - step near INT_MAX does not overflow", "[cron_parser_over
     REQUIRE(result.ok());
     REQUIRE(result.value() == "2025-01-01 00:01:00");
 }
+
+// ============================================================================
+// Fix #353: 步进写法（*/n）的 day/weekday 组合语义。
+// 标准 cron：dom 与 dow 均受限（非 *，包括 */n 步进）时 OR；
+// 仅一个受限时必须满足该字段。以下用例区分"*/2 被误判为 unrestricted"
+// 与"*/2 被误判为 AND 组合"两种错误实现。
+// ============================================================================
+TEST_CASE("CronParser - stepped dom (*/2) is treated as restricted", "[cron_parser_standard]") {
+    // 0 0 0 */2 * *（每月奇数日）
+    // 若 */2 被误判为 unrestricted（等价 *），from 2025-01-01 会返回 01-02；
+    // 正确行为：01-01 为奇数日但非严格未来，下一个奇数日是 01-03。
+    auto result = CronParser::getNextTrigger("0 0 0 */2 * *", "2025-01-01 00:00:00");
+    REQUIRE(result.ok());
+    REQUIRE(result.value() == "2025-01-03 00:00:00");
+}
+
+TEST_CASE("CronParser - stepped dom + restricted dow use OR semantics", "[cron_parser_standard]") {
+    // 0 0 0 */2 * 0（奇数日 或 周日）
+    // from 2025-01-02（周四）：OR → 01-03（周五，奇数日）；
+    // 若错误地 AND → 01-05（周日）。
+    auto result = CronParser::getNextTrigger("0 0 0 */2 * 0", "2025-01-02 00:00:00");
+    REQUIRE(result.ok());
+    REQUIRE(result.value() == "2025-01-03 00:00:00");
+}
+
+TEST_CASE("CronParser - dom restricted + dow star ignores weekday", "[cron_parser_standard]") {
+    // 0 0 0 */2 * *：即使 01-04 是周六也不匹配（非奇数日）
+    auto result = CronParser::getNextTrigger("0 0 0 */2 * *", "2025-01-03 00:00:00");
+    REQUIRE(result.ok());
+    REQUIRE(result.value() == "2025-01-05 00:00:00");
+}
+
+TEST_CASE("CronParser - dom star + dow restricted uses dow only", "[cron_parser_standard]") {
+    // 0 0 0 * * 0（每周日）from 2025-01-01（周三）→ 2025-01-05（周日）
+    auto result = CronParser::getNextTrigger("0 0 0 * * 0", "2025-01-01 00:00:00");
+    REQUIRE(result.ok());
+    REQUIRE(result.value() == "2025-01-05 00:00:00");
+}
