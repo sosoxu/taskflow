@@ -17,6 +17,7 @@ add_executable(taskflow_tests
     test_dag_driver.cpp
     test_regression_116.cpp
     test_round8_fixes.cpp
+    test_shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/src/scheduler/engine/dag_engine.cpp
     ${CMAKE_SOURCE_DIR}/src/common/util/crypto_util.cpp
     ${CMAKE_SOURCE_DIR}/src/worker/executor/task_executor.cpp

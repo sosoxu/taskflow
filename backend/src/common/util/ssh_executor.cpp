@@ -1,4 +1,5 @@
 #include "common/util/ssh_executor.h"
+#include "common/util/shell_quote.h"
 
 #include <chrono>
 #include <cstdio>
@@ -16,21 +17,7 @@ namespace taskflow::common::util {
 
 namespace {
 
-// Escape a string so it can be safely embedded inside single quotes in a
-// POSIX shell command. Each single quote becomes '\'' (close quote, escaped
-// quote, reopen quote).
-std::string shellSingleQuote(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char c : s) {
-        if (c == '\'') {
-            out += "'\\''";
-        } else {
-            out += c;
-        }
-    }
-    return "'" + out + "'";
-}
+// shellSingleQuote 已上移至 common/util/shell_quote.h（Fix #328 去重）。
 
 // Wrap a remote command in `/bin/sh -c '...'` so it's always interpreted by
 // POSIX sh, regardless of the remote user's login shell. This is critical

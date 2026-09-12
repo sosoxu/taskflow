@@ -4,6 +4,7 @@
 #include <spdlog/spdlog.h>
 #include <sstream>
 #include "common/util/ssh_executor.h"
+#include "common/util/shell_quote.h"
 
 namespace taskflow::scheduler::service {
 
@@ -32,21 +33,9 @@ std::string yamlDoubleQuote(const std::string& s) {
     return "\"" + out + "\"";
 }
 
-// Escape a string so it can be safely embedded inside single quotes in a
-// POSIX shell command. Each single quote becomes '\'' (close quote, escaped
-// quote, reopen quote).
-std::string shellSingleQuote(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 2);
-    for (char c : s) {
-        if (c == '\'') {
-            out += "'\\''";
-        } else {
-            out += c;
-        }
-    }
-    return "'" + out + "'";
-}
+// Fix #328: shellSingleQuote 上移至 common/util/shell_quote.h 供统一复用，
+// 本文件所有拼入远程 shell 命令的用户可控输入都必须经其包裹。
+using taskflow::common::util::shellSingleQuote;
 
 // Sanitize a worker name into a filesystem-safe filename component so each
 // worker gets its own config file on a shared remote node (avoiding
@@ -198,7 +187,7 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
     {
         DeployStepLog log{"创建远程目录", false, ""};
         std::string mkdir_cmd =
-            "mkdir -p " + req.remote_dir + "/logs/tasks";
+            "mkdir -p " + shellSingleQuote(req.remote_dir + "/logs/tasks");
         auto r = ssh.execute(mkdir_cmd, 30);
         if (!r.ok()) {
             log.message = r.error();
@@ -245,7 +234,7 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
     // Step 4: check the worker binary exists on the remote host.
     {
         DeployStepLog log{"检查 worker 可执行文件", false, ""};
-        std::string check_cmd = "test -x " + req.worker_binary_path + " && echo ok || echo missing";
+        std::string check_cmd = "test -x " + shellSingleQuote(req.worker_binary_path) + " && echo ok || echo missing";
         auto r = ssh.execute(check_cmd, 15);
         if (!r.ok()) {
             log.message = r.error();
@@ -286,9 +275,9 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
         // setsid launch succeeded and the worker is running remotely — killing
         // the local ssh does NOT affect the detached worker.
         std::string start_cmd =
-            "cd " + req.remote_dir + " && "
-            "setsid " + req.worker_binary_path + " --config " + config_path +
-            " < /dev/null >> " + req.remote_dir + "/logs/worker.log 2>&1 &"
+            "cd " + shellSingleQuote(req.remote_dir) + " && "
+            "setsid " + shellSingleQuote(req.worker_binary_path) + " --config " + shellSingleQuote(config_path) +
+            " < /dev/null >> " + shellSingleQuote(req.remote_dir + "/logs/worker.log") + " 2>&1 &"
             " echo started_pid=$!";
         auto r = ssh.execute(start_cmd, 15);
         if (!r.ok()) {
@@ -351,7 +340,7 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
             // Detection failed — surface the tail of the worker log to aid
             // debugging, but do NOT fail the deploy (the process may have
             // started after our check, or ps output format differed).
-            auto logtail = ssh.execute("tail -n 20 " + req.remote_dir + "/logs/worker.log 2>&1", 10);
+            auto logtail = ssh.execute("tail -n 20 " + shellSingleQuote(req.remote_dir + "/logs/worker.log") + " 2>&1", 10);
             std::string tail = logtail.ok() ? logtail.value().output : "";
             log.success = true;  // still mark success; this is informational
             log.message = "未在 ps 中检测到 worker 进程（可能仍在启动或 ps 格式差异），"
