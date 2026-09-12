@@ -18,44 +18,20 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
     // Fix #152: Save dag_snapshot so the instance uses the DAG definition
     // that was current at creation time, not the live workflow's dag_json
     // which may change while the instance is still executing.
-    // Graceful fallback: if dag_snapshot column doesn't exist (old DB),
-    // retry INSERT without it.
-    try {
-        auto result = common::database::DatabaseManager::instance().withTransaction<std::string>(
-            [&](pqxx::work& txn) -> common::result::Result<std::string> {
-                auto res = txn.exec_params(
-                    "INSERT INTO workflow_instances "
-                    "(id, workflow_id, workflow_version, status, trigger_type, "
-                    "param_overrides, dag_snapshot, creator_id) "
-                    "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6::jsonb, $7) "
-                    "RETURNING id",
-                    id, workflow_id, workflow_version, trigger_type,
-                    param_overrides.dump(),
-                    dag_snapshot.is_null() ? "{}" : dag_snapshot.dump(),
-                    creator_id);
-
-                if (res.empty()) {
-                    return common::result::Result<std::string>::failure("创建工作流实例失败");
-                }
-
-                return std::string(res[0][0].as<std::string>());
-            });
-        return result;
-    } catch (const pqxx::undefined_column&) {
-        // dag_snapshot column doesn't exist yet — retry without it
-    }
-
-    // Fallback: INSERT without dag_snapshot column
-    return common::database::DatabaseManager::instance().withTransaction<std::string>(
+    // Fix #352: 移除原 catch(pqxx::undefined_column) 无快照兜底分支——
+    // DatabaseManager::withTransaction 已将异常统一转换为 Result failure，
+    // 该 catch 永不触发（死代码）；旧库缺列时 create 恒失败且无升级指引。
+    auto result = common::database::DatabaseManager::instance().withTransaction<std::string>(
         [&](pqxx::work& txn) -> common::result::Result<std::string> {
             auto res = txn.exec_params(
                 "INSERT INTO workflow_instances "
                 "(id, workflow_id, workflow_version, status, trigger_type, "
-                "param_overrides, creator_id) "
-                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6) "
+                "param_overrides, dag_snapshot, creator_id) "
+                "VALUES ($1, $2, $3, 'PENDING', $4, $5::jsonb, $6::jsonb, $7) "
                 "RETURNING id",
                 id, workflow_id, workflow_version, trigger_type,
                 param_overrides.dump(),
+                dag_snapshot.is_null() ? "{}" : dag_snapshot.dump(),
                 creator_id);
 
             if (res.empty()) {
@@ -64,6 +40,13 @@ common::result::Result<std::string> WorkflowInstanceDao::create(
 
             return std::string(res[0][0].as<std::string>());
         });
+
+    if (!result.ok() && result.error().find("dag_snapshot") != std::string::npos) {
+        return common::result::Result<std::string>::failure(
+            result.error() +
+            "（数据库缺少 dag_snapshot 列：请执行 backend/sql/migrate_v1.sql 升级）");
+    }
+    return result;
 }
 
 common::result::Result<common::models::WorkflowInstance> WorkflowInstanceDao::findById(const std::string& id) {
