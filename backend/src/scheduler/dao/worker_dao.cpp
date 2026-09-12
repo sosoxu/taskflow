@@ -41,6 +41,27 @@ common::result::Result<std::string> WorkerDao::create(
                 return std::string(res[0][0].as<std::string>());
             }
 
+            // Fix #346: 名字不存在但地址已被占用——worker 容器重建后主机名
+            // 变化而 Docker 复用了旧容器 IP，直接 INSERT 会撞 workers_address
+            // 唯一约束导致注册永久失败。新 worker 对其 advertise 地址具有
+            // 权威性，此处接管陈旧记录（改名并重置运行状态）。
+            auto addr_check = txn.exec_params(
+                "SELECT id FROM workers WHERE address = $1", address);
+            if (!addr_check.empty()) {
+                auto res = txn.exec_params(
+                    "UPDATE workers SET name = $2, max_tasks = $3, "
+                    "resource_tags = $4::jsonb, status = 'online', "
+                    "running_tasks = 0, last_heartbeat = NOW() "
+                    "WHERE address = $1 RETURNING id",
+                    address, name, max_tasks, resource_tags.dump());
+
+                if (res.empty()) {
+                    return common::result::Result<std::string>::failure("接管陈旧 Worker 记录失败");
+                }
+
+                return std::string(res[0][0].as<std::string>());
+            }
+
             // 插入新记录
             auto res = txn.exec_params(
                 "INSERT INTO workers (id, name, address, max_tasks, resource_tags, status) "
