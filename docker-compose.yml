@@ -89,7 +89,9 @@ configs:
         access_token_ttl: 86400
         refresh_token_ttl: 604800
       encryption:
-        aes_key: "taskflow-aes-key-must-be-32-characters"
+        # Fix #324: 旧默认值为 38 字符，不满足"必须为 32 字符"的启动校验，
+        # scheduler 会崩溃循环。生产部署务必替换为随机密钥。
+        aes_key: "TaskFlowDefaultAesKey_ChangeMe32"
       log:
         level: info
         file_path: logs/scheduler.log
