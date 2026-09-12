@@ -34,6 +34,12 @@ COPY worker.yaml.example /app/worker.yaml
 
 RUN mkdir -p /app/logs /app/logs/tasks
 
+# Fix #331: 非 root 运行（worker 执行用户提交的 command/script 任务，
+# root 运行等于把宿主机 root 交给任务提交者）。
+RUN groupadd -r -g 10001 taskflow && useradd -r -u 10001 -g taskflow -d /app taskflow \
+    && chown -R taskflow:taskflow /app
+USER taskflow
+
 EXPOSE 50052
 
 CMD ["/app/worker", "--config", "/app/worker.yaml"]

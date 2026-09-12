@@ -57,6 +57,8 @@ docker-compose logs postgres
 
 > 注意：Docker Compose 部署时，仅暴露 80（前端）、8080（API）、5432（数据库）端口。Worker gRPC 端口（50052）仅在内部网络通信。
 
+> Fix #331 升级注意：scheduler/worker/frontend 容器现以非 root 用户运行，前端容器内监听 8080（宿主机仍映射 80:8080）。从旧版（root 容器）升级时，日志 named volume 属主为 root 会导致启动失败，需删除日志卷后重建：`docker compose down && docker volume rm <project>_scheduler-logs <project>_worker-logs <project>_worker-task-logs && docker compose up -d`（仅丢失历史日志）。
+
 ## 4. 配置文件说明
 
 ### 4.1 Scheduler 配置（scheduler.yaml）
@@ -65,6 +67,10 @@ docker-compose logs postgres
 server:
   http_port: 8080          # HTTP 监听端口
   grpc_port: 50051         # gRPC 监听端口
+  # Fix #326: gRPC 内部认证 token。生产部署必须设置为随机值，且与所有
+  # worker 的 worker.yaml（server.grpc_auth_token）保持一致，否则 worker
+  # 注册/心跳与任务派发会被拒绝。留空仅限本地开发。
+  grpc_auth_token: "change-me-to-a-random-token"
   tls:                     # gRPC TLS 配置（可选）
     enabled: false
     cert_path: ""
@@ -105,6 +111,9 @@ schedule:
 ```yaml
 server:
   grpc_port: 50052          # gRPC 监听端口
+  # Fix #326: 与 scheduler.yaml 的 server.grpc_auth_token 保持一致。
+  # 同时作为访问 scheduler 的注册/心跳凭证与本机 gRPC 服务的校验凭证。
+  grpc_auth_token: "change-me-to-a-random-token"
   # Docker 多 Worker 部署使用 "auto"，让每个副本注册自己的容器 IP。
   # 远程主机部署时填写 Scheduler 可访问的 host:port。
   # advertise_address: "auto"

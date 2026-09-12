@@ -65,7 +65,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "80:80"
+      # Fix #331: 前端容器以非 root 用户监听 8080，宿主机 80 映射到容器 8080
+      - "80:8080"
     depends_on:
       - scheduler
     restart: unless-stopped

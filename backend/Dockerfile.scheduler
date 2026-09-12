@@ -35,6 +35,12 @@ COPY scheduler.yaml.example /app/scheduler.yaml
 
 RUN mkdir -p /app/logs
 
+# Fix #331: 非 root 运行。compose 的日志 named volume 首次初始化时
+# 会继承此处 /app 的属主，因此日志目录可写。
+RUN groupadd -r -g 10001 taskflow && useradd -r -u 10001 -g taskflow -d /app taskflow \
+    && chown -R taskflow:taskflow /app
+USER taskflow
+
 EXPOSE 8080 50051
 
 CMD ["/app/scheduler", "--config", "/app/scheduler.yaml"]
