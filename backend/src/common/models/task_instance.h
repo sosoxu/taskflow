@@ -50,6 +50,12 @@ struct TaskInstance {
     }
 
     nlohmann::json toJson() const {
+        // Fix #325: resolved_config 中可能残留历史明文 db_password（修复前的
+        // 旧数据），输出侧统一打码，避免实例 API 泄露数据库凭据。
+        nlohmann::json resolved_config_out = resolved_config;
+        if (resolved_config_out.is_object() && resolved_config_out.contains("db_password")) {
+            resolved_config_out["db_password"] = "***";
+        }
         return nlohmann::json{
             {"id", id},
             {"workflow_instance_id", workflow_instance_id},
@@ -64,7 +70,7 @@ struct TaskInstance {
             {"finished_at", finished_at},
             {"exit_code", exit_code},
             {"error_message", error_message},
-            {"resolved_config", resolved_config},
+            {"resolved_config", resolved_config_out},
             {"created_at", created_at}
         };
     }

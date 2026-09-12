@@ -13,6 +13,7 @@
 #include <spdlog/spdlog.h>
 
 #include "common/models/task.h"
+#include "common/util/grpc_auth_util.h"
 #include "common/models/task_instance.h"
 #include "common/models/worker_info.h"
 #include "common/models/workflow.h"
@@ -63,10 +64,11 @@ static time_t parsePgTimestamp(const std::string& ts) {
 
 DagDriver::DagDriver(int drive_interval, const std::string& aes_key,
                      std::shared_ptr<grpc::LeaderElection> leader_election,
-                     common::config::TlsConfig worker_tls)
+                     common::config::TlsConfig worker_tls,
+                     const std::string& grpc_auth_token)
     : drive_interval_(drive_interval), aes_key_(aes_key),
       leader_election_(std::move(leader_election)),
-      worker_tls_(std::move(worker_tls)) {}
+      worker_tls_(std::move(worker_tls)), grpc_auth_token_(grpc_auth_token) {}
 
 void DagDriver::start() {
     running_ = true;
@@ -565,8 +567,12 @@ common::result::Result<void> DagDriver::dispatchTask(
         if (decrypt_result.ok()) {
             config["db_password"] = decrypt_result.value();
         } else {
-            spdlog::warn("DagDriver: failed to decrypt db_password for task instance {}: {}",
-                         task_instance.id, decrypt_result.error());
+            // Fix #325: 解密失败不得把密文当密码继续派发，直接置 FAILED。
+            spdlog::error("DagDriver: failed to decrypt db_password for task instance {}: {}",
+                          task_instance.id, decrypt_result.error());
+            task_instance_dao_.updateStatus(task_instance.id, "FAILED");
+            return common::result::Result<void>::failure(
+                "Failed to decrypt db_password for task instance " + task_instance.id);
         }
     }
 
@@ -656,10 +662,10 @@ common::result::Result<void> DagDriver::dispatchTask(
             spdlog::warn("DagDriver: failed to merge workflow instance param_overrides into params: {}", e.what());
         }
 
-        spdlog::debug("DagDriver: resolving placeholders for task instance {}, params={}",
-                       task_instance.id, params.dump());
+        spdlog::debug("DagDriver: resolving placeholders for task instance {}",
+                       task_instance.id);
         resolvePlaceholders(config, params);
-        spdlog::debug("DagDriver: resolved config for task instance {}: {}", task_instance.id, config.dump());
+        // Fix #325: 不再把 resolved config 打进日志（可能含解密后的 db_password）。
     } catch (const std::exception& e) {
         spdlog::error("DagDriver: failed to resolve placeholders for task instance {}: {}",
                       task_instance.id, e.what());
@@ -676,9 +682,15 @@ common::result::Result<void> DagDriver::dispatchTask(
 
     // Save the resolved config to the task instance for later inspection.
     // This allows users to see the actual parameters used during execution.
+    // Fix #325: 持久化前对敏感字段打码——此前明文快照经实例 API 与
+    // task_instances 表泄露了已解密的 db_password。
     try {
+        nlohmann::json masked_config = config;
+        if (masked_config.contains("db_password")) {
+            masked_config["db_password"] = "***";
+        }
         auto save_result = task_instance_dao_.updateResolvedConfig(
-            task_instance.id, config.dump());
+            task_instance.id, masked_config.dump());
         if (!save_result.ok()) {
             spdlog::warn("DagDriver: failed to save resolved_config for task instance {}: {}",
                          task_instance.id, save_result.error());
@@ -706,6 +718,8 @@ common::result::Result<void> DagDriver::dispatchTask(
     auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
         ::grpc::ClientContext ctx;
         ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+        // Fix #326: 携带内部认证 token（与 worker 侧配置一致）
+        common::util::GrpcAuthUtil::applyAuth(ctx, grpc_auth_token_);
         return stub->DispatchTask(&ctx, request, &response);
     });
 

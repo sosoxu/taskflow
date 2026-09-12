@@ -493,8 +493,10 @@ TEST_CASE("TaskInstance: toJson includes all 14 fields", "[model_task_instance_f
     REQUIRE(j["error_message"] == "Task failed due to timeout");
     REQUIRE(j["created_at"] == "2025-06-20T09:59:00Z");
 
-    // 确保恰好 14 个字段
-    REQUIRE(j.size() == 14);
+    // resolved_config 加入 toJson 后共 15 个字段（旧断言 14 未同步，导致ctest失败）；
+    // 未设置时输出 null
+    REQUIRE(j["resolved_config"].is_null());
+    REQUIRE(j.size() == 15);
 }
 
 TEST_CASE("TaskInstance: toJson with empty time fields", "[model_task_instance_full]") {
