@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <thread>
+#include <chrono>
 #include <fstream>
 #include <csignal>
 #include <atomic>
@@ -393,17 +394,25 @@ int main(int argc, char* argv[]) {
 
     spdlog::info("TaskFlow Scheduler 启动完成");
 
-    // Install signal handlers for graceful shutdown
-    std::signal(SIGTERM, [](int) {
-        spdlog::info("Received SIGTERM, initiating graceful shutdown...");
-        drogon::app().quit();
-    });
-    std::signal(SIGINT, [](int) {
-        spdlog::info("Received SIGINT, initiating graceful shutdown...");
+    // Fix #354: 信号处理器必须 async-signal-safe——spdlog（malloc/锁）与
+    // drogon::app().quit() 都不是。与 worker 侧一致：处理器仅置全局
+    // atomic 标志，由监听线程执行优雅停机。
+    std::atomic<bool> g_shutdown_requested{false};
+    // std::signal 的处理器无法捕获状态，通过文件级静态指针引用标志
+    static std::atomic<bool>* s_shutdown_flag = &g_shutdown_requested;
+    std::signal(SIGTERM, [](int) { s_shutdown_flag->store(true); });
+    std::signal(SIGINT, [](int) { s_shutdown_flag->store(true); });
+
+    std::thread shutdown_watcher([&g_shutdown_requested]() {
+        while (!g_shutdown_requested.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        spdlog::info("收到终止信号，开始优雅停机...");
         drogon::app().quit();
     });
 
     drogon::app().run();
+    shutdown_watcher.join();
 
     spdlog::info("Drogon 已退出，开始清理资源...");
 

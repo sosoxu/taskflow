@@ -1,7 +1,7 @@
 #pragma once
 
+#include <stdexcept>
 #include <string>
-#include <random>
 #include <sstream>
 #include <iomanip>
 #include <openssl/rand.h>
@@ -10,14 +10,10 @@ namespace taskflow::common::util {
 
 inline std::string generateUuid() {
     unsigned char bytes[16];
+    // Fix #354: CSPRNG 失败必须硬失败——UUID 用作主键/JWT jti，可预测
+    // 的 ID 会削弱不可猜测性。此前回退 mt19937 弱随机。
     if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
-        // Fallback to random_device
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<uint32_t> dist(0, 255);
-        for (int i = 0; i < 16; ++i) {
-            bytes[i] = static_cast<unsigned char>(dist(gen));
-        }
+        throw std::runtime_error("RAND_bytes failed: cannot generate secure UUID");
     }
 
     // Set version to 4 (random)

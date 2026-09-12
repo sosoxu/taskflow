@@ -80,6 +80,13 @@ public:
         try {
             auto decoded = jwt::decode(token);
 
+            // Fix #354: 强制要求 exp 声明——jwt-cpp 的 verifier 不会拒绝
+            // 缺少 exp 的 token，若无此检查，无 exp 的伪造 token 永不过期
+            if (!decoded.has_payload_claim("exp")) {
+                return common::result::Result<TokenPayload>::failure(
+                    "Token missing exp claim");
+            }
+
             auto verifier = jwt::verify()
                 .allow_algorithm(jwt::algorithm::hs256{secret})
                 .with_issuer("taskflow");

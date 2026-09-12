@@ -29,13 +29,11 @@ public:
         constexpr int cost = 10;
 
         unsigned char salt_bytes[16];
+        // Fix #354: CSPRNG 失败必须硬失败——此前回退 mt19937 弱随机生成
+        // bcrypt 盐值，可预测盐值会削弱离线破解成本
         if (RAND_bytes(salt_bytes, sizeof(salt_bytes)) != 1) {
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<int> dist(0, 255);
-            for (int i = 0; i < 16; ++i) {
-                salt_bytes[i] = static_cast<unsigned char>(dist(gen));
-            }
+            return common::result::Result<std::string>::failure(
+                "RAND_bytes failed: cannot generate secure bcrypt salt");
         }
 
         std::string bcrypt_salt = "$2b$" + std::to_string(cost) + "$" +
@@ -136,17 +134,17 @@ private:
     // PBKDF2 fallback methods (for backward compatibility)
     static common::result::Result<std::string> hashPasswordPBKDF2(const std::string& password) {
         constexpr int kSaltLen = 16;
-        constexpr int kIterations = 10000;
+        // Fix #354: 迭代次数从 10000 提升到 600000（OWASP 2023 对
+        // PBKDF2-HMAC-SHA256 的建议值）。此为 bcrypt 不可用时的回退路径，
+        // 迭代过低会使离线破解成本骤降。
+        constexpr int kIterations = 600000;
         constexpr int kHashLen = 32;
 
         unsigned char salt[kSaltLen];
+        // Fix #354: CSPRNG 失败必须硬失败（原回退 mt19937 弱随机）
         if (RAND_bytes(salt, kSaltLen) != 1) {
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<int> dist(0, 255);
-            for (int i = 0; i < kSaltLen; ++i) {
-                salt[i] = static_cast<unsigned char>(dist(gen));
-            }
+            return common::result::Result<std::string>::failure(
+                "RAND_bytes failed: cannot generate secure PBKDF2 salt");
         }
 
         unsigned char hash[kHashLen];
