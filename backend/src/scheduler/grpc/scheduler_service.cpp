@@ -141,7 +141,11 @@ SchedulerServiceImpl::SchedulerServiceImpl(const std::string& auth_token)
 
     // Fix #121: Decrement the worker's running_tasks counter when a task finishes.
     // Without this, LoadBalanceDispatcher sees stale (inflated) load between heartbeats.
-    if (ti_result.ok() && !ti_result.value().worker_id.empty()) {
+    // Fix #337: 仅当本次调用真正完成状态转换（markFinished 成功）时递减。
+    // 此前以 findById 预检查结果为依据——与取消/超时路径并发时，双方都通过
+    // 预检查导致 running_tasks 双重递减；markFinished 本身是条件 UPDATE
+    // （仅 DISPATCHED/RUNNING 可转换），其成败即互斥判据。
+    if (finish_result.ok() && ti_result.ok() && !ti_result.value().worker_id.empty()) {
         auto dec_result = worker_dao_.decrementRunningTasks(ti_result.value().worker_id);
         if (!dec_result.ok()) {
             spdlog::warn("ReportTaskResult: failed to decrement running_tasks for worker {}: {}",

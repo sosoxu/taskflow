@@ -232,6 +232,15 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
                 if (!timeout_result.ok()) {
                     spdlog::error("DagDriver: failed to mark task instance {} as TIMEOUT: {}",
                                   ti.id, timeout_result.error());
+                } else if (!ti.worker_id.empty()) {
+                    // Fix #337: 谁成功转换谁递减。超时路径成功把任务转为
+                    // 终态后，worker 的迟到 ReportTaskResult 将因条件 UPDATE
+                    // 失败而不再递减——此处必须补上，否则 running_tasks 泄漏。
+                    auto dec_result = worker_dao_.decrementRunningTasks(ti.worker_id);
+                    if (!dec_result.ok()) {
+                        spdlog::warn("DagDriver: failed to decrement running_tasks for worker {} "
+                                     "after TIMEOUT: {}", ti.worker_id, dec_result.error());
+                    }
                 }
             }
         }
@@ -261,8 +270,18 @@ void DagDriver::driveInstance(const common::models::WorkflowInstance& instance) 
             if (elapsed > dispatch_timeout) {
                 spdlog::warn("DagDriver: task instance {} stuck in DISPATCHED for {}s, marking as FAILED",
                              ti.id, elapsed);
-                task_instance_dao_.markFinished(ti.id, "FAILED", -1,
+                auto stuck_result = task_instance_dao_.markFinished(ti.id, "FAILED", -1,
                     "Task stuck in DISPATCHED state for " + std::to_string(elapsed) + " seconds");
+                if (stuck_result.ok() && !ti.worker_id.empty()) {
+                    // Fix #337: 该任务派发成功时已递增计数，此处成功转为终态
+                    // 需对称递减（worker 永远不会为它上报结果）。
+                    auto dec_result = worker_dao_.decrementRunningTasks(ti.worker_id);
+                    if (!dec_result.ok()) {
+                        spdlog::warn("DagDriver: failed to decrement running_tasks for worker {} "
+                                     "after DISPATCHED-stuck FAILED: {}",
+                                     ti.worker_id, dec_result.error());
+                    }
+                }
             }
         }
     }
