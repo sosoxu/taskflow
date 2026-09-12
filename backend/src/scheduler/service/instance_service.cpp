@@ -15,14 +15,16 @@
 #include "common/models/worker_info.h"
 #include "common/models/workflow_instance.h"
 #include "common/result/result.h"
+#include "common/util/grpc_auth_util.h"
 #include "common/util/grpc_channel_util.h"
 #include "scheduler/engine/dag_engine.h"
 #include "taskflow.grpc.pb.h"
 
 namespace taskflow::scheduler::service {
 
-InstanceService::InstanceService(common::config::TlsConfig worker_tls)
-    : worker_tls_(std::move(worker_tls)) {}
+InstanceService::InstanceService(common::config::TlsConfig worker_tls,
+                                const std::string& grpc_auth_token)
+    : worker_tls_(std::move(worker_tls)), grpc_auth_token_(grpc_auth_token) {}
 
 // Fix #134: Resource-level permission check. Admins bypass; non-admin users
 // must own the workflow that created the instance. Empty user_id skips
@@ -288,6 +290,8 @@ void InstanceService::sendCancelTask(const std::string& task_instance_id,
     auto grpc_status = common::util::retryWorkerRpc([&]() -> ::grpc::Status {
         grpc::ClientContext ctx;
         ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
+        // Fix #326: 携带内部认证 token
+        common::util::GrpcAuthUtil::applyAuth(ctx, grpc_auth_token_);
         return stub->CancelTask(&ctx, request, &response);
     });
 
@@ -624,6 +628,8 @@ common::result::Result<std::string> InstanceService::getTaskLog(
 
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(300));
+    // Fix #326: 携带内部认证 token
+    common::util::GrpcAuthUtil::applyAuth(context, grpc_auth_token_);
     auto reader = stub->GetTaskLog(&context, request);
 
     std::string log_content;

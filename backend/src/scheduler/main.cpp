@@ -128,7 +128,8 @@ int main(int argc, char* argv[]) {
     }
 
     // 启动 gRPC 服务
-    taskflow::scheduler::grpc::SchedulerServiceImpl scheduler_service;
+    // Fix #326: token 非空时 worker 注册/心跳/结果上报必须携带内部认证 token
+    taskflow::scheduler::grpc::SchedulerServiceImpl scheduler_service(config.server.grpc_auth_token);
     std::string grpc_address = "0.0.0.0:" + std::to_string(config.server.grpc_port);
     ::grpc::ServerBuilder grpc_builder;
 
@@ -190,7 +191,8 @@ int main(int argc, char* argv[]) {
         config.schedule.dag_drive_interval,
         config.encryption.aes_key,
         leader_election,
-        config.worker_client.tls);
+        config.worker_client.tls,
+        config.server.grpc_auth_token);
     dag_driver.start();
     spdlog::info("DAG 执行驱动已启动");
 
@@ -263,6 +265,9 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+            // Fix #327: 配置了白名单但 Origin 不匹配时必须拒绝（返回空串，
+            // 由调用方跳过 ACAO 头）。此前 fallback 返回 "*"，白名单形同虚设。
+            return "";
         }
         return "*";
     };
@@ -275,10 +280,14 @@ int main(int argc, char* argv[]) {
             if (req->method() == drogon::Options) {
                 auto resp = drogon::HttpResponse::newHttpResponse();
                 resp->setStatusCode(drogon::k204NoContent);
-                resp->addHeader("Access-Control-Allow-Origin", resolve_cors_origin(req));
-                resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-                resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-                resp->addHeader("Access-Control-Max-Age", "86400");
+                // Fix #327: 白名单不匹配时 resolve_cors_origin 返回空串，跳过 ACAO 头
+                auto origin = resolve_cors_origin(req);
+                if (!origin.empty()) {
+                    resp->addHeader("Access-Control-Allow-Origin", origin);
+                    resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                    resp->addHeader("Access-Control-Max-Age", "86400");
+                }
                 acb(resp);
                 return;
             }
@@ -333,7 +342,11 @@ int main(int argc, char* argv[]) {
     // 为所有响应添加 CORS 头
     drogon::app().registerPostHandlingAdvice(
         [&resolve_cors_origin](const drogon::HttpRequestPtr& req, const drogon::HttpResponsePtr& resp) {
-            resp->addHeader("Access-Control-Allow-Origin", resolve_cors_origin(req));
+            // Fix #327: 白名单不匹配时跳过 ACAO 头，浏览器将拦截跨域响应
+            auto origin = resolve_cors_origin(req);
+            if (!origin.empty()) {
+                resp->addHeader("Access-Control-Allow-Origin", origin);
+            }
             resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
             resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
         });
@@ -363,7 +376,8 @@ int main(int argc, char* argv[]) {
     auto workflowCtrl = std::make_shared<taskflow::scheduler::api::WorkflowController>(workflow_service);
     drogon::app().registerController(workflowCtrl);
 
-    auto instance_service = std::make_shared<taskflow::scheduler::service::InstanceService>(config.worker_client.tls);
+    auto instance_service = std::make_shared<taskflow::scheduler::service::InstanceService>(
+        config.worker_client.tls, config.server.grpc_auth_token);
     auto instanceCtrl = std::make_shared<taskflow::scheduler::api::InstanceController>(instance_service, config.auth.jwt_secret);
     drogon::app().registerController(instanceCtrl);
 

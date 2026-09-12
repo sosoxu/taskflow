@@ -15,7 +15,10 @@ namespace taskflow::worker::grpc {
 
 class WorkerClient {
 public:
-    explicit WorkerClient(std::shared_ptr<::grpc::Channel> channel);
+    // Fix #326: auth_token 非空时，每个 RPC 的 metadata 携带该 token，
+    // scheduler 侧据此校验请求来源。
+    explicit WorkerClient(std::shared_ptr<::grpc::Channel> channel,
+                          const std::string& auth_token = {});
 
     taskflow::common::result::Result<std::string> registerWorker(
         const std::string& name, const std::string& address,
@@ -36,6 +39,7 @@ public:
 
 private:
     std::unique_ptr<taskflow::v1::SchedulerService::Stub> stub_;
+    std::string auth_token_;
 
     template<typename Func>
     ::grpc::Status retryRpc(Func rpc_call, int max_retries = 3);

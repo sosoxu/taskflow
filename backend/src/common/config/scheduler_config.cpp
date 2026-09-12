@@ -26,6 +26,8 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         if (s["thread_num"]) config.server.thread_num = s["thread_num"].as<int>();
         // Fix #182: allowed CORS origins (comma-separated)
         if (s["cors_origins"]) config.server.cors_origins = s["cors_origins"].as<std::string>();
+        // Fix #326: gRPC 内部认证 token
+        if (s["grpc_auth_token"]) config.server.grpc_auth_token = s["grpc_auth_token"].as<std::string>();
     }
 
     // server.tls

@@ -1,6 +1,10 @@
 server:
   http_port: 8080
   grpc_port: 50051
+  # Fix #326: gRPC 内部认证 token。为空表示不启用（仅限本地开发）。
+  # 生产部署必须设置随机值，且与所有 worker 的 worker.yaml 保持一致，
+  # 否则 worker 注册/心跳与任务派发会被拒绝。
+  grpc_auth_token: ""
   # tls:
   #   enabled: true
   #   cert_path: /path/to/cert.pem

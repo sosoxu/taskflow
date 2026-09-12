@@ -20,6 +20,10 @@ struct WorkerServerConfig {
     // register this instance's routable IPv4 address, rather than a load-
     // balanced service name shared by multiple worker replicas.
     std::string advertise_address;
+    // Fix #326: worker gRPC 服务端校验的内部认证 token，同时作为访问
+    // scheduler 的客户端凭证。为空表示不启用（兼容旧部署）。
+    // 必须与 scheduler.yaml 的 server.grpc_auth_token 保持一致。
+    std::string grpc_auth_token;
     WorkerTlsConfig tls;
 };
 

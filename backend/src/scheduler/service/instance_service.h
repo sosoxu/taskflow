@@ -14,7 +14,9 @@ namespace taskflow::scheduler::service {
 class InstanceService {
 public:
     // Fix #126: Accept TLS config for scheduler→worker gRPC calls.
-    explicit InstanceService(common::config::TlsConfig worker_tls = {});
+    // Fix #326: grpc_auth_token 用于访问 worker 的 RPC 认证。
+    explicit InstanceService(common::config::TlsConfig worker_tls = {},
+                            const std::string& grpc_auth_token = {});
 
     // Pause workflow instance
     // Fix #134: resource-level permission check (creator_id)
@@ -88,6 +90,8 @@ private:
     dao::WorkflowDao workflow_dao_;
     // Fix #126: TLS config for scheduler→worker gRPC channels.
     common::config::TlsConfig worker_tls_;
+    // Fix #326: 内部认证 token。
+    std::string grpc_auth_token_;
 
     // Recursively reset downstream task instances to PENDING based on DAG edges.
     // Fix #113: traverse DAG from the given node_id to find all downstream nodes.

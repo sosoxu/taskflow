@@ -1,5 +1,9 @@
 server:
   grpc_port: 50052
+  # Fix #326: gRPC 内部认证 token。为空表示不启用（仅限本地开发）。
+  # 必须与 scheduler.yaml 的 server.grpc_auth_token 保持一致；
+  # 同时作为访问 scheduler 的注册/心跳凭证。
+  grpc_auth_token: ""
   # Docker multi-worker deployment: use "auto" to register this worker's
   # container IP. For remote hosts, set an explicitly reachable host:port.
   # advertise_address: "auto"

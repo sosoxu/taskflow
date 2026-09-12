@@ -5,15 +5,22 @@
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include "common/util/grpc_auth_util.h"
 
 namespace taskflow::scheduler::grpc {
 
-SchedulerServiceImpl::SchedulerServiceImpl() = default;
+SchedulerServiceImpl::SchedulerServiceImpl(const std::string& auth_token)
+    : auth_token_(auth_token) {}
 
 ::grpc::Status SchedulerServiceImpl::Register(
-    ::grpc::ServerContext* /*context*/,
+    ::grpc::ServerContext* context,
     const taskflow::v1::RegisterRequest* request,
     taskflow::v1::RegisterResponse* response) {
+    auto auth = common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+    if (!auth.ok()) {
+        spdlog::warn("Register rejected: {} (name={})", auth.error_message(), request->name());
+        return auth;
+    }
     nlohmann::json resource_tags = nlohmann::json::array();
     for (int i = 0; i < request->resource_tags_size(); ++i) {
         resource_tags.push_back(request->resource_tags(i));
@@ -34,9 +41,13 @@ SchedulerServiceImpl::SchedulerServiceImpl() = default;
 }
 
 ::grpc::Status SchedulerServiceImpl::Deregister(
-    ::grpc::ServerContext* /*context*/,
+    ::grpc::ServerContext* context,
     const taskflow::v1::DeregisterRequest* request,
     taskflow::v1::DeregisterResponse* response) {
+    auto auth = common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+    if (!auth.ok()) {
+        return auth;
+    }
     // Fix #124: Mark the worker offline on graceful shutdown so the dispatcher
     // stops sending new tasks to it immediately (rather than waiting for the
     // heartbeat timeout). Running tasks are left to finish; the worker is
@@ -54,9 +65,13 @@ SchedulerServiceImpl::SchedulerServiceImpl() = default;
 }
 
 ::grpc::Status SchedulerServiceImpl::Heartbeat(
-    ::grpc::ServerContext* /*context*/,
+    ::grpc::ServerContext* context,
     const taskflow::v1::HeartbeatRequest* request,
     taskflow::v1::HeartbeatResponse* response) {
+    auto auth = common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+    if (!auth.ok()) {
+        return auth;
+    }
     auto result = worker_dao_.updateHeartbeat(
         request->worker_id(), request->cpu_usage(),
         request->memory_usage(), request->running_tasks());
@@ -71,9 +86,13 @@ SchedulerServiceImpl::SchedulerServiceImpl() = default;
 }
 
 ::grpc::Status SchedulerServiceImpl::ReportTaskResult(
-    ::grpc::ServerContext* /*context*/,
+    ::grpc::ServerContext* context,
     const taskflow::v1::TaskResultRequest* request,
     taskflow::v1::TaskResultResponse* response) {
+    auto auth = common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+    if (!auth.ok()) {
+        return auth;
+    }
 
     const std::string& ti_id = request->task_instance_id();
     const std::string& status = request->status();

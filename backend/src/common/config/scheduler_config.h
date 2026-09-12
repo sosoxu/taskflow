@@ -84,6 +84,9 @@ struct ServerConfig {
     // and the request Origin matches an entry, that Origin is echoed back;
     // otherwise the default "*" is used (dev-friendly).
     std::string cors_origins;
+    // Fix #326: scheduler gRPC 服务端校验的内部认证 token。为空表示不启用
+    // （兼容旧部署）。生产部署必须设置，且与各 worker 的 worker.yaml 一致。
+    std::string grpc_auth_token;
 };
 
 // Fix #126: TLS config for scheduler→worker gRPC calls (DispatchTask, CancelTask, GetTaskLog).

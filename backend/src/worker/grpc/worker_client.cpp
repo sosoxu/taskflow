@@ -1,9 +1,12 @@
 #include "worker/grpc/worker_client.h"
 
+#include "common/util/grpc_auth_util.h"
+
 namespace taskflow::worker::grpc {
 
-WorkerClient::WorkerClient(std::shared_ptr<::grpc::Channel> channel)
-    : stub_(taskflow::v1::SchedulerService::NewStub(channel)) {}
+WorkerClient::WorkerClient(std::shared_ptr<::grpc::Channel> channel,
+                          const std::string& auth_token)
+    : stub_(taskflow::v1::SchedulerService::NewStub(channel)), auth_token_(auth_token) {}
 
 template<typename Func>
 ::grpc::Status WorkerClient::retryRpc(Func rpc_call, int max_retries) {
@@ -37,6 +40,7 @@ common::result::Result<std::string> WorkerClient::registerWorker(
 
     auto call = [&]() -> ::grpc::Status {
         ::grpc::ClientContext context;
+        common::util::GrpcAuthUtil::applyAuth(context, auth_token_);
         context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
         return stub_->Register(&context, request, &response);
     };
@@ -65,6 +69,7 @@ common::result::Result<void> WorkerClient::deregisterWorker(
 
     auto call = [&]() -> ::grpc::Status {
         ::grpc::ClientContext context;
+        common::util::GrpcAuthUtil::applyAuth(context, auth_token_);
         context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
         return stub_->Deregister(&context, request, &response);
     };
@@ -97,6 +102,7 @@ common::result::Result<void> WorkerClient::sendHeartbeat(
 
     auto call = [&]() -> ::grpc::Status {
         ::grpc::ClientContext context;
+        common::util::GrpcAuthUtil::applyAuth(context, auth_token_);
         context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
         return stub_->Heartbeat(&context, request, &response);
     };
@@ -129,6 +135,7 @@ common::result::Result<void> WorkerClient::reportTaskResult(
 
     auto call = [&]() -> ::grpc::Status {
         ::grpc::ClientContext context;
+        common::util::GrpcAuthUtil::applyAuth(context, auth_token_);
         context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(10));
         return stub_->ReportTaskResult(&context, request, &response);
     };

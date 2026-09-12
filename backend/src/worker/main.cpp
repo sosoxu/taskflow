@@ -22,6 +22,7 @@
 
 #include "common/config/worker_config.h"
 #include "worker/grpc/worker_client.h"
+#include "common/util/grpc_auth_util.h"
 #include "worker/executor/task_executor.h"
 #include "worker/util/resource_collector.h"
 #include "taskflow.grpc.pb.h"
@@ -118,14 +119,24 @@ static bool isValidInstanceId(const std::string& id) {
 
 class WorkerServiceImpl final : public WorkerService::Service {
 public:
+    // Fix #326: auth_token 非空时，DispatchTask/CancelTask/GetTaskLog 必须携带
+    // 匹配的内部认证 token，否则拒绝。此前任何能连上 worker 的客户端都可以
+    // 直接下发任意 command 任务（未授权 RCE）。
     WorkerServiceImpl(taskflow::worker::executor::TaskExecutor& executor,
                       taskflow::worker::grpc::WorkerClient& client,
-                      const std::string& log_dir)
-        : executor_(executor), client_(client), log_dir_(log_dir) {}
+                      const std::string& log_dir,
+                      const std::string& auth_token)
+        : executor_(executor), client_(client), log_dir_(log_dir), auth_token_(auth_token) {}
 
-    grpc::Status DispatchTask(grpc::ServerContext* /*context*/,
+    grpc::Status DispatchTask(grpc::ServerContext* context,
                               const TaskDispatchRequest* request,
                               TaskDispatchResponse* response) override {
+        auto auth = taskflow::common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+        if (!auth.ok()) {
+            spdlog::warn("DispatchTask rejected: {} (task_instance_id={})",
+                         auth.error_message(), request->task_instance_id());
+            return auth;
+        }
         spdlog::info("收到任务下发请求: task_instance_id={}, type={}",
                      request->task_instance_id(), request->task_type());
 
@@ -185,9 +196,13 @@ public:
         return grpc::Status::OK;
     }
 
-    grpc::Status CancelTask(grpc::ServerContext* /*context*/,
+    grpc::Status CancelTask(grpc::ServerContext* context,
                             const TaskCancelRequest* request,
                             TaskCancelResponse* response) override {
+        auto auth = taskflow::common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+        if (!auth.ok()) {
+            return auth;
+        }
         spdlog::info("收到任务取消请求: task_instance_id={}", request->task_instance_id());
 
         auto result = executor_.cancel(request->task_instance_id());
@@ -204,6 +219,10 @@ public:
     grpc::Status GetTaskLog(grpc::ServerContext* context,
                             const TaskLogRequest* request,
                             grpc::ServerWriter<LogChunk>* writer) override {
+        auto auth = taskflow::common::util::GrpcAuthUtil::checkAuth(context, auth_token_);
+        if (!auth.ok()) {
+            return auth;
+        }
         spdlog::info("收到日志请求: task_instance_id={}, follow={}",
                      request->task_instance_id(), request->follow());
 
@@ -362,6 +381,7 @@ private:
     taskflow::worker::executor::TaskExecutor& executor_;
     taskflow::worker::grpc::WorkerClient& client_;
     std::string log_dir_;
+    std::string auth_token_;
 };
 
 int main(int argc, char* argv[]) {
@@ -429,13 +449,14 @@ int main(int argc, char* argv[]) {
     } else {
         channel = ::grpc::CreateChannel(config.scheduler.address, ::grpc::InsecureChannelCredentials());
     }
-    taskflow::worker::grpc::WorkerClient scheduler_client(channel);
+    taskflow::worker::grpc::WorkerClient scheduler_client(channel, config.server.grpc_auth_token);
 
     // Start accepting callbacks before registering the worker. Registration
     // makes the worker immediately eligible for scheduling, so doing it first
     // exposes a window where the scheduler can select an unreachable worker.
     std::string server_address = "0.0.0.0:" + std::to_string(config.server.grpc_port);
-    WorkerServiceImpl service(executor, scheduler_client, config.task_log.dir);
+    WorkerServiceImpl service(executor, scheduler_client, config.task_log.dir,
+                              config.server.grpc_auth_token);
 
     ::grpc::ServerBuilder builder;
     if (config.server.tls.enabled) {
@@ -493,27 +514,25 @@ int main(int argc, char* argv[]) {
     }
 
     std::string worker_id;
+    // Fix #333: 注册失败不再退出。此前重试 10 次（约 5 分钟）后进程直接退出，
+    // scheduler 滚动重启/部署窗口超过 5 分钟时裸机部署的 worker 会永久离线。
+    // 改为无限重试，线性退避封顶 30s，scheduler 恢复后自动完成注册。
     int register_retries = 0;
-    const int max_register_retries = 10;
-    while (register_retries < max_register_retries) {
+    while (true) {
         auto register_result = scheduler_client.registerWorker(
             worker_name, worker_address,
             config.worker.max_tasks, config.worker.resource_tags);
 
         if (register_result.ok()) {
             worker_id = register_result.value();
-            spdlog::info("Worker 注册成功, worker_id: {}", worker_id);
+            spdlog::info("Worker 注册成功, worker_id: {} (重试 {} 次后)", worker_id, register_retries);
             break;
         }
         register_retries++;
-        int delay = 5 * register_retries;  // 线性退避: 5s, 10s, 15s...
-        spdlog::warn("Register failed (attempt {}/{}), retrying in {}s: {}",
-                     register_retries, max_register_retries, delay, register_result.error());
+        int delay = std::min(5 * register_retries, 30);  // 线性退避 5s,10s,15s... 封顶 30s
+        spdlog::warn("Register failed (attempt {}), retrying in {}s: {}",
+                     register_retries, delay, register_result.error());
         std::this_thread::sleep_for(std::chrono::seconds(delay));
-    }
-    if (register_retries >= max_register_retries) {
-        spdlog::error("Failed to register after {} attempts, exiting", max_register_retries);
-        return 1;
     }
 
     // 启动心跳线程

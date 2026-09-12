@@ -23,7 +23,8 @@ class DagDriver {
 public:
     DagDriver(int drive_interval, const std::string& aes_key,
               std::shared_ptr<grpc::LeaderElection> leader_election,
-              common::config::TlsConfig worker_tls = {});
+              common::config::TlsConfig worker_tls = {},
+              const std::string& grpc_auth_token = {});
 
     void start();
     void stop();
@@ -126,6 +127,8 @@ private:
     std::shared_ptr<grpc::LeaderElection> leader_election_;
     // Fix #126: TLS config for scheduler→worker gRPC channels.
     common::config::TlsConfig worker_tls_;
+    // Fix #326: 内部认证 token，派发任务时写入 gRPC metadata。
+    std::string grpc_auth_token_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 

@@ -21,6 +21,8 @@ WorkerConfig WorkerConfig::load(const std::string& config_path) {
         auto s = root["server"];
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
         if (s["advertise_address"]) config.server.advertise_address = s["advertise_address"].as<std::string>();
+        // Fix #326: gRPC 内部认证 token（服务端校验 + 作为客户端访问 scheduler 的凭证）
+        if (s["grpc_auth_token"]) config.server.grpc_auth_token = s["grpc_auth_token"].as<std::string>();
     }
 
     // server.tls
