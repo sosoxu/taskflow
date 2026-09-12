@@ -157,6 +157,20 @@ CREATE INDEX idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
 CREATE INDEX idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 
 -- ============================================================
+-- 8. Token 黑名单表（多实例共享，登出/刷新时写入）
+-- Fix #323: 补齐 schema_all.sql 中已存在但 schema.sql 缺失的表。
+-- 此前 docker-compose 默认部署只初始化 schema.sql，导致 refresh token
+-- 流程必失败（写库异常被误判为 token 已重放）、登出黑名单失效。
+-- ============================================================
+CREATE TABLE token_blacklist (
+    jti             VARCHAR(64) PRIMARY KEY,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE token_blacklist OWNER TO taskflow;
+CREATE INDEX idx_token_blacklist_expires ON token_blacklist(expires_at);
+
+-- ============================================================
 -- 初始管理员用户（密码: admin123，bcrypt hash）
 -- Fix #309: Replace the incorrect $2a$ hash with a verified $2b$ hash.
 -- ============================================================

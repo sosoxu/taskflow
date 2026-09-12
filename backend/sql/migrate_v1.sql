@@ -168,6 +168,16 @@ BEGIN
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_enabled ON cron_jobs(enabled) WHERE enabled = TRUE;
     CREATE INDEX IF NOT EXISTS idx_cron_jobs_next_trigger ON cron_jobs(next_trigger_time) WHERE enabled = TRUE;
 
+    -- 8. Token 黑名单表（Fix #323：schema.sql/schema_all.sql 均有，migrate 路径此前缺失，
+    --    老库升级后 refresh token 流程仍会失败）
+    CREATE TABLE IF NOT EXISTS token_blacklist (
+        jti             VARCHAR(64) PRIMARY KEY,
+        expires_at      TIMESTAMPTZ NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE token_blacklist OWNER TO taskflow;
+    CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);
+
     -- Fix #309: 初始管理员用户（密码: admin123，bcrypt $2b$ hash，与 schema.sql 一致）
     INSERT INTO users (username, password_hash, role)
     VALUES ('admin', '$2b$10$ueg7X6rg6l88Nt3Hcshq8.GYTQvwJWgufhC25dvYfKJJ7vPokQaBa', 'admin')
