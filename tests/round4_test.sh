@@ -12,13 +12,52 @@ TOKEN=$(curl -s -X POST "$BASE/api/v1/auth/login" -H "Content-Type: application/
   -d '{"username":"admin","password":"admin123"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
 AUTH="Authorization: Bearer $TOKEN"
 
+# Fix #339: 断言框架——此前本脚本只打印状态码不判定且永远 exit 0。
+# 现在对关键边界行为断言：失败计数 >0 时以非零退出；结束时清理测试数据。
+PASS=0
+FAIL=0
+CREATED_WF_IDS=()
+
+check() {
+  local name="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    PASS=$((PASS+1)); echo "  [PASS] $name (实际=$actual)"
+  else
+    FAIL=$((FAIL+1)); echo "  [FAIL] $name 期望=$expected 实际=$actual"
+  fi
+}
+
+# 断言"不应 5xx"——边界输入允许被接受（参数化查询安全）或 4xx 拒绝，但不允许崩溃
+check_not_5xx() {
+  local name="$1" code="$2"
+  if [ "$code" -ge 500 ] 2>/dev/null; then
+    FAIL=$((FAIL+1)); echo "  [FAIL] $name 不应 5xx，实际 $code"
+  else
+    PASS=$((PASS+1)); echo "  [PASS] $name (HTTP $code)"
+  fi
+}
+
+# 断言"应被拒绝"——不允许 2xx（误接受）也不允许 5xx（崩溃）
+check_rejected() {
+  local name="$1" code="$2"
+  if [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 300 ] 2>/dev/null; then
+    FAIL=$((FAIL+1)); echo "  [FAIL] $name 应被拒绝，实际 2xx ($code)"
+  elif [ "$code" -ge 500 ] 2>/dev/null; then
+    FAIL=$((FAIL+1)); echo "  [FAIL] $name 不应 5xx，实际 $code"
+  else
+    PASS=$((PASS+1)); echo "  [PASS] $name (被拒绝，HTTP $code)"
+  fi
+}
+
+curl_status() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
+
 echo "=== Token acquired ==="
 
 # 辅助函数：创建任务并返回 task_id
 create_task() {
   local name=$1
   local resp=$(curl -s -X POST "$BASE/api/v1/tasks" -H "$AUTH" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$name\",\"type\":\"command\",\"config\":{\"command\":\"echo hi\"}}")
+    -d "{\"name\":\"$name\",\"type\":\"command\",\"config_json\":{\"command\":\"echo hi\"}}")
   echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])" 2>/dev/null
 }
 
@@ -27,7 +66,7 @@ create_workflow() {
   local name=$1
   local task_id=$2
   local resp=$(curl -s -X POST "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" \
-    -d "{\"name\":\"$name\",\"description\":\"test\",\"dag\":{\"nodes\":[{\"id\":\"n1\",\"task_id\":\"$task_id\"}],\"edges\":[]}}")
+    -d "{\"name\":\"$name\",\"description\":\"test\",\"dag_json\":{\"nodes\":[{\"id\":\"n1\",\"task_id\":\"$task_id\"}],\"edges\":[]}}")
   echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])" 2>/dev/null
 }
 
@@ -46,7 +85,7 @@ fi
 echo ""
 echo "=== Test 1: 并发创建同名工作流 ==="
 WF_NAME="dup-wf-$(date +%s)"
-PAYLOAD='{"name":"'"$WF_NAME"'","description":"dup test","dag":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}'
+PAYLOAD='{"name":"'"$WF_NAME"'","description":"dup test","dag_json":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}'
 
 RESULTS=$(seq 1 20 | xargs -P 20 -I {} curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/v1/workflows" \
   -H "$AUTH" -H "Content-Type: application/json" -d "$PAYLOAD")
@@ -62,6 +101,11 @@ items = d.get('data',{}).get('items',[])
 print(len(items))
 " 2>/dev/null)
 echo "实际创建数量: $COUNT"
+OK200=$(echo "$RESULTS" | grep -c '^200$' || true)
+DUP400=$(echo "$RESULTS" | grep -c '^400$' || true)
+check "Test1: 并发创建同名工作流仅 1 个成功" "1" "$OK200"
+check "Test1: 其余 19 个并发请求被 400 拒绝" "19" "$DUP400"
+check "Test1: 数据库中该名称工作流仅 1 条" "1" "$COUNT"
 
 ############################################
 # 测试 2: 超长 DAG 链（100 节点线性）
@@ -72,7 +116,7 @@ python3 -c "
 import json
 nodes = [{'id': f'n{i}', 'task_id': '$BASE_TASK_ID'} for i in range(100)]
 edges = [{'source': f'n{i}', 'target': f'n{i+1}'} for i in range(99)]
-print(json.dumps({'name': 'long-dag-test', 'description': '100 node linear', 'dag': {'nodes': nodes, 'edges': edges}}))
+print(json.dumps({'name': 'long-dag-test', 'description': '100 node linear', 'dag_json': {'nodes': nodes, 'edges': edges}}))
 " > /tmp/long_dag.json
 
 START=$(date +%s%3N)
@@ -84,11 +128,14 @@ WF_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['
 echo "Workflow ID: $WF_ID"
 
 if [ -n "$WF_ID" ]; then
+  CREATED_WF_IDS+=("$WF_ID")
   START=$(date +%s%3N)
   TRIG_RESP=$(curl -s -X POST "$BASE/api/v1/workflows/$WF_ID/trigger" -H "$AUTH" -H "Content-Type: application/json" -d '{}')
   END=$(date +%s%3N)
   echo "触发 100 节点 DAG 耗时: $((END-START)) ms"
   echo "触发响应: $(echo $TRIG_RESP | head -c 200)"
+  TRIG_CODE=$(echo "$TRIG_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',-1))" 2>/dev/null)
+  check "Test2: 100 节点 DAG 触发成功（code=0）" "0" "$TRIG_CODE"
 fi
 
 ############################################
@@ -97,13 +144,17 @@ fi
 echo ""
 echo "=== Test 3: HTTP 方法误用 ==="
 echo "PATCH /api/v1/workflows/{id}:"
-curl -s -o /dev/null -w "  status=%{http_code}\n" -X PATCH "$BASE/api/v1/workflows/$WF_ID" -H "$AUTH" -H "Content-Type: application/json" -d '{}'
+C1=$(curl_status -X PATCH "$BASE/api/v1/workflows/$WF_ID" -H "$AUTH" -H "Content-Type: application/json" -d '{}'); echo "  status=$C1"
 echo "DELETE /api/v1/workflows (集合端点不支持 DELETE):"
-curl -s -o /dev/null -w "  status=%{http_code}\n" -X DELETE "$BASE/api/v1/workflows" -H "$AUTH"
+C2=$(curl_status -X DELETE "$BASE/api/v1/workflows" -H "$AUTH"); echo "  status=$C2"
 echo "PUT /api/v1/workflows (应为 POST):"
-curl -s -o /dev/null -w "  status=%{http_code}\n" -X PUT "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" -d '{}'
+C3=$(curl_status -X PUT "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" -d '{}'); echo "  status=$C3"
 echo "GET /api/v1/workflows with body:"
-curl -s -o /dev/null -w "  status=%{http_code}\n" -X GET "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" -d '{"foo":"bar"}'
+C4=$(curl_status -X GET "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" -d '{"foo":"bar"}'); echo "  status=$C4"
+check_rejected "Test3: PATCH 工作流被拒绝" "$C1"
+check_rejected "Test3: DELETE 集合端点被拒绝" "$C2"
+check_rejected "Test3: PUT 集合端点被拒绝" "$C3"
+check_not_5xx "Test3: GET 带 body 不导致 5xx" "$C4"
 
 ############################################
 # 测试 4: Content-Type 边界
@@ -144,7 +195,7 @@ echo ""
 echo "=== Test 6: 特殊字符 / Unicode / 控制字符 ==="
 echo "Emoji 名称:"
 curl -s -w "  status=%{http_code}\n" -X POST "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{"name":"测试🚀工作流","description":"emoji","dag":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}' | head -c 200
+  -d '{"name":"测试🚀工作流","description":"emoji","dag_json":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}' | head -c 200
 echo ""
 echo "超长名称 (10000 字符):"
 LONG_NAME=$(python3 -c "print('a'*10000)")
@@ -152,12 +203,14 @@ curl -s -o /dev/null -w "  status=%{http_code}\n" -X POST "$BASE/api/v1/workflow
   -d '{"name":"'"$LONG_NAME"'"}'
 echo "控制字符名称:"
 curl -s -w "  status=%{http_code}\n" -X POST "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{"name":"test\u0000\u0001\u0002ctrl","dag":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}' | head -c 200
+  -d '{"name":"test\u0000\u0001\u0002ctrl","dag_json":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}' | head -c 200
 echo ""
 echo "SQL 注入名称:"
-curl -s -w "  status=%{http_code}\n" -X POST "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{"name":"test; DROP TABLE workflows;--","dag":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}' | head -c 200
-echo ""
+SQLI_CODE=$(curl_status -X POST "$BASE/api/v1/workflows" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"name":"test; DROP TABLE workflows;--","dag_json":{"nodes":[{"id":"n1","task_id":"'"$BASE_TASK_ID"'"}],"edges":[]}}')
+echo "  status=$SQLI_CODE"
+# 注入名称可能被安全地接受（参数化查询）或拒绝——都不应 5xx
+check_not_5xx "Test6: SQL 注入名称不导致 5xx（安全接受或 4xx 拒绝）" "$SQLI_CODE"
 
 ############################################
 # 测试 7: 无效 UUID / 超长路径参数
@@ -256,7 +309,7 @@ python3 -c "
 import json
 nodes = [{'id': f'n{i}', 'task_id': '$BASE_TASK_ID'} for i in range(500)]
 edges = [{'source': f'n{i}', 'target': f'n{(i+1)%500}'} for i in range(500)]
-print(json.dumps({'name': 'huge-dag', 'description': '500 nodes', 'dag': {'nodes': nodes, 'edges': edges}}))
+print(json.dumps({'name': 'huge-dag', 'description': '500 nodes', 'dag_json': {'nodes': nodes, 'edges': edges}}))
 " > /tmp/huge_dag.json
 
 START=$(date +%s%3N)
@@ -280,7 +333,7 @@ fi
 echo ""
 echo "=== Test 12: 并发创建同名任务 ==="
 TASK_NAME="dup-task-$(date +%s)"
-TPAYLOAD='{"name":"'"$TASK_NAME"'","type":"command","config":{"command":"echo hi"}}'
+TPAYLOAD='{"name":"'"$TASK_NAME"'","type":"command","config_json":{"command":"echo hi"}}'
 RESULTS=$(seq 1 20 | xargs -P 20 -I {} curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/v1/tasks" \
   -H "$AUTH" -H "Content-Type: application/json" -d "$TPAYLOAD")
 echo "20 并发创建同名任务 $TASK_NAME 状态码分布:"
@@ -383,4 +436,20 @@ END{
 }'
 
 echo ""
-echo "=== Round 4 测试完成 ==="
+echo "=== 清理测试数据 ==="
+for wf_id in "${CREATED_WF_IDS[@]}"; do
+  CODE=$(curl_status -X DELETE "$BASE/api/v1/workflows/$wf_id" -H "$AUTH")
+  echo "  删除工作流 $wf_id: HTTP $CODE"
+done
+# 基础任务
+if [ -n "$BASE_TASK_ID" ]; then
+  CODE=$(curl_status -X DELETE "$BASE/api/v1/tasks/$BASE_TASK_ID" -H "$AUTH")
+  echo "  删除任务 $BASE_TASK_ID: HTTP $CODE"
+fi
+
+echo ""
+echo "=== Round 4 测试完成: 通过 $PASS，失败 $FAIL ==="
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
+exit 0

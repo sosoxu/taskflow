@@ -535,4 +535,8 @@ if [ "$FAIL" -gt "0" ]; then
     echo "失败项已保存到 /tmp/deep_test_issues.txt"
 fi
 
+# Fix #339: 有失败项时以非零退出（此前恒 exit 0，接入 CI 也永远绿）
+if [ "$FAIL" -gt "0" ]; then
+    exit 1
+fi
 exit 0

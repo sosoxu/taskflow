@@ -320,4 +320,20 @@ echo "  成功: $(grep -c '^2' "$RESULTS_DIR/dbpool.csv" 2>/dev/null || echo 0)/
 echo ""
 echo "[错误压力后服务状态]"
 echo "  健康检查: $HEALTH"
+
+# Fix #339: 阈值判定 + 非零退出（此前只打印汇总，无通过/失败结论）
 echo "============================================================"
+echo "[阈值判定]"
+FAIL=0
+C_OK=$(grep -c '^2' "$RESULTS_DIR/concurrent_trigger.csv" 2>/dev/null || echo 0)
+if [ "$C_OK" -ge 90 ]; then echo "  [PASS] 并发触发成功数 $C_OK >= 90"; else FAIL=$((FAIL+1)); echo "  [FAIL] 并发触发成功数 $C_OK < 90"; fi
+B_OK=$(grep -c '^2' "$RESULTS_DIR/batch_create.csv" 2>/dev/null || echo 0)
+if [ "$B_OK" -ge 90 ]; then echo "  [PASS] 批量创建成功数 $B_OK >= 90"; else FAIL=$((FAIL+1)); echo "  [FAIL] 批量创建成功数 $B_OK < 90"; fi
+D_OK=$(grep -c '^2' "$RESULTS_DIR/dbpool.csv" 2>/dev/null || echo 0)
+if [ "$D_OK" -ge 25 ]; then echo "  [PASS] 连接池并发成功数 $D_OK >= 25"; else FAIL=$((FAIL+1)); echo "  [FAIL] 连接池并发成功数 $D_OK < 25"; fi
+if [ "$HEALTH" = "200" ]; then echo "  [PASS] 错误压力后健康检查 200"; else FAIL=$((FAIL+1)); echo "  [FAIL] 错误压力后健康检查 $HEALTH"; fi
+echo "perf 判定: 失败 $FAIL 项"
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
+exit 0
