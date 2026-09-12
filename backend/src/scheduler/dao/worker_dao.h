@@ -48,6 +48,16 @@ public:
 
     // 原子递增运行任务数（Fix #154: dispatchTask 时调用，避免与心跳/上报竞态）
     common::result::Result<void> incrementRunningTasks(const std::string& id);
+
+    // Fix #338: 原子完成"worker 心跳超时下线"处置——worker 置 offline、
+    // running_tasks 归零、其 RUNNING/DISPATCHED 任务实例置 NODE_OFFLINE，
+    // 三步在同一事务内完成。此前为三个独立事务，中途失败会产生
+    // "worker 已 offline 但实例仍 RUNNING"的不一致状态。
+    // 仅当 worker 当前为 online 时执行（幂等：并发检查器重复触发直接返回 0）。
+    // 返回被置为 NODE_OFFLINE 的任务实例数。
+    common::result::Result<int> markOfflineAtomic(
+        const std::string& worker_id,
+        const std::string& error_message);
 };
 
 }  // namespace taskflow::scheduler::dao

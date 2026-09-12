@@ -90,29 +90,23 @@ void HeartbeatChecker::checkLoop() {
                     "(elapsed={}s, timeout={}s), marking offline",
                     worker.id, elapsed, timeout_);
 
-                worker_dao_.updateStatus(worker.id, "offline");
-
-                // Fix #186: Reset running_tasks to 0 when the worker goes
-                // offline. The worker can no longer report heartbeats (which
-                // carry the running_tasks count), so without this reset the
-                // counter stays at its last value forever, inflating the load
-                // seen by LoadBalanceDispatcher and preventing new tasks from
-                // being dispatched to other workers.
-                worker_dao_.updateRunningTasks(worker.id, 0);
-
-                // Mark running task instances as NODE_OFFLINE
-                auto instances_result =
-                    task_instance_dao_.listByWorkerId(
-                        worker.id);
-                if (instances_result.ok()) {
-                    for (const auto& instance : instances_result.value()) {
-                        if (instance.status == "RUNNING" ||
-                            instance.status == "DISPATCHED") {
-                            task_instance_dao_.markFinished(
-                                instance.id, "NODE_OFFLINE",
-                                -1, "Worker offline");
-                        }
-                    }
+                // Fix #338: 单事务原子完成下线处置（worker 置 offline +
+                // running_tasks 归零 + RUNNING/DISPATCHED 实例置 NODE_OFFLINE）。
+                // 此前为三个独立事务，中途失败会产生"worker 已 offline 但
+                // 实例仍 RUNNING"的不一致状态。幂等：仅 worker 仍 online 时执行。
+                auto offline_result = worker_dao_.markOfflineAtomic(
+                    worker.id, "Worker offline (heartbeat timeout)");
+                if (!offline_result.ok()) {
+                    spdlog::error(
+                        "HeartbeatChecker: failed to mark worker {} offline: {}",
+                        worker.id, offline_result.error());
+                    continue;
+                }
+                if (offline_result.value() > 0) {
+                    spdlog::info(
+                        "HeartbeatChecker: {} running/dispatched task instance(s) "
+                        "of worker {} marked NODE_OFFLINE",
+                        offline_result.value(), worker.id);
                 }
             }
         }

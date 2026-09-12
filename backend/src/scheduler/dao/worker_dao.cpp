@@ -231,4 +231,32 @@ common::result::Result<void> WorkerDao::incrementRunningTasks(const std::string&
         });
 }
 
+common::result::Result<int> WorkerDao::markOfflineAtomic(
+    const std::string& worker_id,
+    const std::string& error_message) {
+    // Fix #338: 单事务完成 worker 下线三步处置（此前为三个独立事务，
+    // 中途失败产生 offline/running 不一致）。WHERE status='online' 保证
+    // 幂等——多实例 scheduler 并发触发心跳检查时，只有一方真正处置。
+    return common::database::DatabaseManager::instance().withTransaction<int>(
+        [&](pqxx::work& txn) -> common::result::Result<int> {
+            auto worker_res = txn.exec_params(
+                "UPDATE workers SET status = 'offline', running_tasks = 0 "
+                "WHERE id = $1 AND status = 'online' RETURNING id",
+                worker_id);
+
+            if (worker_res.empty()) {
+                // 已被处置过（下线状态），幂等返回
+                return 0;
+            }
+
+            auto ti_res = txn.exec_params(
+                "UPDATE task_instances SET status = 'NODE_OFFLINE', "
+                "finished_at = NOW(), exit_code = -1, error_message = $2 "
+                "WHERE worker_id = $1 AND status IN ('RUNNING', 'DISPATCHED')",
+                worker_id, error_message);
+
+            return static_cast<int>(ti_res.affected_rows());
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

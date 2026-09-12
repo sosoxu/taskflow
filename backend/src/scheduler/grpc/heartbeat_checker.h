@@ -5,7 +5,6 @@
 #include <thread>
 
 #include "scheduler/dao/worker_dao.h"
-#include "scheduler/dao/task_instance_dao.h"
 
 namespace taskflow::scheduler::grpc {
 
@@ -23,7 +22,8 @@ private:
     std::atomic<bool> running_{false};
     std::thread thread_;
     taskflow::scheduler::dao::WorkerDao worker_dao_;
-    taskflow::scheduler::dao::TaskInstanceDao task_instance_dao_;
+    // Fix #338: 下线处置已合并进 WorkerDao::markOfflineAtomic 单事务，
+    // 不再直接操作 TaskInstanceDao。
 };
 
 }  // namespace taskflow::scheduler::grpc
