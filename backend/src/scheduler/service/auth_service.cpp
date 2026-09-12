@@ -184,7 +184,8 @@ common::result::Result<common::util::TokenPayload> AuthService::verifyAccessToke
     return payload;
 }
 
-common::result::Result<void> AuthService::logout(const std::string& access_token) {
+common::result::Result<void> AuthService::logout(const std::string& access_token,
+                                                 const std::string& refresh_token) {
     auto verifyResult = common::util::JwtUtil::verifyToken(access_token, jwt_secret_);
     if (!verifyResult.ok()) {
         return common::result::Result<void>::failure("Invalid token");
@@ -193,9 +194,29 @@ common::result::Result<void> AuthService::logout(const std::string& access_token
     if (payload.type != "access") {
         return common::result::Result<void>::failure("Token is not an access token");
     }
+
+    // Fix #329: add() 返回是否成功持久化；写库失败时登出必须报错，
+    // 否则多实例/重启场景下黑名单丢失，已登出 token 复活。
+    bool persisted = true;
     // Add jti to blacklist
     if (!payload.jti.empty()) {
-        common::util::TokenBlacklist::instance().add(payload.jti, payload.exp);
+        persisted = common::util::TokenBlacklist::instance().add(payload.jti, payload.exp) && persisted;
+    }
+
+    // Fix #330: 同时吊销 refresh token，登出后旧 refresh token 不可再换新 token。
+    // 传入无效/过期的 refresh token 时不视为错误——它本来就不可用。
+    if (!refresh_token.empty()) {
+        auto refresh_verify = common::util::JwtUtil::verifyToken(refresh_token, jwt_secret_);
+        if (refresh_verify.ok() && refresh_verify.value().type == "refresh" &&
+            !refresh_verify.value().jti.empty()) {
+            const auto& rp = refresh_verify.value();
+            persisted = common::util::TokenBlacklist::instance().add(rp.jti, rp.exp) && persisted;
+        }
+    }
+
+    if (!persisted) {
+        return common::result::Result<void>::failure(
+            "登出未完全生效：token 黑名单写入失败，请稍后重试");
     }
     return common::result::Result<void>();
 }

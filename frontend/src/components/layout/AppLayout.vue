@@ -73,7 +73,8 @@ const username = computed(() => {
 async function handleLogout() {
   try {
     if (userStore.token) {
-      await logoutApi(userStore.token)
+      // Fix #330: 同时把 refresh_token 传给后端吊销，登出后旧会话不可续期
+      await logoutApi(userStore.token, localStorage.getItem('refresh_token') || undefined)
     }
   } catch (e) {
     // 即使后端登出失败，前端仍需清理本地状态

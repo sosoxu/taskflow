@@ -25,7 +25,10 @@ public:
     common::result::Result<common::util::TokenPayload> verifyAccessToken(
         const std::string& token);
 
-    common::result::Result<void> logout(const std::string& access_token);
+    // Fix #330: 同时吊销传入的 refresh token（可选），登出即终结整个会话。
+    // Fix #329: 黑名单写库失败时返回错误，调用方不应假报登出成功。
+    common::result::Result<void> logout(const std::string& access_token,
+                                        const std::string& refresh_token = {});
 
     // Add jti to token blacklist directly
     void blacklistJti(const std::string& jti);

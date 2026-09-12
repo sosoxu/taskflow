@@ -15,6 +15,8 @@ public:
     ADD_METHOD_TO(AuthController::login, "/api/v1/auth/login", drogon::Post);
     ADD_METHOD_TO(AuthController::refreshToken, "/api/v1/auth/refresh", drogon::Post);
     ADD_METHOD_TO(AuthController::logout, "/api/v1/auth/logout", drogon::Post);
+    // Fix #335: 返回 access token 声明的身份信息，前端启动时复核本地 role
+    ADD_METHOD_TO(AuthController::me, "/api/v1/auth/me", drogon::Get);
     METHOD_LIST_END
 
     void registerUser(const drogon::HttpRequestPtr& req,
@@ -28,6 +30,9 @@ public:
 
     void logout(const drogon::HttpRequestPtr& req,
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback);
+
+    void me(const drogon::HttpRequestPtr& req,
+            std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 
 private:
     std::shared_ptr<service::AuthService> auth_service_;
