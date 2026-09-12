@@ -86,10 +86,15 @@ jobs:
           load: true
 
       - name: 构建三个服务镜像（gha 缓存）
+        # buildx 的 docker-container driver 不访问本地 docker 镜像库，
+        # FROM taskflow-deps:latest 会去远端解析而失败——用
+        # --build-context docker-image:// 把 FROM 指向本地已加载的 deps 镜像
         run: |
-          docker buildx build --cache-from type=gha --cache-to type=gha,mode=max \
+          docker buildx build --build-context taskflow-deps=docker-image://taskflow-deps:latest \
+            --cache-from type=gha --cache-to type=gha,mode=max \
             --load -f backend/Dockerfile.scheduler -t taskflow-scheduler:latest backend/
-          docker buildx build --cache-from type=gha --cache-to type=gha,mode=max \
+          docker buildx build --build-context taskflow-deps=docker-image://taskflow-deps:latest \
+            --cache-from type=gha --cache-to type=gha,mode=max \
             --load -f backend/Dockerfile.worker -t taskflow-worker:latest backend/
           docker buildx build --cache-from type=gha --cache-to type=gha,mode=max \
             --load -t taskflow-frontend:latest frontend/
