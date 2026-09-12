@@ -83,6 +83,9 @@ request.interceptors.response.use(
               reject(new Error('token refresh failed'))
               return
             }
+            // Fix #334: 重放前必须置 _retry。否则新 token 若再次 401，
+            // 该请求会重新进入刷新流程，与主路径一起无限循环。
+            originalRequest._retry = true
             originalRequest.headers.Authorization = `Bearer ${token}`
             resolve(request(originalRequest))
           })
