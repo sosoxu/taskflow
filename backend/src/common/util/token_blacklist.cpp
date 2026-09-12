@@ -7,21 +7,22 @@
 
 namespace taskflow::common::util {
 
-void TokenBlacklist::add(const std::string& jti, int64_t exp_timestamp) {
-    if (jti.empty()) return;
+bool TokenBlacklist::add(const std::string& jti, int64_t exp_timestamp) {
+    if (jti.empty()) return true;
 
     int64_t now = nowSeconds();
     if (exp_timestamp == 0) {
         exp_timestamp = now + 86400;  // 默认 24h
     }
 
-    // 写入 DB
-    addToDb(jti, exp_timestamp);
+    // 写入 DB（Fix #329: 失败重试一次后仍失败则向上传递，登出接口据此报错）
+    bool persisted = addToDb(jti, exp_timestamp);
 
-    // 更新本地缓存
+    // 更新本地缓存（本实例立即生效）
     std::lock_guard<std::mutex> lock(mutex_);
     purgeExpiredCache();
     cache_[jti] = {true, exp_timestamp, 0};
+    return persisted;
 }
 
 bool TokenBlacklist::isBlacklisted(const std::string& jti) const {
@@ -52,7 +53,13 @@ bool TokenBlacklist::isBlacklisted(const std::string& jti) const {
     }
 
     // 查 DB
-    bool in_db = checkDb(jti);
+    // Fix #329: -1 表示查询失败 → fail-closed 直接返回 true，且不写缓存，
+    // 避免 DB 短暂故障期间把所有 token 缓存为黑名单、恢复后仍被锁。
+    int db_state = checkDb(jti);
+    if (db_state < 0) {
+        return true;
+    }
+    bool in_db = db_state == 1;
 
     // 更新缓存
     {
@@ -111,7 +118,7 @@ bool TokenBlacklist::tryAddIfNotBlacklisted(const std::string& jti, int64_t exp_
     return inserted;
 }
 
-bool TokenBlacklist::checkDb(const std::string& jti) const {
+int TokenBlacklist::checkDb(const std::string& jti) const {
     try {
         auto result = common::database::DatabaseManager::instance().withReadTransaction<bool>(
             [&](pqxx::nontransaction& txn) -> bool {
@@ -121,27 +128,42 @@ bool TokenBlacklist::checkDb(const std::string& jti) const {
                     jti);
                 return !res.empty();
             });
-        return result.ok() && result.value();
+        if (!result.ok()) {
+            spdlog::error("TokenBlacklist: checkDb failed for jti {}: {}",
+                          jti, result.error());
+            return -1;
+        }
+        return result.value() ? 1 : 0;
     } catch (const std::exception& e) {
         spdlog::error("TokenBlacklist: checkDb error for jti {}: {}", jti, e.what());
-        return false;
+        return -1;
     }
 }
 
-void TokenBlacklist::addToDb(const std::string& jti, int64_t exp_timestamp) {
-    try {
-        common::database::DatabaseManager::instance().withTransaction<void>(
-            [&](pqxx::work& txn) -> common::result::Result<void> {
-                txn.exec_params(
-                    "INSERT INTO token_blacklist (jti, expires_at) "
-                    "VALUES ($1, to_timestamp($2)) "
-                    "ON CONFLICT (jti) DO NOTHING",
-                    jti, exp_timestamp);
-                return common::result::Result<void>();
-            });
-    } catch (const std::exception& e) {
-        spdlog::error("TokenBlacklist: addToDb error for jti {}: {}", jti, e.what());
+bool TokenBlacklist::addToDb(const std::string& jti, int64_t exp_timestamp) {
+    // Fix #329: 失败重试一次；两次都失败才向上报告失败
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        try {
+            auto result = common::database::DatabaseManager::instance().withTransaction<void>(
+                [&](pqxx::work& txn) -> common::result::Result<void> {
+                    txn.exec_params(
+                        "INSERT INTO token_blacklist (jti, expires_at) "
+                        "VALUES ($1, to_timestamp($2)) "
+                        "ON CONFLICT (jti) DO NOTHING",
+                        jti, exp_timestamp);
+                    return common::result::Result<void>();
+                });
+            if (result.ok()) {
+                return true;
+            }
+            spdlog::error("TokenBlacklist: addToDb failed for jti {} (attempt {}): {}",
+                          jti, attempt + 1, result.error());
+        } catch (const std::exception& e) {
+            spdlog::error("TokenBlacklist: addToDb error for jti {} (attempt {}): {}",
+                          jti, attempt + 1, e.what());
+        }
     }
+    return false;
 }
 
 void TokenBlacklist::purgeExpiredCache() {

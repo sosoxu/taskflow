@@ -1,15 +1,49 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <pqxx/pqxx>
 
 #include "common/util/password_util.h"
 #include "common/util/crypto_util.h"
 #include "common/util/jwt_util.h"
 #include "common/util/uuid.h"
+#include "common/database/database_manager.h"
 
 using namespace taskflow::common::util;
+
+// ============================================================================
+// Fix #329: isBlacklisted 在 DB 异常时 fail-closed（视为已拉黑）。
+// 因此"未拉黑"断言只有在 DB 可用时才成立。测试环境设置 TF_TEST_DB_CONN
+// （libpq 连接串，需已建 token_blacklist 表）即可验证完整语义；
+// 未设置或 DB 不可用时，验证 fail-closed 行为并跳过 DB 相关断言。
+// ============================================================================
+static bool tokenBlacklistDbAvailable() {
+    static bool attempted = false;
+    static bool available = false;
+    if (!attempted) {
+        attempted = true;
+        const char* conn = std::getenv("TF_TEST_DB_CONN");
+        if (conn && *conn) {
+            try {
+                auto& db = taskflow::common::database::DatabaseManager::instance();
+                db.init(conn, 1, 2);
+                auto probe = db.withReadTransaction<bool>(
+                    [](pqxx::nontransaction& txn) -> bool {
+                        txn.exec("SELECT 1 FROM token_blacklist LIMIT 1");
+                        return true;
+                    });
+                available = probe.ok() && probe.value();
+            } catch (const std::exception&) {
+                available = false;
+            }
+        }
+    }
+    return available;
+}
 
 // ============================================================================
 // §2.8 密码 bcrypt 加密
@@ -270,14 +304,23 @@ TEST_CASE("TokenBlacklist: add and check jti", "[jwt]") {
     auto& blacklist = TokenBlacklist::instance();
 
     const std::string jti = "test-jti-" + generateUuid();
-    REQUIRE_FALSE(blacklist.isBlacklisted(jti));
+    if (tokenBlacklistDbAvailable()) {
+        REQUIRE_FALSE(blacklist.isBlacklisted(jti));
+    } else {
+        // Fix #329: 无 DB 时 fail-closed，视为已拉黑
+        REQUIRE(blacklist.isBlacklisted(jti));
+    }
 
     blacklist.add(jti);
     REQUIRE(blacklist.isBlacklisted(jti));
 
     // 另一个 jti 不受影响
     const std::string jti2 = "test-jti2-" + generateUuid();
-    REQUIRE_FALSE(blacklist.isBlacklisted(jti2));
+    if (tokenBlacklistDbAvailable()) {
+        REQUIRE_FALSE(blacklist.isBlacklisted(jti2));
+    } else {
+        REQUIRE(blacklist.isBlacklisted(jti2));
+    }
 }
 
 TEST_CASE("TokenBlacklist: thread-safe concurrent access", "[jwt]") {
@@ -615,8 +658,13 @@ TEST_CASE("TokenBlacklist: expired entry is not blacklisted", "[jwt_blacklist_ex
 
     blacklist.add(jti, past_exp);
 
-    // 过期条目应被视为未黑名单
-    REQUIRE_FALSE(blacklist.isBlacklisted(jti));
+    // Fix #329: "过期即未拉黑"依赖真值源（DB）。DB 可用时验证完整语义；
+    // 无 DB 时 fail-closed，视为已拉黑。
+    if (tokenBlacklistDbAvailable()) {
+        REQUIRE_FALSE(blacklist.isBlacklisted(jti));
+    } else {
+        REQUIRE(blacklist.isBlacklisted(jti));
+    }
 }
 
 TEST_CASE("TokenBlacklist: add with default exp (24h) is blacklisted", "[jwt_blacklist_exp]") {
@@ -644,10 +692,14 @@ TEST_CASE("TokenBlacklist: add purges already-expired entries", "[jwt_blacklist_
         std::chrono::system_clock::now().time_since_epoch()).count() + 3600;
     blacklist.add(active_jti, future_exp);
 
-    // 活跃条目应在黑名单中
+    // 活跃条目应在黑名单中（正向缓存，不依赖 DB）
     REQUIRE(blacklist.isBlacklisted(active_jti));
-    // 过期条目应已被清理（isBlacklisted 返回 false）
-    REQUIRE_FALSE(blacklist.isBlacklisted(expired_jti));
+    // Fix #329: 过期条目清理后需查真值源。DB 可用 → 未拉黑；无 DB → fail-closed
+    if (tokenBlacklistDbAvailable()) {
+        REQUIRE_FALSE(blacklist.isBlacklisted(expired_jti));
+    } else {
+        REQUIRE(blacklist.isBlacklisted(expired_jti));
+    }
 }
 
 TEST_CASE("TokenBlacklist: same jti re-added with new exp", "[jwt_blacklist_exp]") {
@@ -659,7 +711,12 @@ TEST_CASE("TokenBlacklist: same jti re-added with new exp", "[jwt_blacklist_exp]
     int64_t past_exp = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count() - 1;
     blacklist.add(jti, past_exp);
-    REQUIRE_FALSE(blacklist.isBlacklisted(jti));
+    // Fix #329: 无 DB 时 fail-closed，视为已拉黑
+    if (tokenBlacklistDbAvailable()) {
+        REQUIRE_FALSE(blacklist.isBlacklisted(jti));
+    } else {
+        REQUIRE(blacklist.isBlacklisted(jti));
+    }
 
     // 重新添加为未过期
     int64_t future_exp = std::chrono::duration_cast<std::chrono::seconds>(

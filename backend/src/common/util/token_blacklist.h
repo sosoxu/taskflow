@@ -29,13 +29,18 @@ public:
     }
 
     // 将 jti 加入黑名单。exp_timestamp 为 token 的过期时间（unix 秒）。
-    void add(const std::string& jti, int64_t exp_timestamp = 0);
+    // Fix #329: 返回是否成功持久化到 DB（写库失败返回 false，调用方应把
+    // 登出视为未完成而非假成功）。本地缓存无论成败都置位（本实例立即生效）。
+    bool add(const std::string& jti, int64_t exp_timestamp = 0);
 
     // 检查 jti 是否在黑名单中。
+    // Fix #329: DB 查询异常时 fail-closed（返回 true 视为已拉黑），
+    // 不再放行——DB 故障时系统本就不可用，安全控制不随故障降级失效。
     bool isBlacklisted(const std::string& jti) const;
 
     // 原子检查并加入：若 jti 不在黑名单中则加入并返回 true，
     // 若已在黑名单中则返回 false。用于 refresh token 轮换防重放。
+    // DB 异常时同样返回 false（fail-closed，拒绝刷新）。
     bool tryAddIfNotBlacklisted(const std::string& jti, int64_t exp_timestamp = 0);
 
 private:
@@ -55,11 +60,12 @@ private:
         int64_t cached_until;    // 缓存有效期（负向缓存的过期时间）
     };
 
-    // 查询 DB 判断 jti 是否在黑名单中
-    bool checkDb(const std::string& jti) const;
+    // 查询 DB 判断 jti 是否在黑名单中。
+    // 返回 1 已拉黑 / 0 未拉黑 / -1 查询失败（Fix #329）
+    int checkDb(const std::string& jti) const;
 
-    // 写入 DB（ON CONFLICT DO NOTHING）
-    void addToDb(const std::string& jti, int64_t exp_timestamp);
+    // 写入 DB（ON CONFLICT DO NOTHING），失败时重试一次；返回是否成功
+    bool addToDb(const std::string& jti, int64_t exp_timestamp);
 
     // 清理内存缓存中已过期的条目
     void purgeExpiredCache();
