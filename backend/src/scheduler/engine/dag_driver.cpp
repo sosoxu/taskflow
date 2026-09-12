@@ -523,7 +523,21 @@ common::result::Result<void> DagDriver::dispatchTask(
             "No online worker with required resource_tags for task " + task_instance.id);
     }
 
-    auto worker_result = dispatcher->selectWorker(eligible_workers);
+    // Fix #349: 强制 max_tasks 配额上限——满载 worker 不参与本轮派发。
+    auto capacity_workers = filterByCapacity(eligible_workers);
+    if (capacity_workers.empty()) {
+        // 所有匹配 worker 已满载：容量是暂时性条件，任务回退 PENDING
+        // 等下一轮（worker 释放配额后自动派发），而非像标签缺失那样 FAILED。
+        auto reset_result = task_instance_dao_.resetForRetry(task_instance.id);
+        if (!reset_result.ok()) {
+            spdlog::error("DagDriver: failed to reset task instance {} to PENDING (workers at capacity): {}",
+                         task_instance.id, reset_result.error());
+        }
+        return common::result::Result<void>::failure(
+            "All eligible workers at capacity (max_tasks reached) for task " + task_instance.id);
+    }
+
+    auto worker_result = dispatcher->selectWorker(capacity_workers);
     if (!worker_result.ok()) {
         // Mark task as FAILED when no worker is available (e.g., specified worker offline).
         // Without this, the task stays PENDING and is retried indefinitely.

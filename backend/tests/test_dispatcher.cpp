@@ -494,3 +494,61 @@ TEST_CASE("RandomDispatcher: multiple calls cover different workers", "[dispatch
     REQUIRE(saw_w1);
     REQUIRE(saw_w2);
 }
+
+// ============================================================================
+// Fix #349: filterByCapacity —— 派发强制 max_tasks 配额上限
+// ============================================================================
+TEST_CASE("filterByCapacity removes workers at or over max_tasks", "[dispatcher]") {
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("free",  "online", 2, 10));   // 空闲
+    workers.push_back(makeWorker("full",  "online", 10, 10));  // 恰好满载
+    workers.push_back(makeWorker("over",  "online", 12, 10));  // 超载（历史脏数据）
+    workers.push_back(makeWorker("zero",  "online", 0, 0));    // max_tasks=0 不可用
+
+    auto filtered = filterByCapacity(workers);
+    REQUIRE(filtered.size() == 1);
+    REQUIRE(filtered[0].id == "free");
+}
+
+TEST_CASE("filterByCapacity keeps worker with exactly one free slot", "[dispatcher]") {
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 9, 10));
+    auto filtered = filterByCapacity(workers);
+    REQUIRE(filtered.size() == 1);
+    REQUIRE(filtered[0].id == "w1");
+}
+
+TEST_CASE("filterByCapacity returns empty vector when all workers at capacity", "[dispatcher]") {
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("w1", "online", 10, 10));
+    workers.push_back(makeWorker("w2", "online", 5, 5));
+    REQUIRE(filterByCapacity(workers).empty());
+}
+
+TEST_CASE("RandomDispatcher over capacity-filtered list never selects full worker", "[dispatcher]") {
+    RandomDispatcher dispatcher;
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("free", "online", 0, 10));
+    workers.push_back(makeWorker("full", "online", 10, 10));
+
+    auto eligible = filterByCapacity(workers);
+    for (int i = 0; i < 50; ++i) {
+        auto result = dispatcher.selectWorker(eligible);
+        REQUIRE(result.ok());
+        REQUIRE(result.value().id == "free");
+    }
+}
+
+TEST_CASE("LoadBalanceDispatcher over capacity-filtered list ignores overloaded workers", "[dispatcher]") {
+    // 此前 loadRatio 对超载 worker 只做"偏好"排序（1e9 兜底 max_tasks<=0），
+    // 满/超载 worker 仍可能因候选列表只有它们而被选中；过滤后不再可能。
+    LoadBalanceDispatcher dispatcher;
+    std::vector<WorkerInfo> workers;
+    workers.push_back(makeWorker("low",  "online", 1, 10));
+    workers.push_back(makeWorker("full", "online", 10, 10));
+
+    auto eligible = filterByCapacity(workers);
+    auto result = dispatcher.selectWorker(eligible);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().id == "low");
+}

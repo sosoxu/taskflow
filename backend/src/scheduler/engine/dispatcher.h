@@ -64,6 +64,22 @@ inline std::vector<common::models::WorkerInfo> filterByResourceTags(
     return filtered;
 }
 
+// Fix #349: 过滤已满载的 worker（running_tasks >= max_tasks）。
+// 此前 max_tasks 只是 LoadBalance 的软参考、Random 完全不看容量，
+// 高峰期会无限超配派发。此处作为硬上限：过滤后无可用 worker 时
+// 派发失败，任务经 resetForRetry 回路等待下一轮。
+inline std::vector<common::models::WorkerInfo> filterByCapacity(
+    const std::vector<common::models::WorkerInfo>& workers) {
+    std::vector<common::models::WorkerInfo> filtered;
+    filtered.reserve(workers.size());
+    for (const auto& w : workers) {
+        if (w.max_tasks > 0 && w.running_tasks < w.max_tasks) {
+            filtered.push_back(w);
+        }
+    }
+    return filtered;
+}
+
 class RandomDispatcher : public Dispatcher {
 public:
     common::result::Result<common::models::WorkerInfo> selectWorker(
