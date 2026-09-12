@@ -633,9 +633,18 @@ common::result::Result<std::string> InstanceService::getTaskLog(
     auto reader = stub->GetTaskLog(&context, request);
 
     std::string log_content;
+    // Fix #350: 收集侧硬上限。此前无限 append，单个超大日志任务的查看请求
+    // 即可耗尽 scheduler 内存（worker 侧部分 executor 有行数上限，但收集端
+    // 没有兜底）。超出即停止读取并附加截断提示。
+    constexpr size_t kMaxLogBytes = 10 * 1024 * 1024;  // 10MB
+    bool truncated = false;
     taskflow::v1::LogChunk chunk;
     while (reader->Read(&chunk)) {
         log_content.append(chunk.data().begin(), chunk.data().end());
+        if (log_content.size() >= kMaxLogBytes) {
+            truncated = true;
+            break;
+        }
         if (chunk.eof()) {
             break;
         }
@@ -645,6 +654,11 @@ common::result::Result<std::string> InstanceService::getTaskLog(
     if (!grpc_status.ok()) {
         return common::result::Result<std::string>::failure(
             "gRPC GetTaskLog failed: " + grpc_status.error_message());
+    }
+
+    if (truncated) {
+        log_content +=
+            "\n[taskflow] 日志超过 10MB 上限已截断，完整内容请到 worker 节点的日志目录查看。\n";
     }
 
     return log_content;
