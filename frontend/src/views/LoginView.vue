@@ -114,6 +114,16 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
+// Fix #347: 校验 redirect 参数为站内相对路径，防 open redirect。
+// 拒绝 //evil.com（协议相对）与 https://evil.com（绝对 URL）等外部跳转。
+function safeRedirect(): string {
+  const raw = route.query.redirect
+  if (typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') && !raw.includes('://')) {
+    return raw
+  }
+  return '/'
+}
+
 const loginFormRef = ref<FormInstance>()
 const registerFormRef = ref<FormInstance>()
 
@@ -178,8 +188,7 @@ async function handleLogin() {
     })
     setToken(data.access_token)
     ElMessage.success('登录成功')
-    const redirect = route.query.redirect as string
-    router.push(redirect || '/')
+    router.push(safeRedirect())
   } catch (err: unknown) {
     const errData = (err as { response?: { data?: { message?: string } } })?.response?.data
     let message = '登录失败，请检查用户名和密码'
@@ -240,10 +249,8 @@ async function handleRegister() {
     setToken(data.access_token)
     ElMessage.success('登录成功')
     showRegisterDialog.value = false
-    // Fix #210: Respect the redirect query param (same as handleLogin) instead
-    // of always pushing to '/'.
-    const redirect = route.query.redirect as string
-    router.push(redirect || '/')
+    // Fix #210/#347: 尊重 redirect 参数，但经 safeRedirect 校验仅允许站内路径
+    router.push(safeRedirect())
   } catch {
     ElMessage.warning('注册成功，但自动登录失败，请手动登录')
     showRegisterDialog.value = false
