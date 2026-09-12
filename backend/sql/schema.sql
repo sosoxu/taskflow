@@ -18,7 +18,8 @@ CREATE TABLE users (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_username ON users(username);
+-- Fix #356: 移除 idx_users_username——username 的 UNIQUE 约束已隐式创建
+-- 唯一索引，此显式索引冗余，只会增加写入开销。
 
 -- ============================================================
 -- 2. 任务表
@@ -56,6 +57,9 @@ CREATE TABLE workflows (
     schedule_strategy   VARCHAR(16) NOT NULL DEFAULT 'random'
                             CHECK (schedule_strategy IN ('random', 'load_balance', 'specified')),
     target_worker_id    UUID,
+    -- 已知债务（Fix #356 记录）：cron 调度意图在此（workflows.cron_expression/
+    -- cron_enabled）与 cron_jobs 表两处表示，存在不一致风险。收敛需迁移设计，
+    -- 暂保留双轨；新增代码请以 cron_jobs 表为权威源。
     cron_expression     VARCHAR(64),
     cron_enabled        BOOLEAN NOT NULL DEFAULT FALSE,
     creator_id          UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,

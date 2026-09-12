@@ -27,21 +27,42 @@ if [ "$(whoami)" != "postgres" ]; then
 fi
 
 # 1. 创建用户
+# Fix #356: 经 psql 变量（stdin 插值）替代字符串拼接——密码含引号/
+# 反斜杠时拼接会产生坏 SQL 或注入面。注意 psql 仅对 stdin/-f 输入做
+# 变量插值，-c 不插值。
 echo ">>> 创建用户 ${DB_USER} ..."
-psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}'" | grep -q 1 || \
-    psql -c "CREATE USER ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}';"
+USER_EXISTS=$(psql -v db_user="$DB_USER" -Atq <<'SQL'
+SELECT 1 FROM pg_roles WHERE rolname = :'db_user';
+SQL
+)
+if [ "$USER_EXISTS" != "1" ]; then
+    psql -v db_user="$DB_USER" -v db_pass="$DB_PASS" <<'SQL'
+CREATE USER :"db_user" WITH LOGIN PASSWORD :'db_pass';
+SQL
+fi
 echo "    用户已存在或创建成功"
 
 # 2. 创建数据库
 echo ">>> 创建数据库 ${DB_NAME} ..."
-psql -c "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1 || \
-    psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+DB_EXISTS=$(psql -v db_name="$DB_NAME" -Atq <<'SQL'
+SELECT 1 FROM pg_database WHERE datname = :'db_name';
+SQL
+)
+if [ "$DB_EXISTS" != "1" ]; then
+    psql -v db_user="$DB_USER" -v db_name="$DB_NAME" <<'SQL'
+CREATE DATABASE :"db_name" OWNER :"db_user";
+SQL
+fi
 echo "    数据库已存在或创建成功"
 
 # 3. 授权
 echo ">>> 授权 ..."
-psql -d "${DB_NAME}" -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
-psql -d "${DB_NAME}" -c "GRANT ALL PRIVILEGES ON SCHEMA public TO ${DB_USER};"
+psql -v db_user="$DB_USER" -v db_name="$DB_NAME" <<'SQL'
+GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
+SQL
+psql -v db_user="$DB_USER" -d "${DB_NAME}" <<'SQL'
+GRANT ALL PRIVILEGES ON SCHEMA public TO :"db_user";
+SQL
 echo "    授权完成"
 
 # 4. 执行建表

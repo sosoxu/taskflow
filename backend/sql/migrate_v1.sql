@@ -36,7 +36,9 @@ BEGIN
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE users OWNER TO taskflow;
-    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+    -- Fix #356: 移除冗余 idx_users_username（UNIQUE 约束已隐式建索引）。
+    -- 老库若已创建该索引可手工清理：
+    --   DROP INDEX IF EXISTS idx_users_username;
 
     -- 2. 任务表
     CREATE TABLE IF NOT EXISTS tasks (

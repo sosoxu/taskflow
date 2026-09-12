@@ -5,8 +5,10 @@
 | 组件 | 最低版本 |
 |------|----------|
 | Docker | 20.10+ |
-| Docker Compose | 2.0+ |
-| PostgreSQL | 15+（Docker 部署时自动提供） |
+| Docker Compose | **2.23+**（compose 文件使用 `configs.content` 内嵌配置，旧版 v1/v2 早期版本不支持） |
+| PostgreSQL | 15+（Docker 部署时自动提供；compose 默认镜像为 postgres:16-alpine） |
+
+> 统一使用 `docker compose`（v2 插件形式）；独立的 `docker-compose` v1 二进制不支持本文件的配置内嵌语法。
 
 ## 2. 快速部署（Docker Compose）
 
@@ -143,9 +145,11 @@ log:
 task_log:
   dir: logs/tasks           # 任务日志目录
   retention_days: 30        # 日志保留天数
-  sink_type: "file"         # 日志存储后端：file / elasticsearch
-  es_url: ""                # Elasticsearch URL（sink_type=elasticsearch 时）
-  es_index: "taskflow-logs" # Elasticsearch 索引名
+  # 以下 sink_type/es_url/es_index 为预留配置（当前版本仅实现 file 存储），
+  # 配置 elasticsearch 不会生效：
+  # sink_type: "file"
+  # es_url: ""
+  # es_index: "taskflow-logs"
 ```
 
 ## 5. 环境变量
@@ -192,24 +196,19 @@ psql -h localhost -U taskflow -d taskflow -f sql/migrate_v1.sql
 
 ### 8.1 调度器高可用
 
-Docker Compose 默认启动 2 个 Scheduler 实例，通过 PostgreSQL Advisory Lock 自动选主：
+Scheduler 通过 PostgreSQL Advisory Lock 自动选主。**注意：非 Swarm 模式下 `deploy.replicas` 会被忽略**（compose 文件内有注释说明），且 scheduler 绑定固定端口 8080/50051，单机多副本需修改端口映射。生产建议：
 
-```yaml
-scheduler:
-  deploy:
-    replicas: 2  # 可根据需要调整
-```
+- 单机验证：`docker compose up -d --scale worker=2` 只对 worker 有效；scheduler 多实例请用 Docker Swarm 或多台主机部署
+- 多实例时为每套环境配置不同的 `schedule.advisory_lock_id`（共用同一 PostgreSQL 时避免互抢主）
 
 - 主节点：负责 DAG 驱动、Cron 触发、心跳检测
 - 从节点：处理 API 请求
-- 主节点故障时从节点自动接管（约 10 秒内）
+- 主节点故障时从节点自动接管（约一个续约周期内）
 
 ### 8.2 Worker 扩容
 
-```yaml
-worker:
-  deploy:
-    replicas: 2  # 可根据需要调整
+```bash
+docker compose up -d --scale worker=2
 ```
 
 Worker 可动态增减，无需重启 Scheduler。新增 Worker 自动注册，停止后 30 秒内被标记离线。
@@ -258,16 +257,9 @@ worker:
 
 Worker 自动清理超过 `retention_days`（默认 30 天）的任务日志，每小时检查一次。
 
-### 10.3 ELK 集成
+### 10.3 ELK 集成（未实现，预留）
 
-将 `sink_type` 设为 `elasticsearch` 并配置 `es_url`：
-
-```yaml
-task_log:
-  sink_type: "elasticsearch"
-  es_url: "http://elasticsearch:9200"
-  es_index: "taskflow-logs"
-```
+`worker.yaml` 中的 `sink_type: elasticsearch` / `es_url` / `es_index` 为**预留配置项，当前版本未实现**——配置后不会生效，任务日志仍写入本地文件（`task_log.dir`）。如需集中式日志，当前可用方案：挂载 worker 日志目录到宿主机后由 Filebeat/Fluentd 采集。
 
 ## 11. 备份与恢复
 
