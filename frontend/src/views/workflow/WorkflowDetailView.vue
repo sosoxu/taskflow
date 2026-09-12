@@ -5,8 +5,9 @@
       <div>
         <el-button @click="goBack">返回</el-button>
         <!-- Fix #178: WorkflowDetailView 缺少编辑入口 -->
-        <el-button type="warning" @click="handleEdit">编辑</el-button>
-        <el-button type="primary" :loading="triggering" @click="handleTrigger">触发</el-button>
+        <!-- Fix #335: 编辑/触发属于写操作，viewer 不可见（与列表页守卫一致） -->
+        <el-button v-if="userStore.isOperator" type="warning" @click="handleEdit">编辑</el-button>
+        <el-button v-if="userStore.isOperator" type="primary" :loading="triggering" @click="handleTrigger">触发</el-button>
       </div>
     </div>
 
@@ -163,6 +164,7 @@ import { getWorkflow, triggerWorkflow } from '../../api/workflow'
 import { getWorkflowInstances } from '../../api/instance'
 import { getTask } from '../../api/task'
 import { formatTime } from '../../utils/format'
+import { useUserStore } from '../../stores/userStore'
 import type { WorkflowItem } from '../../types/workflow'
 import type { WorkflowInstance } from '../../types/instance'
 
@@ -196,6 +198,7 @@ interface DagEdgeData {
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const workflowId = computed(() => route.params.id as string)
 

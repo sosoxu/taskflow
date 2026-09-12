@@ -89,8 +89,13 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
+  // Fix #335: 每个会话首次导航时用服务端 /auth/me 复核身份。
+  // localStorage 里的 role 可被手改，必须以服务端签发的 JWT 声明为准。
+  if (userStore.isLoggedIn && !userStore.serverChecked) {
+    await userStore.validateFromServer()
+  }
   if (to.path === '/login') {
     if (userStore.isLoggedIn) {
       next('/')

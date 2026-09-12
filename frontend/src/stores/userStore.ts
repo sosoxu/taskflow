@@ -6,12 +6,39 @@ export const useUserStore = defineStore('user', () => {
   const username = ref<string>(localStorage.getItem('username') || '')
   const role = ref<string>(localStorage.getItem('role') || '')
   const token = ref<string>(localStorage.getItem('access_token') || '')
+  // Fix #335: 本会话是否已完成服务端身份校验
+  const serverChecked = ref(false)
 
   const isLoggedIn = computed(() => !!token.value)
   const isAdmin = computed(() => role.value === 'admin')
   const isOperator = computed(() => role.value === 'operator' || role.value === 'admin')
   // Fix #172: isViewer for hiding write-operation buttons
   const isViewer = computed(() => role.value === 'viewer')
+
+  // Fix #335: 以服务端签发的 JWT 声明刷新本地 role。
+  // role 直接读 localStorage 可被手改解锁管理界面，登录/刷新后必须复核。
+  // 校验失败（token 无效）则清除本地状态；动态 import 避免 userStore→api→request 的静态循环依赖。
+  async function validateFromServer(): Promise<void> {
+    try {
+      const { getMe } = await import('../api/auth')
+      const res = await getMe()
+      const d = res.data?.data
+      if (res.data?.code === 0 && d) {
+        userId.value = d.user_id
+        username.value = d.username
+        role.value = d.role
+        localStorage.setItem('user_id', d.user_id)
+        localStorage.setItem('username', d.username)
+        localStorage.setItem('role', d.role)
+      } else {
+        clearUser()
+      }
+    } catch {
+      clearUser()
+    } finally {
+      serverChecked.value = true
+    }
+  }
 
   function setUser(data: { userId: string; username: string; role: string; token: string; refreshToken: string }) {
     userId.value = data.userId
@@ -68,11 +95,13 @@ export const useUserStore = defineStore('user', () => {
     username,
     role,
     token,
+    serverChecked,
     isLoggedIn,
     isAdmin,
     isOperator,
     isViewer,
     setUser,
     clearUser,
+    validateFromServer,
   }
 })
