@@ -76,6 +76,8 @@ configs:
       server:
         http_port: 8080
         grpc_port: 50051
+        # Fix #326: gRPC 内部认证（与 worker_config 中的一致），生产替换为随机值
+        grpc_auth_token: "taskflow-internal-grpc-token-change-me"
       database:
         host: postgres
         port: 5432
@@ -106,6 +108,9 @@ configs:
     content: |
       server:
         grpc_port: 50052
+        # Fix #326: 与 scheduler_config 中 server.grpc_auth_token 一致，
+        # 同时用于注册/心跳（客户端）与本地 gRPC 服务（服务端校验）
+        grpc_auth_token: "taskflow-internal-grpc-token-change-me"
         # Each scaled worker registers its own container IP. The `worker`
         # service name load-balances and cannot identify a specific replica.
         advertise_address: "auto"
