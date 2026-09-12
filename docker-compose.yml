@@ -99,6 +99,8 @@ configs:
         level: info
         file_path: logs/scheduler.log
       schedule:
+        # Fix #348: 多环境共用同一 PostgreSQL 时需为每套环境配置不同 lock_id
+        advisory_lock_id: 12345
         dag_drive_interval: 2
         heartbeat_check_interval: 10
         heartbeat_timeout: 30

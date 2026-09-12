@@ -111,10 +111,29 @@ bool LeaderElection::renewLock() {
             return true;
         }
 
-        // Connection is the same one that acquired the lock — verify it's alive.
+        // Connection is the same one that acquired the lock.
+        // Fix #348: 不再仅 SELECT 1 验证连接存活——额外查 pg_locks 确认
+        // 本会话（pg_backend_pid()）仍实际持有该 advisory lock。若丢失
+        // （如运维手工 unlock、异常状态），立即尝试重新获取；获取失败
+        // 则返回 false 触发降级，避免"连接活着但锁已不在"的双主窗口。
         pqxx::nontransaction txn(*lock_conn_);
-        auto res = txn.exec("SELECT 1");
-        (void)res;
+        auto held = txn.exec_params(
+            "SELECT 1 FROM pg_locks WHERE locktype='advisory' "
+            "AND pid=pg_backend_pid() AND classid=0 AND objid=$1",
+            lock_id_);
+        if (!held.empty()) {
+            return true;
+        }
+
+        spdlog::warn("LeaderElection: connection alive but advisory lock {} "
+                     "no longer held by this session, re-acquiring",
+                     lock_id_);
+        auto re = txn.exec_params("SELECT pg_try_advisory_lock($1)", lock_id_);
+        bool reacquired = re[0][0].as<bool>();
+        if (!reacquired) {
+            spdlog::info("LeaderElection: failed to re-acquire lock, another node is leader");
+            return false;
+        }
         return true;
     } catch (const std::exception& e) {
         spdlog::error("LeaderElection: connection lost during renewal: {}",

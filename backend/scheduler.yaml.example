@@ -38,6 +38,9 @@ schedule:
   heartbeat_timeout: 30
   timeout_check_interval: 10
   leader_lease_interval: 5
+  # Fix #348: 选主 advisory lock ID。多套环境共用同一 PostgreSQL 实例时，
+  # 必须为每套环境配置不同的值，否则会互抢主。
+  advisory_lock_id: 12345
 
 static_files:
   enabled: true

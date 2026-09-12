@@ -80,6 +80,8 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
         if (sc["heartbeat_timeout"]) config.schedule.heartbeat_timeout = sc["heartbeat_timeout"].as<int>();
         if (sc["timeout_check_interval"]) config.schedule.timeout_check_interval = sc["timeout_check_interval"].as<int>();
         if (sc["leader_lease_interval"]) config.schedule.leader_lease_interval = sc["leader_lease_interval"].as<int>();
+        // Fix #348: advisory lock ID 可配置（多环境共用 PG 时需区分）
+        if (sc["advisory_lock_id"]) config.schedule.advisory_lock_id = sc["advisory_lock_id"].as<int>();
     }
 
     // worker_client.tls (Fix #126: TLS for scheduler→worker gRPC)

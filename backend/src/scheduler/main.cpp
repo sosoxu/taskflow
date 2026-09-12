@@ -182,7 +182,7 @@ int main(int argc, char* argv[]) {
 
     // 启动选主（必须在 DagDriver 和 CronScheduler 之前）
     auto leader_election = std::make_shared<taskflow::scheduler::grpc::LeaderElection>(
-        config.schedule.leader_lease_interval, 12345);
+        config.schedule.leader_lease_interval, config.schedule.advisory_lock_id);
     leader_election->start();
     spdlog::info("选主机制已启动");
 

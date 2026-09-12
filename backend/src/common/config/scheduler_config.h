@@ -63,6 +63,9 @@ struct ScheduleConfig {
     int heartbeat_timeout = 30;          // 心跳超时（秒）
     int timeout_check_interval = 10;     // 任务超时检查间隔（秒）
     int leader_lease_interval = 5;       // 选主续约间隔（秒）
+    // Fix #348: 选主 advisory lock ID。此前硬编码 12345，多套环境共用同一
+    // PostgreSQL 实例时会互抢主。部署多环境时必须为每套环境配置不同值。
+    int advisory_lock_id = 12345;
 };
 
 struct TlsConfig {
