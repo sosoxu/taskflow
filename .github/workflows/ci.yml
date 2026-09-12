@@ -85,19 +85,16 @@ jobs:
           cache-to: type=gha,mode=max
           load: true
 
-      - name: 构建三个服务镜像（gha 缓存）
-        # buildx 的 docker-container driver 不访问本地 docker 镜像库，
-        # FROM taskflow-deps:latest 会去远端解析而失败——用
-        # --build-context docker-image:// 把 FROM 指向本地已加载的 deps 镜像
+      - name: 构建三个服务镜像
+        # 用经典 docker build（docker driver 可引用本地 deps 镜像）。
+        # buildx 的 docker-container driver 不访问本地镜像库，且
+        # --build-context docker-image:// 在 runner 上仍走远端解析，
+        # 两次尝试均失败于 FROM taskflow-deps:latest 的 metadata 拉取。
+        # deps 大头编译已有 gha 缓存，此步骤仅编译应用源码（约数分钟）。
         run: |
-          docker buildx build --build-context taskflow-deps=docker-image://taskflow-deps:latest \
-            --cache-from type=gha --cache-to type=gha,mode=max \
-            --load -f backend/Dockerfile.scheduler -t taskflow-scheduler:latest backend/
-          docker buildx build --build-context taskflow-deps=docker-image://taskflow-deps:latest \
-            --cache-from type=gha --cache-to type=gha,mode=max \
-            --load -f backend/Dockerfile.worker -t taskflow-worker:latest backend/
-          docker buildx build --cache-from type=gha --cache-to type=gha,mode=max \
-            --load -t taskflow-frontend:latest frontend/
+          docker build -f backend/Dockerfile.scheduler -t taskflow-scheduler:latest backend/
+          docker build -f backend/Dockerfile.worker -t taskflow-worker:latest backend/
+          docker build -t taskflow-frontend:latest frontend/
 
       # 镜像已预构建加载，--no-build 直接使用；-p taskflow 使派生镜像名对齐
       - name: 启动全栈
