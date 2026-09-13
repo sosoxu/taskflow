@@ -384,7 +384,10 @@ int main(int argc, char* argv[]) {
 
     auto worker_dao = std::make_shared<taskflow::scheduler::dao::WorkerDao>();
     auto worker_service = std::make_shared<taskflow::scheduler::service::WorkerService>(worker_dao);
-    auto worker_deploy_service = std::make_shared<taskflow::scheduler::service::WorkerDeployService>();
+    // Fix #357: 把 scheduler 自身的 gRPC 内部认证 token 传给部署服务，
+    // SSH 部署生成的 worker.yaml 会带上该 token，worker 注册才不被拒
+    auto worker_deploy_service = std::make_shared<taskflow::scheduler::service::WorkerDeployService>(
+        config.server.grpc_auth_token);
     auto workerCtrl = std::make_shared<taskflow::scheduler::api::WorkerController>(worker_service, worker_deploy_service);
     drogon::app().registerController(workerCtrl);
 

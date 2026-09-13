@@ -49,7 +49,12 @@ struct WorkerDeployResult {
 
 class WorkerDeployService {
 public:
-    WorkerDeployService() = default;
+    // Fix #357: 注入 scheduler 自身的 gRPC 内部认证 token，写入生成的
+    // worker 配置。开启认证（server.grpc_auth_token 非空）后，不带 token
+    // 的 SSH 部署 worker 注册会被拒（UNAUTHENTICATED），部署链路失效。
+    // token 由 scheduler 侧注入而非请求携带，避免凭据经 API 传输。
+    explicit WorkerDeployService(const std::string& grpc_auth_token = {})
+        : grpc_auth_token_(grpc_auth_token) {}
 
     // Validate inputs, generate worker.yaml, SSH into the node, write the
     // config file and start the worker. The worker registers itself with the
@@ -59,7 +64,8 @@ public:
 
 private:
     static common::result::Result<void> validate(const WorkerDeployRequest& req);
-    static std::string generateWorkerConfig(const WorkerDeployRequest& req);
+    std::string generateWorkerConfig(const WorkerDeployRequest& req) const;
+    std::string grpc_auth_token_;
 };
 
 }  // namespace taskflow::scheduler::service
