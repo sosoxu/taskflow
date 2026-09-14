@@ -537,6 +537,7 @@ Worker 自动清理超过 `retention_days`（默认 30 天）的任务日志，�
 
 ## 文档
 
+- [镜像使用说明](docs/镜像使用说明.md) — 预构建 Docker 镜像加载与部署指南
 - [DEPLOYMENT.md](DEPLOYMENT.md) — 部署配置、多实例、TLS、备份恢复、故障排查
 - [API 文档 (OpenAPI/Swagger)](docs/openapi.yaml) — 符合 OpenAPI 3.0 标准的 REST API 规范
 - 需求与设计文档（位于 `docs/` 目录）：
