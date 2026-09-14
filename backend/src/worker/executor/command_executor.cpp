@@ -1,3 +1,4 @@
+#include "common/util/instance_id.h"
 #include "worker/executor/command_executor.h"
 
 #include <sys/types.h>
@@ -17,17 +18,9 @@
 
 namespace taskflow::worker::executor {
 
-// Fix #277: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
-// 与 log_sink.cpp 的 isValidInstanceId 保持一致
-static bool isValidInstanceId(const std::string& id) {
-    if (id.empty()) return false;
-    for (char c : id) {
-        if (c == '/' || c == '\\' || c == '\0') return false;
-    }
-    if (id.find("..") != std::string::npos) return false;
-    if (id == ".") return false;
-    return true;
-}
+// Fix #342: 公共校验函数，唯一定义在 common/util/instance_id.h
+// 覆盖 Fix #277 的路径穿越校验要求
+using taskflow::common::util::isValidInstanceId;
 
 TaskResult CommandExecutor::execute(const std::string& task_instance_id,
                                     const nlohmann::json& config,

@@ -1,3 +1,4 @@
+#include "common/util/instance_id.h"
 #include "worker/executor/log_sink.h"
 
 #include <filesystem>
@@ -7,20 +8,9 @@
 
 namespace taskflow::worker::executor {
 
-// Fix #271: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
-// Fix #282: 额外拒绝单个 "."，防止日志写到 base_dir 根目录
-static bool isValidInstanceId(const std::string& id) {
-    if (id.empty()) return false;
-    // 拒绝含路径分隔符、空字节的 ID
-    for (char c : id) {
-        if (c == '/' || c == '\\' || c == '\0') return false;
-    }
-    // 拒绝 ".." 序列
-    if (id.find("..") != std::string::npos) return false;
-    // Fix #282: 拒绝单个 "."（等价于 base_dir 本身）
-    if (id == ".") return false;
-    return true;
-}
+// Fix #342: 公共校验函数，唯一定义在 common/util/instance_id.h
+// 覆盖 Fix #271（拒绝路径分隔符与 ".."）与 Fix #282（拒绝单个 "."）的要求
+using taskflow::common::util::isValidInstanceId;
 
 FileLogSink::FileLogSink(const std::string& base_dir) : base_dir_(base_dir) {
     std::filesystem::create_directories(base_dir_);

@@ -3,51 +3,11 @@
 #include <cctype>
 #include <sstream>
 #include <drogon/HttpResponse.h>
+#include "scheduler/api/response_util.h"
 
 namespace taskflow::scheduler::api {
 
 namespace {
-
-static bool isValidUUID(const std::string& id) {
-    if (id.length() != 36) return false;
-    for (size_t i = 0; i < 36; i++) {
-        if (i == 8 || i == 13 || i == 18 || i == 23) {
-            if (id[i] != '-') return false;
-        } else {
-            if (!std::isxdigit(static_cast<unsigned char>(id[i]))) return false;
-        }
-    }
-    return true;
-}
-
-Json::Value nlohmannToJsoncpp(const nlohmann::json& j) {
-    Json::Reader reader;
-    Json::Value output;
-    reader.parse(j.dump(), output);
-    return output;
-}
-
-void sendSuccess(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
-                 const nlohmann::json& data, int statusCode = 200) {
-    Json::Value resp;
-    resp["code"] = 0;
-    resp["message"] = "success";
-    resp["data"] = nlohmannToJsoncpp(data);
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
-    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
-    callback(httpResp);
-}
-
-void sendError(std::function<void(const drogon::HttpResponsePtr&)>&& callback,
-               int statusCode, int code, const std::string& message) {
-    Json::Value resp;
-    resp["code"] = code;
-    resp["message"] = message;
-    resp["data"] = Json::nullValue;
-    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
-    httpResp->setStatusCode(static_cast<drogon::HttpStatusCode>(statusCode));
-    callback(httpResp);
-}
 
 }  // namespace
 
@@ -71,13 +31,7 @@ void InstanceController::pauseInstance(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40008, result.error());
         return;
     }
@@ -107,13 +61,7 @@ void InstanceController::resumeInstance(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40008, result.error());
         return;
     }
@@ -143,13 +91,7 @@ void InstanceController::cancelInstance(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40008, result.error());
         return;
     }
@@ -181,12 +123,7 @@ void InstanceController::deleteInstance(
     auto result = instance_service_->deleteInstance(id, user_id, role);
 
     if (!result.ok()) {
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40009, result.error());
         return;
     }
@@ -221,13 +158,7 @@ void InstanceController::retryTask(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40009, result.error());
         return;
     }
@@ -262,13 +193,7 @@ void InstanceController::killTask(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40009, result.error());
         return;
     }
@@ -298,13 +223,7 @@ void InstanceController::getInstance(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 40403, result.error());
         return;
     }
@@ -346,13 +265,7 @@ void InstanceController::listInstances(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 50001, result.error());
         return;
     }
@@ -415,13 +328,7 @@ void InstanceController::listAllInstances(
         auto result = instance_service_->listInstances(workflow_id, page, page_size, user_id, role);
         if (!result.ok()) {
             // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-            int status = 400;
-            if (result.error().find("Permission denied") != std::string::npos) {
-                status = 403;
-            } else if (result.error().find("not found") != std::string::npos ||
-                       result.error().find("不存在") != std::string::npos) {
-                status = 404;
-            }
+            int status = errorStatusOf(result.error());
             sendError(std::move(callback), status, 50001, result.error());
             return;
         }
@@ -433,13 +340,7 @@ void InstanceController::listAllInstances(
 
     if (!result.ok()) {
         // Fix #159: distinguish 403 (permission) / 404 (not found) / 400 (other)
-        int status = 400;
-        if (result.error().find("Permission denied") != std::string::npos) {
-            status = 403;
-        } else if (result.error().find("not found") != std::string::npos ||
-                   result.error().find("不存在") != std::string::npos) {
-            status = 404;
-        }
+        int status = errorStatusOf(result.error());
         sendError(std::move(callback), status, 50001, result.error());
         return;
     }

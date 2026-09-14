@@ -23,10 +23,14 @@
 #include "common/config/worker_config.h"
 #include "worker/grpc/worker_client.h"
 #include "common/util/grpc_auth_util.h"
+#include "common/util/instance_id.h"
 #include "worker/executor/task_executor.h"
 #include "worker/util/resource_collector.h"
 #include "taskflow.grpc.pb.h"
 
+// Fix #342: 公共校验函数，唯一定义在 common/util/instance_id.h
+// 覆盖 Fix #298 的路径穿越校验要求
+using taskflow::common::util::isValidInstanceId;
 using taskflow::v1::WorkerService;
 using taskflow::v1::TaskDispatchRequest;
 using taskflow::v1::TaskDispatchResponse;
@@ -105,17 +109,6 @@ static std::string localRoutableIpv4() {
 }
 
 // WorkerService 实现 - 集成 TaskExecutor
-// Fix #298: 验证实例 ID 不含路径分隔符或 ".."，防止路径穿越攻击
-// 与 executor 中的 isValidInstanceId 保持一致
-static bool isValidInstanceId(const std::string& id) {
-    if (id.empty()) return false;
-    for (char c : id) {
-        if (c == '/' || c == '\\' || c == '\0') return false;
-    }
-    if (id.find("..") != std::string::npos) return false;
-    if (id == ".") return false;
-    return true;
-}
 
 class WorkerServiceImpl final : public WorkerService::Service {
 public:
