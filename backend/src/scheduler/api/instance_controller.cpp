@@ -163,6 +163,43 @@ void InstanceController::cancelInstance(
     callback(httpResp);
 }
 
+// Fix #345: 删除终态实例（连带 task_instances 级联）。
+// 用于测试脚本与运维清理：工作流删除受"存在执行实例"约束，
+// 此前无实例删除端点导致清理链路无法闭环。
+void InstanceController::deleteInstance(
+    const drogon::HttpRequestPtr& req,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+    const std::string& id) {
+
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string role = req->getAttributes()->get<std::string>("role");
+    auto result = instance_service_->deleteInstance(id, user_id, role);
+
+    if (!result.ok()) {
+        int status = 400;
+        if (result.error().find("Permission denied") != std::string::npos) {
+            status = 403;
+        } else if (result.error().find("不存在") != std::string::npos) {
+            status = 404;
+        }
+        sendError(std::move(callback), status, 40009, result.error());
+        return;
+    }
+
+    Json::Value resp;
+    resp["code"] = 0;
+    resp["message"] = "success";
+    resp["data"] = Json::nullValue;
+    auto httpResp = drogon::HttpResponse::newHttpJsonResponse(resp);
+    httpResp->setStatusCode(drogon::k200OK);
+    callback(httpResp);
+}
+
 void InstanceController::retryTask(
     const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,

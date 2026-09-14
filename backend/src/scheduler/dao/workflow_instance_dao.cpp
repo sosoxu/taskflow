@@ -308,4 +308,21 @@ common::result::Result<int> WorkflowInstanceDao::countByCreator(const std::strin
         });
 }
 
+common::result::Result<void> WorkflowInstanceDao::deleteIfTerminal(const std::string& id) {
+    // Fix #345: 条件删除——仅终态可删（运行中实例删除会造成调度状态悬空）。
+    // task_instances.workflow_instance_id 为 ON DELETE CASCADE，随行级联。
+    return common::database::DatabaseManager::instance().withTransaction<void>(
+        [&](pqxx::work& txn) -> common::result::Result<void> {
+            auto res = txn.exec_params(
+                "DELETE FROM workflow_instances WHERE id = $1 "
+                "AND status IN ('SUCCESS', 'FAILED', 'CANCELLED')",
+                id);
+            if (res.affected_rows() == 0) {
+                return common::result::Result<void>::failure(
+                    "实例不存在或非终态（仅 SUCCESS/FAILED/CANCELLED 可删除）");
+            }
+            return common::result::Result<void>();
+        });
+}
+
 }  // namespace taskflow::scheduler::dao

@@ -321,6 +321,40 @@ echo ""
 echo "[错误压力后服务状态]"
 echo "  健康检查: $HEALTH"
 
+# Fix #345: 清理本轮测试数据（按 TS 前缀检索删除），此前全部遗留污染数据库。
+# 先删实例（工作流删除受"存在执行实例"约束），再删工作流与任务。
+echo "============================================================"
+echo "[清理测试数据]"
+INST_PAGE=1
+while [ "$INST_PAGE" -le 20 ]; do
+    ILIST=$(curl -s "${AUTH[@]}" "$BASE_URL/instances?keyword=${TS}&page=${INST_PAGE}&page_size=50")
+    IIDS=$(echo "$ILIST" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data',{}).get('items',[]); print(' '.join(i.get('id','') for i in items if i.get('id')))" 2>/dev/null)
+    [ -z "$IIDS" ] && break
+    IDEL=0
+    for iid in $IIDS; do
+        curl -s -o /dev/null "${AUTH[@]}" -X DELETE "$BASE_URL/instances/$iid"
+        IDEL=$((IDEL+1))
+    done
+    [ "$IDEL" -eq 0 ] && INST_PAGE=$((INST_PAGE+1))
+done
+for kind in workflows tasks; do
+    PAGE=1; REMOVED=0
+    while [ "$PAGE" -le 20 ]; do
+        LIST=$(curl -s "${AUTH[@]}" "$BASE_URL/$kind?keyword=${TS}&page=${PAGE}&page_size=50")
+        IDS=$(echo "$LIST" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data',{}).get('items',[]); print(' '.join(i.get('id','') for i in items if i.get('id')))" 2>/dev/null)
+        [ -z "$IDS" ] && break
+        DELETED=0
+        for id in $IDS; do
+            curl -s -o /dev/null "${AUTH[@]}" -X DELETE "$BASE_URL/$kind/$id"
+            DELETED=$((DELETED+1)); REMOVED=$((REMOVED+1))
+        done
+        [ "$DELETED" -eq 0 ] && PAGE=$((PAGE+1))
+    done
+    echo "  已清理 $kind: $REMOVED 条"
+done
+# /tmp 结果目录保留（供失败排查），仅清理监控中间文件
+rm -f "$RESULTS_DIR"/mon_*.csv 2>/dev/null || true
+
 # Fix #339: 阈值判定 + 非零退出（此前只打印汇总，无通过/失败结论）
 echo "============================================================"
 echo "[阈值判定]"

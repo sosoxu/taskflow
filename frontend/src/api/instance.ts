@@ -28,6 +28,11 @@ export function cancelInstance(id: string): Promise<AxiosResponse<ApiResponse<nu
   return request.post(`/api/v1/instances/${id}/cancel`)
 }
 
+// Fix #345: 删除终态实例（SUCCESS/FAILED/CANCELLED，连带任务实例级联）
+export function deleteInstance(id: string): Promise<AxiosResponse<ApiResponse<null>>> {
+  return request.delete(`/api/v1/instances/${id}`)
+}
+
 export function retryTask(instanceId: string, taskInstanceId: string): Promise<AxiosResponse<ApiResponse<null>>> {
   return request.post(`/api/v1/instances/${instanceId}/tasks/${taskInstanceId}/retry`)
 }

@@ -36,3 +36,7 @@ backend/generated/
 # Python
 __pycache__/
 *.pyc
+
+# Large image archives (offline distribution artifacts, keep out of git)
+*.tar
+*.tar.gz

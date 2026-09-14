@@ -438,6 +438,11 @@ END{
 echo ""
 echo "=== 清理测试数据 ==="
 for wf_id in "${CREATED_WF_IDS[@]}"; do
+  # Fix #345: 先删实例（工作流删除受"存在执行实例"约束）
+  INSTS=$(curl -s "$BASE/api/v1/workflows/$wf_id/instances?page=1&page_size=100" -H "$AUTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(i.get('id','') for i in (d.get('data',{}).get('items') or []) if i.get('id')))" 2>/dev/null)
+  for iid in $INSTS; do
+    curl -s -o /dev/null -X DELETE "$BASE/api/v1/instances/$iid" -H "$AUTH"
+  done
   CODE=$(curl_status -X DELETE "$BASE/api/v1/workflows/$wf_id" -H "$AUTH")
   echo "  删除工作流 $wf_id: HTTP $CODE"
 done

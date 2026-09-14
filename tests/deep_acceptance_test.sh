@@ -21,6 +21,8 @@ api_delete() { curl -s -X DELETE "$BASE_URL$1" -H "Authorization: Bearer $TOKEN"
 jcode()  { echo "$1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code',-1))" 2>/dev/null || echo "-1"; }
 jfield() { echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$2)" 2>/dev/null || echo ""; }
 jcount() { echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data',{}).get('items',d.get('data',[])); print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0"; }
+# Fix #345: 提取列表响应中的所有 id（清理测试数据用）
+jids()   { echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data',{}).get('items',d.get('data',[])); print(' '.join(i.get('id','') for i in items if isinstance(i,dict) and i.get('id')))" 2>/dev/null; }
 
 # 登录获取 admin token
 info "===== 登录 ====="
@@ -534,6 +536,41 @@ if [ "$FAIL" -gt "0" ]; then
     done
     echo "失败项已保存到 /tmp/deep_test_issues.txt"
 fi
+
+# Fix #345: 清理本轮测试产生的任务/工作流（按 TS 时间戳前缀检索删除），
+# 此前全部遗留污染数据库
+info "清理测试数据..."
+# Fix #345: 先删实例（工作流删除受"存在执行实例"约束），再删工作流与任务。
+# 实例按本轮 TS 前缀从全局实例列表检索（终态才可删，运行中的由取消兜底）。
+INST_PAGE=1
+while [ "$INST_PAGE" -le 20 ]; do
+    ILIST=$(api_get "/instances?keyword=${TS}&page=${INST_PAGE}&page_size=50")
+    IIDS=$(jids "$ILIST")
+    [ -z "$IIDS" ] && break
+    IDEL=0
+    for iid in $IIDS; do
+        api_delete "/instances/$iid" >/dev/null
+        IDEL=$((IDEL+1))
+    done
+    [ "$IDEL" -eq 0 ] && INST_PAGE=$((INST_PAGE+1))
+done
+for kind in workflows tasks; do
+    PAGE=1
+    while :; do
+        LIST=$(api_get "/$kind?keyword=${TS}&page=${PAGE}&page_size=50")
+        IDS=$(jids "$LIST")
+        [ -z "$IDS" ] && break
+        DELETED=0
+        for id in $IDS; do
+            api_delete "/$kind/$id" >/dev/null
+            DELETED=$((DELETED+1))
+        done
+        # 若删除成功则停留在当前页继续；无删除则翻页避免死循环
+        [ "$DELETED" -eq 0 ] && PAGE=$((PAGE+1))
+        [ "$PAGE" -gt 20 ] && break
+    done
+done
+info "清理完成"
 
 # Fix #339: 有失败项时以非零退出（此前恒 exit 0，接入 CI 也永远绿）
 if [ "$FAIL" -gt "0" ]; then

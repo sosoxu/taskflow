@@ -107,6 +107,16 @@ common::result::Result<void> InstanceService::resumeInstance(
     return common::result::Result<void>();
 }
 
+// Fix #345: 删除终态实例。连带 task_instances 级联删除（数据库外键）。
+common::result::Result<void> InstanceService::deleteInstance(
+    const std::string& id, const std::string& user_id, const std::string& role) {
+    auto access_result = checkInstanceAccess(id, user_id, role);
+    if (!access_result.ok()) {
+        return access_result;
+    }
+    return workflow_instance_dao_.deleteIfTerminal(id);
+}
+
 common::result::Result<void> InstanceService::cancelInstance(
     const std::string& id, const std::string& user_id, const std::string& role) {
     auto access_result = checkInstanceAccess(id, user_id, role);

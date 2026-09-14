@@ -15,6 +15,8 @@ public:
     ADD_METHOD_TO(InstanceController::pauseInstance, "/api/v1/instances/{id}/pause", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::resumeInstance, "/api/v1/instances/{id}/resume", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::cancelInstance, "/api/v1/instances/{id}/cancel", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    // Fix #345: 删除终态实例（测试/运维清理）
+    ADD_METHOD_TO(InstanceController::deleteInstance, "/api/v1/instances/{id}", drogon::Delete, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::retryTask, "/api/v1/instances/{id}/tasks/{taskInstanceId}/retry", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::killTask, "/api/v1/instances/{id}/tasks/{taskInstanceId}/kill", drogon::Post, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::getInstance, "/api/v1/instances/{id}", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
@@ -33,6 +35,11 @@ public:
                         const std::string& id);
 
     void cancelInstance(const drogon::HttpRequestPtr& req,
+                        std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                        const std::string& id);
+
+    // Fix #345: 删除终态实例
+    void deleteInstance(const drogon::HttpRequestPtr& req,
                         std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                         const std::string& id);
 

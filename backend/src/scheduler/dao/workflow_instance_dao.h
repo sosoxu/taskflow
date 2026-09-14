@@ -61,6 +61,10 @@ public:
         const std::string& creator_id = "");
 
     common::result::Result<std::vector<common::models::WorkflowInstance>> listActive();
+
+    // Fix #345: 删除终态实例（task_instances 经外键 ON DELETE CASCADE 级联）。
+    // 仅 SUCCESS/FAILED/CANCELLED 可删，非终态返回失败。
+    common::result::Result<void> deleteIfTerminal(const std::string& id);
 };
 
 }  // namespace taskflow::scheduler::dao

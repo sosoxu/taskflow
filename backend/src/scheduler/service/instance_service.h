@@ -34,6 +34,12 @@ public:
                                                 const std::string& user_id = "",
                                                 const std::string& role = "");
 
+    // Fix #345: 删除终态实例（SUCCESS/FAILED/CANCELLED），连带 task_instances
+    // 级联删除。运行中实例拒绝删除（先取消）。用于测试/运维清理。
+    common::result::Result<void> deleteInstance(const std::string& id,
+                                                const std::string& user_id = "",
+                                                const std::string& role = "");
+
     // Retry a specific task instance (reset to PENDING, increment retry_count, recursively reset downstream)
     common::result::Result<void> retryTask(const std::string& instance_id,
                                            const std::string& task_instance_id,
