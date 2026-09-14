@@ -182,7 +182,6 @@ import type { WorkerInfo, DeployWorkerRequest, DeployWorkerResult } from '../../
 const loading = ref(false)
 const workers = ref<WorkerInfo[]>([])
 
-let refreshTimer: ReturnType<typeof setInterval> | null = null
 function cpuColor(value: number): string {
   if (value >= 90) return '#f56c6c'
   if (value >= 70) return '#e6a23c'
