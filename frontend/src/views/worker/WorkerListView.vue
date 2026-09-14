@@ -171,10 +171,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { getWorkers, deployWorker } from '../../api/worker'
+import { usePolling } from '../../composables/usePolling'
 import { formatTime } from '../../utils/format'
 import type { WorkerInfo, DeployWorkerRequest, DeployWorkerResult } from '../../types/worker'
 
@@ -182,7 +183,6 @@ const loading = ref(false)
 const workers = ref<WorkerInfo[]>([])
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
-
 function cpuColor(value: number): string {
   if (value >= 90) return '#f56c6c'
   if (value >= 70) return '#e6a23c'
@@ -212,27 +212,9 @@ async function fetchWorkers(silent = false) {
   }
 }
 
-// Fix #197: 启停轮询辅助函数
-function startRefresh() {
-  if (refreshTimer) return
-  refreshTimer = setInterval(() => fetchWorkers(true), 10000)
-}
-
-function stopRefresh() {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-}
-
-// Fix #197: 标签页隐藏时停止轮询，可见时恢复
-function handleVisibilityChange() {
-  if (document.hidden) {
-    stopRefresh()
-  } else {
-    startRefresh()
-  }
-}
+// Fix #197/#341: 每 10 秒静默刷新（silent 跳过 loading 闪烁），
+// 标签页隐藏时暂停、可见时恢复——统一由 usePolling 处理。
+usePolling(() => fetchWorkers(true), { interval: 10000 })
 
 // ===== 部署 Worker =====
 const deployDialogVisible = ref(false)
@@ -308,15 +290,6 @@ async function submitDeploy() {
 
 onMounted(() => {
   fetchWorkers()
-  startRefresh()
-  // Fix #197: 监听标签页可见性变化
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-})
-
-onUnmounted(() => {
-  stopRefresh()
-  // Fix #197: 移除可见性监听
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 

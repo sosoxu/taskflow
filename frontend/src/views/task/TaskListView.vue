@@ -28,8 +28,8 @@
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="type" label="类型" width="120">
         <template #default="{ row }">
-          <el-tag :type="typeTagMap[row.type]?.type || 'info'" effect="plain">
-            {{ typeTagMap[row.type]?.label || row.type }}
+          <el-tag :type="taskTypeTag(row.type)" effect="plain">
+            {{ taskTypeLabel(row.type) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -112,15 +112,7 @@
             <el-input v-model="form.config.working_dir" placeholder="留空使用默认目录" />
           </el-form-item>
           <el-form-item label="环境变量">
-            <div class="env-editor">
-              <div v-for="(_, key) in form.config.env_vars" :key="key" class="env-row">
-                <el-input v-model="envKeyTemp[key]" placeholder="变量名" style="width: 160px" @change="updateEnvKey(key)" />
-                <span class="env-eq">=</span>
-                <el-input v-model="form.config.env_vars![key]" placeholder="变量值" style="flex: 1" />
-                <el-button :icon="Delete" circle size="small" @click="removeEnvVar(key)" />
-              </div>
-              <el-button size="small" :icon="Plus" @click="addEnvVar">添加环境变量</el-button>
-            </div>
+            <EnvVarEditor ref="envEditorRef" v-model="form.config.env_vars" />
           </el-form-item>
         </template>
 
@@ -134,15 +126,7 @@
             <el-input v-model="form.config.working_dir" placeholder="留空使用默认目录" />
           </el-form-item>
           <el-form-item label="环境变量">
-            <div class="env-editor">
-              <div v-for="(_, key) in form.config.env_vars" :key="key" class="env-row">
-                <el-input v-model="envKeyTemp[key]" placeholder="变量名" style="width: 160px" @change="updateEnvKey(key)" />
-                <span class="env-eq">=</span>
-                <el-input v-model="form.config.env_vars![key]" placeholder="变量值" style="flex: 1" />
-                <el-button :icon="Delete" circle size="small" @click="removeEnvVar(key)" />
-              </div>
-              <el-button size="small" :icon="Plus" @click="addEnvVar">添加环境变量</el-button>
-            </div>
+            <EnvVarEditor ref="envEditorRef" v-model="form.config.env_vars" />
           </el-form-item>
         </template>
 
@@ -205,8 +189,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Plus, Delete } from '@element-plus/icons-vue'
 import { getTasks, getTask, createTask, updateTask, deleteTask } from '../../api/task'
+import EnvVarEditor from '../../components/EnvVarEditor.vue'
 import type { TaskItem, TaskConfig } from '../../types/task'
+import { usePagination } from '../../composables/usePagination'
 import { formatTime } from '../../utils/format'
+import { taskTypeLabel, taskTypeTag } from '../../utils/mappings'
 import { useUserStore } from '../../stores/userStore'
 import { basicSetup } from 'codemirror'
 import { EditorView } from '@codemirror/view'
@@ -219,20 +206,14 @@ const router = useRouter()
 // Fix #172: viewer 角色隐藏写操作按钮
 const userStore = useUserStore()
 
-const typeTagMap: Record<string, { type: string; label: string }> = {
-  command: { type: 'primary', label: 'Command' },
-  script: { type: 'success', label: 'Script' },
-  sql: { type: 'warning', label: 'SQL' },
-}
-
 // List state
 const loading = ref(false)
 const taskList = ref<TaskItem[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(10)
 const keyword = ref('')
 const typeFilter = ref('')
+
+// Fix #341: 分页样板改用 usePagination
+const { page, pageSize, total, handleSizeChange, resetToFirstPage } = usePagination(fetchList)
 
 async function fetchList() {
   loading.value = true
@@ -255,13 +236,7 @@ async function fetchList() {
 }
 
 function handleSearch() {
-  page.value = 1
-  fetchList()
-}
-
-// Fix #175: 分页 size-change 未重置 page=1
-function handleSizeChange() {
-  page.value = 1
+  resetToFirstPage()
   fetchList()
 }
 
@@ -280,46 +255,8 @@ const defaultConfig = (): TaskConfig => ({
   env_vars: {},
 })
 
-// Env vars editor helpers
-const envKeyTemp = ref<Record<string, string>>({})
-let envKeyCounter = 0
-
-function addEnvVar() {
-  const placeholder = `__new_${++envKeyCounter}`
-  if (!form.config.env_vars) form.config.env_vars = {}
-  form.config.env_vars[placeholder] = ''
-  envKeyTemp.value[placeholder] = ''
-}
-
-function removeEnvVar(key: string) {
-  if (form.config.env_vars) {
-    delete form.config.env_vars[key]
-    // Trigger reactivity
-    form.config.env_vars = { ...form.config.env_vars }
-  }
-  delete envKeyTemp.value[key]
-}
-
-function updateEnvKey(oldKey: string) {
-  const newKey = envKeyTemp.value[oldKey]?.trim()
-  if (!newKey || newKey === oldKey) return
-  if (!form.config.env_vars) return
-  // Fix #229: Reject duplicate env var keys — otherwise renaming would
-  // silently overwrite the value of an existing variable with the same name.
-  if (Object.prototype.hasOwnProperty.call(form.config.env_vars, newKey)) {
-    ElMessage.warning(`环境变量 "${newKey}" 已存在，请使用其他名称`)
-    // Restore the input to the old key so the user can correct it
-    envKeyTemp.value[oldKey] = oldKey
-    return
-  }
-  const value: string = form.config.env_vars[oldKey] ?? ''
-  delete form.config.env_vars[oldKey]
-  form.config.env_vars[newKey] = value
-  delete envKeyTemp.value[oldKey]
-  envKeyTemp.value[newKey] = newKey
-  // Trigger reactivity
-  form.config.env_vars = { ...form.config.env_vars }
-}
+// Fix #341: 环境变量编辑器的状态与增删改逻辑移入 EnvVarEditor 组件
+const envEditorRef = ref<InstanceType<typeof EnvVarEditor> | null>(null)
 
 const form = reactive({
   name: '',
@@ -385,17 +322,16 @@ function resetForm() {
   form.retry_interval = 60
   form.resource_tags = []
   form.config = defaultConfig()
-  envKeyTemp.value = {}
+  envEditorRef.value?.reset()
   paramEntries.value = []
 }
 
 function handleTypeChange() {
   form.config = defaultConfig()
-  // Fix #236: Clear envKeyTemp when the task type changes. Otherwise stale
-  // placeholder keys (e.g. __new_1) from the previous type's env editor
-  // persist and would block submission via the "请先完成环境变量名输入"
-  // guard in handleSubmit, even though the new config has no env vars.
-  envKeyTemp.value = {}
+  // Fix #236/#341: 切换类型时重置环境变量编辑器。旧实现是清空 envKeyTemp，
+  // 否则上个类型遗留的占位 key（如 __new_1）会卡住提交前的
+  // 「请先完成环境变量名输入」校验——即便新配置根本没有环境变量。
+  envEditorRef.value?.reset()
   destroyEditors()
   nextTick(() => {
     initEditorForType()
@@ -495,18 +431,13 @@ async function handleEdit(row: TaskItem) {
     form.retry_interval = task.retry_interval ?? 60
     form.resource_tags = task.resource_tags || []
     form.config = { ...defaultConfig(), ...(task.config_json || {}) }
-    // Populate env key temp for editing
-    envKeyTemp.value = {}
-    if (form.config.env_vars) {
-      for (const key of Object.keys(form.config.env_vars)) {
-        envKeyTemp.value[key] = key
-      }
-    }
     // Populate parameters from task
     entriesFromParams(task.parameters_json)
     destroyEditors()
     dialogVisible.value = true
     nextTick(() => {
+      // Populate env key temp for editing
+      envEditorRef.value?.loadKeys(form.config.env_vars)
       initEditorForType()
     })
   } catch {
@@ -522,7 +453,7 @@ async function handleSubmit() {
   }
   // Fix #196: 提交前检查是否存在未完成的环境变量名输入（占位符 key 仍存在），
   // 避免用户输入 key 后未失焦直接提交导致该变量被静默丢弃。
-  if (form.config.env_vars && Object.keys(envKeyTemp.value).some((k) => k.startsWith('__new_'))) {
+  if (envEditorRef.value?.hasPendingKeys()) {
     ElMessage.warning('请先完成环境变量名输入')
     return
   }
@@ -564,18 +495,13 @@ async function handleSubmit() {
     // Clean up env_vars: remove placeholder keys (keys starting with __new_)
     const cleanConfig = { ...form.config }
     if (cleanConfig.env_vars) {
-      const cleaned: Record<string, string> = {}
-      for (const [k, v] of Object.entries(cleanConfig.env_vars)) {
-        const realKey = envKeyTemp.value[k]?.trim() || k
-        if (realKey && !realKey.startsWith('__new_')) {
-          cleaned[realKey] = v
-        }
+      // 占位 key 换成用户输入的真实变量名；无有效变量时整体移除
+      const cleaned = envEditorRef.value?.resolveKeys()
+      if (cleaned) {
+        cleanConfig.env_vars = cleaned
+      } else {
+        delete cleanConfig.env_vars
       }
-      cleanConfig.env_vars = Object.keys(cleaned).length > 0 ? cleaned : undefined
-    }
-    // Remove env_vars if empty
-    if (cleanConfig.env_vars && Object.keys(cleanConfig.env_vars).length === 0) {
-      delete cleanConfig.env_vars
     }
 
     const payload = {
@@ -678,22 +604,6 @@ onBeforeUnmount(() => {
 
 .code-editor :deep(.cm-scroller) {
   overflow: auto;
-}
-
-.env-editor {
-  width: 100%;
-}
-
-.env-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.env-eq {
-  color: #909399;
-  font-weight: 600;
 }
 
 .param-editor {

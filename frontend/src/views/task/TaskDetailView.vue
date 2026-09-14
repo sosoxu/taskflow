@@ -14,8 +14,8 @@
           <el-descriptions :column="2" border>
             <el-descriptions-item label="名称">{{ task.name }}</el-descriptions-item>
             <el-descriptions-item label="类型">
-              <el-tag :type="typeTagMap[task.type]?.type || 'info'" effect="plain">
-                {{ typeTagMap[task.type]?.label || task.type }}
+              <el-tag :type="taskTypeTag(task.type)" effect="plain">
+                {{ taskTypeLabel(task.type) }}
               </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="描述" :span="2">{{ task.description || '-' }}</el-descriptions-item>
@@ -161,19 +161,15 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import { getTask } from '../../api/task'
 import { getAllInstances } from '../../api/instance'
 import type { TaskItem } from '../../types/task'
-import type { WorkflowInstance, WorkflowInstanceStatus } from '../../types/instance'
+import type { WorkflowInstance } from '../../types/instance'
+import { usePagination } from '../../composables/usePagination'
 import { formatTime } from '../../utils/format'
+import { instanceStatusType, taskTypeLabel, taskTypeTag } from '../../utils/mappings'
 
 const route = useRoute()
 const router = useRouter()
 // Fix #191b: taskId 改为 computed，切换任务时响应式更新
 const taskId = computed(() => route.params.id as string)
-
-const typeTagMap: Record<string, { type: string; label: string }> = {
-  command: { type: 'primary', label: 'Command' },
-  script: { type: 'success', label: 'Script' },
-  sql: { type: 'warning', label: 'SQL' },
-}
 
 const loading = ref(false)
 const task = ref<TaskItem | null>(null)
@@ -181,21 +177,9 @@ const task = ref<TaskItem | null>(null)
 // Fix #177: 执行历史列表状态
 const instances = ref<WorkflowInstance[]>([])
 const instancesLoading = ref(false)
-const instancePage = ref(1)
-const instancePageSize = ref(10)
-const instanceTotal = ref(0)
-
-function instanceStatusType(status: WorkflowInstanceStatus): string {
-  const map: Record<string, string> = {
-    PENDING: 'info',
-    RUNNING: '',
-    PAUSED: 'warning',
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    CANCELLED: 'info',
-  }
-  return map[status] || 'info'
-}
+// Fix #341: 分页样板改用 usePagination
+const { page: instancePage, pageSize: instancePageSize, total: instanceTotal, handleSizeChange } =
+  usePagination(fetchInstances)
 
 async function fetchInstances() {
   instancesLoading.value = true
@@ -219,12 +203,6 @@ async function fetchInstances() {
   } finally {
     instancesLoading.value = false
   }
-}
-
-// Fix #175: 分页 size-change 未重置 page=1
-function handleSizeChange() {
-  instancePage.value = 1
-  fetchInstances()
 }
 
 function viewInstance(row: WorkflowInstance) {

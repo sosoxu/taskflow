@@ -91,7 +91,7 @@
             <el-table-column prop="workflow_name" label="工作流" />
             <el-table-column prop="status" label="状态" width="120">
               <template #default="{ row }">
-                <el-tag :type="statusTagType(row.status)" size="small">
+                <el-tag :type="instanceStatusType(row.status)" size="small">
                   {{ row.status }}
                 </el-tag>
               </template>
@@ -128,11 +128,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, onUnmounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Share, VideoPlay, Monitor, Plus, TrendCharts, CircleCheck } from '@element-plus/icons-vue'
 import { getDashboardStats } from '../api/dashboard'
+import { usePolling } from '../composables/usePolling'
 import { formatTime } from '../utils/format'
+import { instanceStatusType } from '../utils/mappings'
 import { useUserStore } from '../stores/userStore'
 
 // Fix #172: viewer 角色隐藏写操作按钮
@@ -158,24 +160,11 @@ interface InstanceItem {
 
 const recentInstances = ref<InstanceItem[]>([])
 
-function statusTagType(status: string): '' | 'success' | 'warning' | 'danger' | 'info' {
-  const map: Record<string, '' | 'success' | 'warning' | 'danger' | 'info'> = {
-    RUNNING: '',
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    PAUSED: 'warning',
-    PENDING: 'info',
-    CANCELLED: 'info',
-  }
-  return map[status] || 'info'
-}
-
 // Fix #234: Track first load so we only surface an error toast once (on
 // initial mount). Subsequent auto-refresh failures stay silent to avoid
 // spamming the user every 30s when the backend is briefly unavailable;
 // the last successfully-loaded stats are kept on screen.
 let isFirstLoad = true
-let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadDashboardData() {
   try {
@@ -202,17 +191,12 @@ async function loadDashboardData() {
 
 onMounted(() => {
   loadDashboardData()
-  // Fix #234: Auto-refresh every 30s so running instance count, online
-  // workers, and recent instances stay current without manual reload.
-  refreshTimer = setInterval(loadDashboardData, 30000)
 })
 
-onUnmounted(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-})
+// Fix #234: Auto-refresh every 30s so running instance count, online
+// workers, and recent instances stay current without manual reload.
+// Fix #341: 轮询样板改用 usePolling；仪表盘保持「隐藏标签页也刷新」的原行为。
+usePolling(loadDashboardData, { interval: 30000, pauseOnHidden: false })
 </script>
 
 <style scoped>

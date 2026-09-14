@@ -101,6 +101,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUsers, createUser, updateUserRole, deleteUser } from '../../api/user'
+import { usePagination } from '../../composables/usePagination'
 import { formatTime } from '../../utils/format'
 import { useUserStore } from '../../stores/userStore'
 
@@ -116,9 +117,8 @@ interface UserItem {
 
 const loading = ref(false)
 const users = ref<UserItem[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(10)
+// Fix #341: 分页样板改用 usePagination
+const { page, pageSize, total, handleSizeChange } = usePagination(fetchUsers)
 
 const submitting = ref(false)
 
@@ -176,12 +176,6 @@ async function fetchUsers() {
   } finally {
     loading.value = false
   }
-}
-
-// Fix #175: 分页 size-change 未重置 page=1
-function handleSizeChange() {
-  page.value = 1
-  fetchUsers()
 }
 
 function openCreateDialog() {

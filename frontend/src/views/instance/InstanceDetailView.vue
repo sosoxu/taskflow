@@ -228,8 +228,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getInstance, pauseInstance, resumeInstance, cancelInstance, retryTask, killTask } from '../../api/instance'
 import { getTaskLogs, getTaskLogStreamUrl } from '../../api/log'
 import { getWorkflow } from '../../api/workflow'
+import { usePolling } from '../../composables/usePolling'
+import { useSseLog } from '../../composables/useSseLog'
 import { formatTime } from '../../utils/format'
-import type { WorkflowInstance, TaskInstance, WorkflowInstanceStatus, TaskInstanceStatus } from '../../types/instance'
+import { instanceStatusType, taskStatusType } from '../../utils/mappings'
+import type { WorkflowInstance, TaskInstance } from '../../types/instance'
 import type { DagGraph } from '../../types/workflow'
 import { useUserStore } from '../../stores/userStore'
 
@@ -252,53 +255,27 @@ const instanceParamOverrides = computed(() => {
 })
 
 const logDialogVisible = ref(false)
-const logContent = ref('')
 const currentLogTask = ref<TaskInstance | null>(null)
 const autoScroll = ref(true)
-const logStreaming = ref(false)
 const logContainerRef = ref<HTMLElement | null>(null)
+
+// Fix #341: SSE 日志流（重连、长度上限、定时器清理）抽到 useSseLog
+const logSse = useSseLog({
+  onMessage: () => {
+    if (autoScroll.value) {
+      nextTick(() => scrollToBottom())
+    }
+  },
+  onReconnectExhausted: () => {
+    ElMessage.warning('日志实时跟踪连接失败，已停止重连，请点击"实时跟踪"重试')
+  },
+})
+const logContent = logSse.content
+const logStreaming = logSse.streaming
 
 // Resolved config dialog state
 const configDialogVisible = ref(false)
 const currentConfigTask = ref<TaskInstance | null>(null)
-let eventSource: EventSource | null = null
-// Fix #192: SSE 重连计数器，最多重连 3 次（间隔 2s/4s/6s）
-let sseReconnectCount = 0
-const SSE_MAX_RECONNECT = 3
-// Fix #355: 保存重连 setTimeout 句柄——关闭弹窗/卸载时清除，
-// 避免旧重连回调在新会话中再建孤儿 EventSource
-let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null
-// Fix #194: logContent 最大长度限制（约 100KB），避免无限增长导致卡顿
-const LOG_MAX_LENGTH = 100000
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-function instanceStatusType(status: WorkflowInstanceStatus): string {
-  const map: Record<WorkflowInstanceStatus, string> = {
-    PENDING: 'info',
-    RUNNING: 'warning',
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    CANCELLED: 'info',
-    PAUSED: 'warning',
-  }
-  return map[status] || 'info'
-}
-
-function taskStatusType(status: TaskInstanceStatus): string {
-  const map: Record<TaskInstanceStatus, string> = {
-    PENDING: 'info',
-    DISPATCHED: 'info',
-    RUNNING: 'warning',
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    TIMEOUT: 'danger',
-    CANCELLED: 'info',
-    UPSTREAM_FAILED: 'warning',
-    NODE_OFFLINE: 'danger',
-  }
-  return map[status] || 'info'
-}
 
 // DAG layout computation
 const nodeSpacingX = 180
@@ -518,13 +495,7 @@ async function handleRetryTask(task: TaskInstance) {
     // terminal state (FAILED/etc.) back to RUNNING/PENDING. Polling was
     // stopped when the terminal state was reached, so it must be restarted
     // here; otherwise the UI will never refresh to show progress.
-    if (
-      instance.value &&
-      (instance.value.status === 'RUNNING' ||
-        instance.value.status === 'PENDING' ||
-        instance.value.status === 'PAUSED') &&
-      !pollTimer
-    ) {
+    if (isInstanceActive()) {
       startPolling()
     }
   } catch {
@@ -550,7 +521,7 @@ async function handleKillTask(task: TaskInstance) {
 
 async function openLogDialog(task: TaskInstance) {
   currentLogTask.value = task
-  logContent.value = ''
+  logSse.clear()
   logDialogVisible.value = true
   await fetchLog()
 }
@@ -577,80 +548,11 @@ async function fetchLog() {
 
 function startLogStream() {
   if (!instance.value || !currentLogTask.value) return
-  stopLogStream()
-  // Fix #192: 重置重连计数器
-  sseReconnectCount = 0
-  createEventSource()
-}
-
-// Fix #192: 抽取 EventSource 创建逻辑，支持错误后手动重连（2s/4s/6s 递增），
-// 最多重连 3 次，超限则停止并提示用户。手动关闭当前连接以避免原生自动重连
-// 与 setTimeout 重连堆叠产生多个连接。
-function createEventSource() {
-  if (!instance.value || !currentLogTask.value) return
-  const url = getTaskLogStreamUrl(instance.value.id, currentLogTask.value.id)
-  eventSource = new EventSource(url)
-  logStreaming.value = true
-
-  eventSource.onmessage = (event) => {
-    // Fix #194: 通过 appendLog 限制日志长度，避免无限增长
-    appendLog(event.data)
-    if (autoScroll.value) {
-      nextTick(() => scrollToBottom())
-    }
-  }
-
-  eventSource.addEventListener('done', () => {
-    // 正常结束，标记不再重连
-    sseReconnectCount = SSE_MAX_RECONNECT
-    stopLogStream()
-  })
-
-  eventSource.onerror = () => {
-    // Fix #192: 不立即放弃，先关闭当前连接再按递增间隔重连
-    if (eventSource) {
-      eventSource.close()
-      eventSource = null
-    }
-    sseReconnectCount++
-    if (sseReconnectCount > SSE_MAX_RECONNECT) {
-      ElMessage.warning('日志实时跟踪连接失败，已停止重连，请点击"实时跟踪"重试')
-      stopLogStream()
-      return
-    }
-    const delay = sseReconnectCount * 2000 // 2s, 4s, 6s
-    if (sseReconnectTimer) clearTimeout(sseReconnectTimer)
-    sseReconnectTimer = setTimeout(() => {
-      sseReconnectTimer = null
-      // 仅在用户未主动停止时重连，避免死循环
-      if (logStreaming.value) {
-        createEventSource()
-      }
-    }, delay)
-  }
-}
-
-// Fix #194: 限制 logContent 最大长度为 100KB，超过则截断保留后半部分并加提示
-function appendLog(chunk: string) {
-  const next = logContent.value + chunk + '\n'
-  if (next.length > LOG_MAX_LENGTH) {
-    logContent.value = '... (log truncated, showing last 100KB) ...\n' + next.slice(-LOG_MAX_LENGTH)
-  } else {
-    logContent.value = next
-  }
+  logSse.start(getTaskLogStreamUrl(instance.value.id, currentLogTask.value.id))
 }
 
 function stopLogStream() {
-  if (eventSource) {
-    eventSource.close()
-    eventSource = null
-  }
-  // Fix #355: 同时取消挂起的重连定时器
-  if (sseReconnectTimer) {
-    clearTimeout(sseReconnectTimer)
-    sseReconnectTimer = null
-  }
-  logStreaming.value = false
+  logSse.close()
 }
 
 function scrollToBottom() {
@@ -677,23 +579,16 @@ function goBack() {
 }
 
 // Auto-poll for running instances
-// Fix #192/#197: 停止轮询辅助函数
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
+// Fix #192/#197/#341: 轮询（5s）、终态自动停止、标签页隐藏暂停统一由 usePolling 处理
+const isInstanceActive = () =>
+  !!instance.value &&
+  (instance.value.status === 'RUNNING' ||
+    instance.value.status === 'PENDING' ||
+    instance.value.status === 'PAUSED')
 
-function startPolling() {
-  pollTimer = setInterval(async () => {
+const { start: startPolling, stop: stopPolling } = usePolling(
+  async () => {
     if (!instance.value) return
-    const status = instance.value.status
-    // Stop polling if instance reached a terminal state
-    if (status !== 'RUNNING' && status !== 'PENDING' && status !== 'PAUSED') {
-      stopPolling()
-      return
-    }
     // Poll without loading spinner
     const id = route.params.id as string
     if (!id) return
@@ -701,25 +596,12 @@ function startPolling() {
       const res = await getInstance(id)
       instance.value = res.data.data
     } catch { /* ignore poll errors */ }
-  }, 5000)
-}
-
-// Fix #197: 标签页隐藏时停止轮询，可见时若实例运行中则恢复轮询
-function handleVisibilityChange() {
-  if (document.hidden) {
-    stopPolling()
-  } else {
-    if (instance.value && (instance.value.status === 'RUNNING' || instance.value.status === 'PENDING' || instance.value.status === 'PAUSED')) {
-      if (!pollTimer) startPolling()
-    }
-  }
-}
+  },
+  { interval: 5000, isActive: isInstanceActive },
+)
 
 onMounted(() => {
   fetchInstance()
-  startPolling()
-  // Fix #197: 监听标签页可见性变化
-  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 // Fix #161/#192: Re-fetch when the route param changes (e.g. navigating from one
@@ -730,7 +612,7 @@ watch(() => route.params.id, async (newId, oldId) => {
     stopLogStream()
     stopPolling()
     await fetchInstance()
-    if (instance.value && (instance.value.status === 'RUNNING' || instance.value.status === 'PENDING' || instance.value.status === 'PAUSED')) {
+    if (isInstanceActive()) {
       startPolling()
     }
   }
@@ -739,8 +621,6 @@ watch(() => route.params.id, async (newId, oldId) => {
 onUnmounted(() => {
   stopPolling()
   stopLogStream()
-  // Fix #197: 移除可见性监听
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 

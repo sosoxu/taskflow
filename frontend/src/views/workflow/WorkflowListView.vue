@@ -124,8 +124,10 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getWorkflows, getWorkflow, deleteWorkflow, triggerWorkflow } from '../../api/workflow'
-import { getTask } from '../../api/task'
+import { usePagination } from '../../composables/usePagination'
 import { formatTime } from '../../utils/format'
+import { strategyLabel, strategyTagType } from '../../utils/mappings'
+import { loadTriggerParamEntries, type TriggerParamEntry } from '../../utils/triggerParams'
 import type { WorkflowItem } from '../../types/workflow'
 import { useUserStore } from '../../stores/userStore'
 
@@ -136,9 +138,8 @@ const userStore = useUserStore()
 const loading = ref(false)
 const workflows = ref<WorkflowItem[]>([])
 const keyword = ref('')
-const page = ref(1)
-const pageSize = ref(10)
-const total = ref(0)
+// Fix #341: 分页样板改用 usePagination
+const { page, pageSize, total, handleSizeChange, resetToFirstPage } = usePagination(fetchList)
 
 const deleteDialogVisible = ref(false)
 const deleteLoading = ref(false)
@@ -148,62 +149,17 @@ const triggerDialogVisible = ref(false)
 const triggerLoading = ref(false)
 const triggerTarget = ref<WorkflowItem | null>(null)
 
-// Trigger parameter entries
-interface TriggerParamEntry { key: string; value: string; defaultValue: string }
 const triggerParamEntries = ref<TriggerParamEntry[]>([])
 
 async function loadTriggerParams(workflowId: string) {
   triggerParamEntries.value = []
   try {
     const { data: resp } = await getWorkflow(workflowId)
-    const wf = resp.data
-    if (!wf?.dag_json?.nodes) return
-
-    // Collect all unique parameter names from all task nodes
-    const paramMap = new Map<string, string>() // key -> defaultValue
-    for (const node of wf.dag_json.nodes) {
-      if (!node.task_id) continue
-      try {
-        const { data: taskResp } = await getTask(node.task_id)
-        const task = taskResp.data
-        if (task?.parameters_json && typeof task.parameters_json === 'object') {
-          for (const [key, val] of Object.entries(task.parameters_json)) {
-            if (!paramMap.has(key)) {
-              paramMap.set(key, typeof val === 'string' ? val : JSON.stringify(val))
-            }
-          }
-        }
-      } catch {
-        // Skip tasks that can't be loaded
-      }
-    }
-
-    triggerParamEntries.value = Array.from(paramMap.entries()).map(([key, defaultValue]) => ({
-      key,
-      value: '',
-      defaultValue,
-    }))
+    // Fix #341: 收集触发参数改用共享实现，节点任务信息并发拉取
+    triggerParamEntries.value = await loadTriggerParamEntries(resp.data?.dag_json?.nodes)
   } catch {
     // If we can't load params, just show empty form
   }
-}
-
-function strategyTagType(strategy: string) {
-  const map: Record<string, string> = {
-    random: 'info',
-    load_balance: 'success',
-    specified: 'warning',
-  }
-  return map[strategy] || 'info'
-}
-
-function strategyLabel(strategy: string) {
-  const map: Record<string, string> = {
-    random: '随机',
-    load_balance: '负载均衡',
-    specified: '指定节点',
-  }
-  return map[strategy] || strategy
 }
 
 async function fetchList() {
@@ -225,13 +181,7 @@ async function fetchList() {
 }
 
 function handleSearch() {
-  page.value = 1
-  fetchList()
-}
-
-// Fix #175: 分页 size-change 未重置 page=1
-function handleSizeChange() {
-  page.value = 1
+  resetToFirstPage()
   fetchList()
 }
 

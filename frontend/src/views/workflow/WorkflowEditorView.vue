@@ -172,6 +172,7 @@ import '@vue-flow/controls/dist/style.css'
 import { getWorkflow, createWorkflow, updateWorkflow } from '../../api/workflow'
 import { getTasks } from '../../api/task'
 import { getWorkers } from '../../api/worker'
+import { taskTypeTag } from '../../utils/mappings'
 import type { TaskItem } from '../../types/task'
 import type { WorkerInfo } from '../../types/worker'
 import type { DagGraph } from '../../types/workflow'
@@ -304,15 +305,6 @@ const selectedNodeName = computed(() => {
   const data = dagNodeDataMap.value.get(selectedNodeId.value)
   return data?.task_name || ''
 })
-
-function taskTypeTag(type: string) {
-  const map: Record<string, string> = {
-    command: '',
-    script: 'success',
-    sql: 'warning',
-  }
-  return map[type] || 'info'
-}
 
 let nodeCounter = 0
 

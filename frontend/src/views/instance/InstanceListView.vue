@@ -106,16 +106,17 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getAllInstances } from '../../api/instance'
+import { usePagination } from '../../composables/usePagination'
 import { formatTime } from '../../utils/format'
-import type { WorkflowInstance, WorkflowInstanceStatus } from '../../types/instance'
+import { instanceStatusType } from '../../utils/mappings'
+import type { WorkflowInstance } from '../../types/instance'
 
 const router = useRouter()
 
 const loading = ref(false)
 const instances = ref<WorkflowInstance[]>([])
-const page = ref(1)
-const pageSize = ref(10)
-const total = ref(0)
+// Fix #341: 分页样板改用 usePagination
+const { page, pageSize, total, handleSizeChange, resetToFirstPage } = usePagination(fetchList)
 
 const statusFilter = ref('')
 const triggerFilter = ref('')
@@ -150,36 +151,19 @@ async function fetchList() {
 }
 
 function handleSearch() {
-  page.value = 1
+  resetToFirstPage()
   fetchList()
 }
 
 function handleReset() {
   statusFilter.value = ''
   triggerFilter.value = ''
-  page.value = 1
-  fetchList()
-}
-
-function handleSizeChange() {
-  page.value = 1
+  resetToFirstPage()
   fetchList()
 }
 
 function handleView(row: WorkflowInstance) {
   router.push({ name: 'instance-detail', params: { id: row.id } })
-}
-
-function instanceStatusType(status: WorkflowInstanceStatus): string {
-  const map: Record<WorkflowInstanceStatus, string> = {
-    PENDING: 'info',
-    RUNNING: 'warning',
-    SUCCESS: 'success',
-    FAILED: 'danger',
-    CANCELLED: 'info',
-    PAUSED: 'warning',
-  }
-  return map[status] || 'info'
 }
 
 onMounted(() => {
