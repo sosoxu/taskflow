@@ -1,0 +1,26 @@
+# 统一行尾符：仓库内一律存 LF，检出也保持 LF。
+# 背景：项目在 /mnt/d（DrvFs）上开发，Windows 侧编辑器保存会把文本文件
+# 整体改成 CRLF，导致 git 出现整文件级 diff（曾一次产生 9000+ 行噪音）。
+# 这里以 eol=lf 固定检出行为，即使编辑器写成 CRLF，入库前也会被归一化。
+* text=auto eol=lf
+
+# 二进制资源不做任何换行符转换
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.tar binary
+*.so binary
+*.a binary
+*.o binary
+*.proto text
