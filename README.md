@@ -576,7 +576,8 @@ Worker 自动清理超过 `retention_days`（默认 30 天）的任务日志，�
 | | POST | /instances/{id}/tasks/{tid}/retry | 重试任务 |
 | | POST | /instances/{id}/tasks/{tid}/kill | 终止任务 |
 | | GET | /instances/{id}/tasks/{tid}/logs | 获取任务日志 |
-| | GET | /instances/{id}/tasks/{tid}/logs/stream | SSE 日志流 |
+| | GET | /instances/{id}/tasks/{tid}/logs/ticket | 换发一次性 SSE 票据 |
+| | GET | /instances/{id}/tasks/{tid}/logs/stream | SSE 日志流（用一次性 ticket 认证） |
 | **Users** | GET | /users/me | 获取当前用户 |
 | | GET | /users | 获取用户列表 |
 | | POST | /users | 创建用户 |

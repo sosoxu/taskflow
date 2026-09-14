@@ -10,6 +10,7 @@
 #include "common/util/password_util.h"
 #include "common/util/crypto_util.h"
 #include "common/util/jwt_util.h"
+#include "common/util/sse_ticket_store.h"
 #include "common/util/uuid.h"
 #include "common/database/database_manager.h"
 
@@ -723,6 +724,103 @@ TEST_CASE("TokenBlacklist: same jti re-added with new exp", "[jwt_blacklist_exp]
         std::chrono::system_clock::now().time_since_epoch()).count() + 3600;
     blacklist.add(jti, future_exp);
     REQUIRE(blacklist.isBlacklisted(jti));
+}
+
+// ============================================================================
+// Fix #343: SSE 一次性票据（SseTicketStore）
+// 票据以 DB 为真值源，和 TokenBlacklist 一样依赖 TF_TEST_DB_CONN；
+// 未提供 DB 时只验证 fail-closed 行为（签发失败、消费拒绝）。
+// ============================================================================
+static bool sseTicketDbAvailable() {
+    static bool attempted = false;
+    static bool available = false;
+    if (!attempted) {
+        attempted = true;
+        const char* conn = std::getenv("TF_TEST_DB_CONN");
+        if (conn && *conn) {
+            try {
+                auto& db = taskflow::common::database::DatabaseManager::instance();
+                db.init(conn, 1, 2);
+                auto probe = db.withReadTransaction<bool>(
+                    [](pqxx::nontransaction& txn) -> bool {
+                        txn.exec("SELECT 1 FROM sse_tickets LIMIT 1");
+                        return true;
+                    });
+                available = probe.ok() && probe.value();
+            } catch (const std::exception&) {
+                available = false;
+            }
+        }
+    }
+    return available;
+}
+
+TEST_CASE("SseTicketStore: issue then consume is single-use", "[sse_ticket]") {
+    auto& store = SseTicketStore::instance();
+    // 先探测/初始化连接池：DatabaseManager 未 init 时 issue() 会 fail-closed
+    const bool db_available = sseTicketDbAvailable();
+    const std::string instance_id = generateUuid();
+    const std::string task_instance_id = generateUuid();
+
+    auto ticket = store.issue("user-1", "alice", "operator", instance_id, task_instance_id);
+
+    if (!db_available) {
+        // 无 DB：fail-closed——签不出来，消费也必然失败
+        REQUIRE(ticket.empty());
+        REQUIRE_FALSE(store.consume("whatever").has_value());
+        return;
+    }
+
+    // 32 字节 CSPRNG 随机数的十六进制表示
+    REQUIRE(ticket.size() == 64);
+
+    auto first = store.consume(ticket);
+    REQUIRE(first.has_value());
+    REQUIRE(first->user_id == "user-1");
+    REQUIRE(first->username == "alice");
+    REQUIRE(first->role == "operator");
+    // 票据携带签发时绑定的资源，供调用方核对
+    REQUIRE(first->instance_id == instance_id);
+    REQUIRE(first->task_instance_id == task_instance_id);
+
+    // 单次有效：同一个 ticket 第二次消费必须失败
+    REQUIRE_FALSE(store.consume(ticket).has_value());
+}
+
+TEST_CASE("SseTicketStore: unknown or empty ticket is rejected", "[sse_ticket]") {
+    auto& store = SseTicketStore::instance();
+    REQUIRE_FALSE(store.consume("deadbeef").has_value());
+    REQUIRE_FALSE(store.consume("").has_value());
+}
+
+TEST_CASE("SseTicketStore: expired ticket is rejected", "[sse_ticket]") {
+    if (!sseTicketDbAvailable()) {
+        return;
+    }
+
+    auto& store = SseTicketStore::instance();
+    const std::string ticket = "expired-" + generateUuid();
+
+    // 直接落一条已过期票据（issue() 不接受非正 TTL，无法用它构造过期数据）
+    auto& db = taskflow::common::database::DatabaseManager::instance();
+    auto inserted = db.withTransaction<bool>([&](pqxx::work& txn) -> bool {
+        txn.exec_params(
+            "INSERT INTO sse_tickets "
+            "(ticket, user_id, username, role, instance_id, task_instance_id, expires_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, NOW() - INTERVAL '1 second')",
+            ticket, "user-x", "x", "admin", generateUuid(), generateUuid());
+        return true;
+    });
+    REQUIRE(inserted.ok());
+
+    REQUIRE_FALSE(store.consume(ticket).has_value());
+}
+
+TEST_CASE("SseTicketStore: issue requires user and resource ids", "[sse_ticket]") {
+    auto& store = SseTicketStore::instance();
+    REQUIRE(store.issue("", "u", "admin", "inst", "task").empty());
+    REQUIRE(store.issue("u", "u", "admin", "", "task").empty());
+    REQUIRE(store.issue("u", "u", "admin", "inst", "").empty());
 }
 
 // ============================================================================

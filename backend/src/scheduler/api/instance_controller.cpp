@@ -3,6 +3,7 @@
 #include <cctype>
 #include <sstream>
 #include <drogon/HttpResponse.h>
+#include "common/util/sse_ticket_store.h"
 #include "scheduler/api/response_util.h"
 
 namespace taskflow::scheduler::api {
@@ -385,6 +386,51 @@ void InstanceController::getTaskLog(
     sendSuccess(std::move(callback), response);
 }
 
+// Fix #343: 换发一次性 SSE 票据。前端先带 Authorization 头调用这里拿到 ticket，
+// 再用 ticket 建立 EventSource，避免把 access_token 放进 URL query。
+void InstanceController::issueTaskLogTicket(
+    const drogon::HttpRequestPtr& req,
+    std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+    const std::string& id,
+    const std::string& taskInstanceId) {
+
+    if (!isValidUUID(id)) {
+        sendError(std::move(callback), 400, 40001, "Invalid ID format: must be a valid UUID");
+        return;
+    }
+    if (!isValidUUID(taskInstanceId)) {
+        sendError(std::move(callback), 400, 40001, "Invalid task instance ID format: must be a valid UUID");
+        return;
+    }
+
+    std::string user_id = req->getAttributes()->get<std::string>("user_id");
+    std::string username = req->getAttributes()->get<std::string>("username");
+    std::string role = req->getAttributes()->get<std::string>("role");
+
+    // 任务实例必须存在。资源级权限（owner/admin）不在这里放宽——streamTaskLog
+    // 会用票据携带的同一身份重新校验一遍，票据本身不构成额外权限。
+    auto validate_result = instance_service_->validateTaskInstance(id, taskInstanceId);
+    if (!validate_result.ok()) {
+        sendError(std::move(callback), 404, 40404, validate_result.error());
+        return;
+    }
+
+    auto ticket = common::util::SseTicketStore::instance().issue(
+        user_id, username, role, id, taskInstanceId);
+    if (ticket.empty()) {
+        // fail-closed：签发不出来就不给票据，前端提示重试
+        sendError(std::move(callback), 503, 50301, "签发日志流票据失败，请稍后重试");
+        return;
+    }
+
+    nlohmann::json response = {
+        {"ticket", ticket},
+        {"expires_in", common::util::SseTicketStore::kDefaultTtlSeconds},
+    };
+
+    sendSuccess(std::move(callback), response);
+}
+
 void InstanceController::streamTaskLog(
     const drogon::HttpRequestPtr& req,
     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
@@ -404,6 +450,18 @@ void InstanceController::streamTaskLog(
     // Fix #134: resource-level permission check
     std::string user_id = req->getAttributes()->get<std::string>("user_id");
     std::string role = req->getAttributes()->get<std::string>("role");
+
+    // Fix #343: 用 ticket 连接时，票据绑定的资源必须与请求的资源一致，
+    // 否则一张泄露的票据可以被挪去请求别的实例/任务。
+    auto attrs = req->getAttributes();
+    if (attrs->find("sse_ticket_instance_id")) {
+        const auto& bound_instance = attrs->get<std::string>("sse_ticket_instance_id");
+        const auto& bound_task = attrs->get<std::string>("sse_ticket_task_instance_id");
+        if (bound_instance != id || bound_task != taskInstanceId) {
+            sendError(std::move(callback), 401, 40101, "票据与请求资源不匹配");
+            return;
+        }
+    }
 
     // Validate the task instance exists
     auto validate_result = instance_service_->validateTaskInstance(id, taskInstanceId);

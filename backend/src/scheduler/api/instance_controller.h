@@ -23,6 +23,8 @@ public:
     ADD_METHOD_TO(InstanceController::listInstances, "/api/v1/workflows/{id}/instances", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::listAllInstances, "/api/v1/instances", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::getTaskLog, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
+    // Fix #343: SSE 一次性票据换发（用 Authorization 头调用，票据再用于流式接口）
+    ADD_METHOD_TO(InstanceController::issueTaskLogTicket, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs/ticket", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     ADD_METHOD_TO(InstanceController::streamTaskLog, "/api/v1/instances/{id}/tasks/{taskInstanceId}/logs/stream", drogon::Get, "taskflow::scheduler::middleware::AuthFilter", "taskflow::scheduler::middleware::RoleFilter");
     METHOD_LIST_END
 
@@ -68,6 +70,11 @@ public:
                     std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                     const std::string& id,
                     const std::string& taskInstanceId);
+
+    void issueTaskLogTicket(const drogon::HttpRequestPtr& req,
+                            std::function<void(const drogon::HttpResponsePtr&)>&& callback,
+                            const std::string& id,
+                            const std::string& taskInstanceId);
 
     void streamTaskLog(const drogon::HttpRequestPtr& req,
                        std::function<void(const drogon::HttpResponsePtr&)>&& callback,

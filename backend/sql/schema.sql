@@ -175,6 +175,25 @@ ALTER TABLE token_blacklist OWNER TO taskflow;
 CREATE INDEX idx_token_blacklist_expires ON token_blacklist(expires_at);
 
 -- ============================================================
+-- 9. SSE 一次性票据表（Fix #343）
+-- EventSource 不能带自定义头，此前 SSE 只能把 access_token 放进 URL query，
+-- 会落进 nginx/代理访问日志与浏览器历史。改为先用带 Authorization 头的
+-- 请求换发一次性 ticket（30s 有效、绑定实例与任务、消费即失效）。
+-- ============================================================
+CREATE TABLE sse_tickets (
+    ticket            VARCHAR(64) PRIMARY KEY,
+    user_id           VARCHAR(64) NOT NULL,
+    username          VARCHAR(64) NOT NULL DEFAULT '',
+    role              VARCHAR(32) NOT NULL,
+    instance_id       VARCHAR(64) NOT NULL,
+    task_instance_id  VARCHAR(64) NOT NULL,
+    expires_at        TIMESTAMPTZ NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE sse_tickets OWNER TO taskflow;
+CREATE INDEX idx_sse_tickets_expires ON sse_tickets(expires_at);
+
+-- ============================================================
 -- 初始管理员用户（密码: admin123，bcrypt hash）
 -- Fix #309: Replace the incorrect $2a$ hash with a verified $2b$ hash.
 -- ============================================================

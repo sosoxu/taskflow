@@ -3,6 +3,7 @@ add_library(taskflow_common STATIC
     config/worker_config.cpp
     database/database_manager.cpp
     util/crypto_util.cpp
+    util/sse_ticket_store.cpp
     util/token_blacklist.cpp
     util/ssh_executor.cpp
 )

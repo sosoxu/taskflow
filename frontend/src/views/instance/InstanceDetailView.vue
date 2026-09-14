@@ -546,9 +546,12 @@ async function fetchLog() {
   }
 }
 
-function startLogStream() {
+async function startLogStream() {
   if (!instance.value || !currentLogTask.value) return
-  logSse.start(getTaskLogStreamUrl(instance.value.id, currentLogTask.value.id))
+  const instanceId = instance.value.id
+  const taskInstanceId = currentLogTask.value.id
+  // Fix #343: 每次（重）连都重新换发一次性票据，URL 里不再出现 access_token
+  await logSse.start(() => getTaskLogStreamUrl(instanceId, taskInstanceId))
 }
 
 function stopLogStream() {

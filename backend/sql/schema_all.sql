@@ -177,6 +177,22 @@ ALTER TABLE token_blacklist OWNER TO taskflow;
 CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);
 
 -- ============================================================
+-- 9. SSE 一次性票据表（Fix #343：SSE 不再把 access_token 放进 URL）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sse_tickets (
+    ticket            VARCHAR(64) PRIMARY KEY,
+    user_id           VARCHAR(64) NOT NULL,
+    username          VARCHAR(64) NOT NULL DEFAULT '',
+    role              VARCHAR(32) NOT NULL,
+    instance_id       VARCHAR(64) NOT NULL,
+    task_instance_id  VARCHAR(64) NOT NULL,
+    expires_at        TIMESTAMPTZ NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE sse_tickets OWNER TO taskflow;
+CREATE INDEX IF NOT EXISTS idx_sse_tickets_expires ON sse_tickets(expires_at);
+
+-- ============================================================
 -- 初始管理员用户（密码: admin123，bcrypt hash）
 -- ============================================================
 INSERT INTO users (username, password_hash, role)
@@ -205,6 +221,7 @@ BEGIN
         ALTER TABLE task_instances OWNER TO taskflow;
         ALTER TABLE cron_jobs OWNER TO taskflow;
         ALTER TABLE token_blacklist OWNER TO taskflow;
+        ALTER TABLE sse_tickets OWNER TO taskflow;
         -- 索引和序列也需一并修改所有权
         ALTER INDEX idx_users_username OWNER TO taskflow;
         ALTER INDEX idx_tasks_name_active OWNER TO taskflow;
@@ -223,6 +240,7 @@ BEGIN
         ALTER INDEX idx_cron_jobs_enabled OWNER TO taskflow;
         ALTER INDEX idx_cron_jobs_next_trigger OWNER TO taskflow;
         ALTER INDEX idx_token_blacklist_expires OWNER TO taskflow;
+        ALTER INDEX idx_sse_tickets_expires OWNER TO taskflow;
         RAISE NOTICE 'All tables and indexes ownership set to taskflow';
     ELSE
         RAISE NOTICE 'Current user is not superuser, skipping ownership transfer';

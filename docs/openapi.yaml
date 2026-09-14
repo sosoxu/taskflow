@@ -709,16 +709,66 @@ paths:
                           is_complete:
                             type: boolean
 
-  /api/v1/instances/{id}/tasks/{taskInstanceId}/logs/stream:
+  /api/v1/instances/{id}/tasks/{taskInstanceId}/logs/ticket:
     get:
       tags: [Instances]
-      summary: 流式获取任务实例日志（SSE）
-      operationId: streamTaskLog
+      summary: 换发一次性 SSE 票据（Fix #343）
+      description: |
+        EventSource 不支持自定义请求头，此前 SSE 只能把 access_token 放进 URL，
+        token 会落进 nginx/代理访问日志与浏览器历史。改为先用本接口（带
+        Authorization 头）换发一次性 ticket，再用 ticket 建立流式连接。
+        票据 30 秒内有效、只能消费一次，并绑定签发时的实例与任务。
+      operationId: issueTaskLogTicket
       security:
         - BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/InstanceId"
         - $ref: "#/components/parameters/TaskInstanceId"
+      responses:
+        "200":
+          description: 票据签发成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          ticket:
+                            type: string
+                            description: 一次性票据（64 位十六进制）
+                          expires_in:
+                            type: integer
+                            description: 有效期（秒）
+        "401":
+          description: 未认证
+        "404":
+          description: 实例或任务实例不存在
+        "503":
+          description: 票据签发失败（数据库不可用）
+
+  /api/v1/instances/{id}/tasks/{taskInstanceId}/logs/stream:
+    get:
+      tags: [Instances]
+      summary: 流式获取任务实例日志（SSE）
+      operationId: streamTaskLog
+      description: |
+        Fix #343: 认证方式改为一次性 ticket（query 参数 `ticket`），不再接受
+        把 access_token 放进 query。ticket 由 /logs/ticket 换发，单次有效，
+        且必须与本请求的实例、任务一致。
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+        - $ref: "#/components/parameters/TaskInstanceId"
+        - name: ticket
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 由 /logs/ticket 换发的一次性票据
       responses:
         "200":
           description: SSE 事件流
@@ -727,6 +777,8 @@ paths:
               schema:
                 type: string
                 description: Server-Sent Events 流
+        "401":
+          description: 票据无效、已使用、已过期，或与请求资源不匹配
 
   # ---------------------------------------------------------------------------
   # Users
