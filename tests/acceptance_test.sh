@@ -3,7 +3,7 @@
 # 覆盖所有 API 端点和关键业务场景
 set -o pipefail
 
-BASE_URL="http://localhost:8080/api/v1"
+BASE_URL="${BASE_URL:-http://localhost:8080/api/v1}"
 PASS=0
 FAIL=0
 ISSUES=()
@@ -554,6 +554,11 @@ fi
 # ============================================================
 info "===== 10. 资源级权限校验 ====="
 
+# 已知问题（待确认设计）：triggerWorkflow 接收 creator_id/role 但未做归属校验，
+# 因此 operator 目前可以触发 admin 创建的工作流（实例归属触发者本人）。
+# 而实例级操作（查看/暂停/取消）是有归属校验的——两者不一致。
+# 这里保留断言不掩盖问题：若确认"operator 可运行任意工作流"是预期行为，
+# 再改为断言 200 并补文档。
 OPERATOR_TRIGGER=$(curl -s "$BASE_URL/workflows/${SIMPLE_WF_ID}/trigger" -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' -d '{}')
 if [ "$(jcode "$OPERATOR_TRIGGER")" != "0" ]; then
     pass_test "operator不能触发admin的工作流（资源级权限正确）"
@@ -628,10 +633,18 @@ else
 fi
 
 BIG_PAGE=$(api_get "/tasks?page=1&page_size=10000")
-if [ "$(jcode "$BIG_PAGE")" = "0" ]; then
-    pass_test "超大分页请求正常处理"
+# Fix #169/#314: page/page_size 有上限校验（page_size > 100 直接 400）。
+# 本用例此前断言超大 page_size 应成功，与现行校验相反。
+NORMAL_PAGE=$(api_get "/tasks?page=1&page_size=10")
+if [ "$(jcode "$NORMAL_PAGE")" = "0" ]; then
+    pass_test "正常分页请求处理成功"
 else
-    fail_test "超大分页请求异常"
+    fail_test "正常分页请求异常"
+fi
+if [ "$(jcode "$BIG_PAGE")" != "0" ]; then
+    pass_test "超出上限的 page_size 被拒绝 (10000 > 100)"
+else
+    fail_test "超出上限的 page_size 未被拒绝"
 fi
 
 SPECIAL_NAME=$(api_post "/tasks" "{\"name\":\"test-task-with-dashes-${TS}\",\"type\":\"command\",\"config_json\":{\"command\":\"echo test\"},\"timeout\":30}")

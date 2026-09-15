@@ -2,7 +2,7 @@
 # TaskFlow 集成测试脚本 - 测试任务和工作流的创建、执行等情况
 set -o pipefail
 
-BASE_URL="http://localhost:8080/api/v1"
+BASE_URL="${BASE_URL:-http://localhost:8080/api/v1}"
 TOKEN=""
 PASS=0
 FAIL=0

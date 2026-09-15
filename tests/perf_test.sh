@@ -11,7 +11,7 @@
 #   - 错误率与稳定性
 set -o pipefail
 
-BASE_URL="http://localhost:8080/api/v1"
+BASE_URL="${BASE_URL:-http://localhost:8080/api/v1}"
 RESULTS_DIR="/tmp/perf_results"
 mkdir -p "$RESULTS_DIR"
 

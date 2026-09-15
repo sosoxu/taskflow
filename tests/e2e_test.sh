@@ -10,6 +10,18 @@ PASS=0
 FAIL=0
 TOTAL=0
 
+# 测试账号：用户名是全局唯一约束且软删除不释放，固定名字会让脚本只能跑一次，
+# 因此每次运行带时间戳后缀。
+E2E_USER="e2e_test_user_$(date +%s)"
+
+# 变量预初始化：脚本开了 set -u，失败分支下这些变量可能尚未赋值，
+# 直接引用会以 "unbound variable" 中断整个脚本。
+WORKFLOW_ID=""
+INSTANCE_ID=""
+CMD_TASK_ID=""
+SCRIPT_TASK_ID=""
+SQL_TASK_ID=""
+
 # 颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -66,6 +78,25 @@ assert_contains() {
     fi
 }
 
+# 删除工作流：先取消并删除它的实例，再删工作流。
+# Fix #308 之后「有实例的工作流」会被拒绝删除（400），所以清理必须先处理实例。
+delete_workflow_with_instances() {
+    local wid="$1" token="$2"
+    local inst_ids
+    inst_ids=$(curl -s -H "Authorization: Bearer $token" \
+        "$BASE_URL/api/v1/workflows/$wid/instances?page=1&page_size=100" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); items=(d.get('data') or {}).get('items') or []; print(' '.join(i['id'] for i in items))" 2>/dev/null || echo "")
+    for iid in $inst_ids; do
+        curl -s -o /dev/null -X POST -H "Authorization: Bearer $token" \
+            "$BASE_URL/api/v1/instances/$iid/cancel" || true
+        curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $token" \
+            "$BASE_URL/api/v1/instances/$iid" || true
+    done
+    # 返回最终的状态码，便于调用方断言
+    curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $token" \
+        "$BASE_URL/api/v1/workflows/$wid" || echo "000"
+}
+
 # ==================== 测试开始 ====================
 
 echo "========================================"
@@ -80,18 +111,60 @@ split_response "$resp"
 assert_status "200" "$STATUS" "Health check"
 
 # ---------- 2. 用户注册 ----------
+# ---------- 1.5 预清理：删除上次运行遗留的同名数据 ----------
+# 脚本用固定的测试名（e2e_* 任务与工作流；用户见 E2E_USER 注释），重复运行时若不清
+# 就会在"注册/创建"处得到 400，后续断言被 if 静默跳过。这里先用 admin 清场。
+log_info "=== 1.5 预清理（同名遗留数据）==="
+ADMIN_USER="${ADMIN_USER:-admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
+ADMIN_TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' \
+    "$BASE_URL/api/v1/auth/login" \
+    -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}" \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["access_token"])' 2>/dev/null || echo "")
+
+if [ -n "$ADMIN_TOKEN" ]; then
+    # 工作流要先删实例（有实例的工作流会被拒绝删除），实例是运行中的先取消
+    WF_IDS=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+        "$BASE_URL/api/v1/workflows?page=1&page_size=100" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); items=(d.get('data') or {}).get('items') or []; print(' '.join(i['id'] for i in items if i.get('name','').startswith('e2e_')))" 2>/dev/null || echo "")
+    for wid in $WF_IDS; do
+        delete_workflow_with_instances "$wid" "$ADMIN_TOKEN" >/dev/null
+    done
+
+    TASK_IDS=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+        "$BASE_URL/api/v1/tasks?page=1&page_size=100" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); items=(d.get('data') or {}).get('items') or []; print(' '.join(i['id'] for i in items if i.get('name','').startswith('e2e_')))" 2>/dev/null || echo "")
+    for tid in $TASK_IDS; do
+        curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+            "$BASE_URL/api/v1/tasks/$tid" || true
+    done
+
+    # 注意：用户是软删除，且 username 是全局唯一约束（删了也不释放名字），
+    # 所以这里不删用户——重复运行时改为复用已有账号（见下一步的注册分支）。
+    log_info "预清理完成（工作流: ${WF_IDS:-无}；任务: ${TASK_IDS:-无}）"
+else
+    log_fail "预清理失败：无法用 $ADMIN_USER 登录"
+fi
+
 log_info "=== 2. 用户注册 ==="
 resp=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
     "$BASE_URL/api/v1/auth/register" \
-    -d '{"username":"e2e_test_user","password":"test123456"}')
+    -d "{\"username\":\"$E2E_USER\",\"password\":\"test123456\"}")
 split_response "$resp"
-assert_status "200" "$STATUS" "Register user"
+if [ "$STATUS" = "200" ]; then
+    log_pass "Register user (status=200)"
+elif [ "$STATUS" = "400" ] && echo "$BODY" | grep -q "already exists"; then
+    # 用户名软删除后不释放，重复运行时直接复用已有账号登录
+    log_info "测试账号已存在，复用已有账号"
+else
+    log_fail "Register user (expected=200, actual=$STATUS)"
+fi
 
 # ---------- 3. 用户登录 ----------
 log_info "=== 3. 用户登录 ==="
 resp=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
     "$BASE_URL/api/v1/auth/login" \
-    -d '{"username":"e2e_test_user","password":"test123456"}')
+    -d "{\"username\":\"$E2E_USER\",\"password\":\"test123456\"}")
 split_response "$resp"
 assert_status "200" "$STATUS" "Login"
 TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])" 2>/dev/null || echo "")
@@ -181,6 +254,16 @@ fi
 # ---------- 10. 创建工作流（线性 DAG: A→B→C） ----------
 log_info "=== 10. 创建工作流 ==="
 if [ -n "$CMD_TASK_ID" ] && [ -n "$SCRIPT_TASK_ID" ]; then
+    # 可重复运行：先清掉上次异常退出留下的同名工作流（名称唯一约束会导致 400）
+    EXISTING_WF=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$BASE_URL/api/v1/workflows?keyword=e2e_linear_workflow&page=1&page_size=50" \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); items=(d.get('data') or {}).get('items') or []; print(' '.join(i['id'] for i in items if i.get('name')=='e2e_linear_workflow'))" 2>/dev/null || echo "")
+    for wid in $EXISTING_WF; do
+        curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" \
+            "$BASE_URL/api/v1/workflows/$wid" || true
+    done
+    [ -n "$EXISTING_WF" ] && log_info "已清理同名遗留工作流: $EXISTING_WF"
+
     resp=$(api_post "/api/v1/workflows" "{
         \"name\":\"e2e_linear_workflow\",
         \"description\":\"E2E test linear workflow A->B->C\",
@@ -217,7 +300,14 @@ if [ -n "$WORKFLOW_ID" ]; then
     resp=$(api_post "/api/v1/workflows/$WORKFLOW_ID/trigger" '{}')
     split_response "$resp"
     assert_status "200" "$STATUS" "Trigger workflow"
-    INSTANCE_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])" 2>/dev/null || echo "")
+    # Fix: 触发接口返回的是 data.instance_id（此前取 data.id 恒为空，
+    # 导致下面所有实例相关断言都被 if 静默跳过）
+    INSTANCE_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['instance_id'])" 2>/dev/null || echo "")
+    if [ -n "$INSTANCE_ID" ]; then
+        log_pass "Got instance id"
+    else
+        log_fail "Trigger did not return instance_id"
+    fi
 fi
 
 # ---------- 13. 查看执行实例详情 ----------
@@ -319,16 +409,28 @@ split_response "$resp"
 assert_status "200" "$STATUS" "List workers"
 
 # ---------- 22. 查看用户列表 ----------
-log_info "=== 22. 查看用户列表 ==="
+log_info "=== 22. 查看用户列表（非 admin 应被拒，admin 可访问）==="
 resp=$(api_get "/api/v1/users")
 split_response "$resp"
-assert_status "200" "$STATUS" "List users"
+# Fix: 用户管理接口仅 admin 可访问（RoleFilter fail-closed）。脚本此前用注册
+# 出来的普通账号断言 200，与权限设计相反；改为断言 403，并用 admin 复核 200。
+assert_status "403" "$STATUS" "List users as non-admin is forbidden"
+
+ADMIN_USER="${ADMIN_USER:-admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
+ADMIN_TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' \
+    "$BASE_URL/api/v1/auth/login" \
+    -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}" \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["access_token"])' 2>/dev/null || echo "")
+ADMIN_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE_URL/api/v1/users")
+assert_status "200" "$ADMIN_STATUS" "List users as admin"
 
 # ---------- 23. Token 刷新 ----------
 log_info "=== 23. Token 刷新 ==="
 resp=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
     "$BASE_URL/api/v1/auth/refresh" \
-    -d "{\"refresh_token\":\"$(curl -s -X POST -H 'Content-Type: application/json' $BASE_URL/api/v1/auth/login -d '{\"username\":\"e2e_test_user\",\"password\":\"test123456\"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"data\"][\"refresh_token\"])' 2>/dev/null)\"}")
+    -d "{\"refresh_token\":\"$(curl -s -X POST -H 'Content-Type: application/json' $BASE_URL/api/v1/auth/login -d "{\"username\":\"$E2E_USER\",\"password\":\"test123456\"}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["refresh_token"])' 2>/dev/null)\"}")
 split_response "$resp"
 assert_status "200" "$STATUS" "Refresh token"
 
@@ -357,7 +459,7 @@ log_info "=== 26. 清理测试数据 ==="
 # 重新登录获取新 token
 resp=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" \
     "$BASE_URL/api/v1/auth/login" \
-    -d '{"username":"e2e_test_user","password":"test123456"}')
+    -d "{\"username\":\"$E2E_USER\",\"password\":\"test123456\"}")
 split_response "$resp"
 TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])" 2>/dev/null || echo "")
 
@@ -375,6 +477,12 @@ if [ -n "$SQL_TASK_ID" ]; then
     resp=$(api_delete "/api/v1/tasks/$SQL_TASK_ID")
     split_response "$resp"
     assert_status "200" "$STATUS" "Delete SQL task"
+fi
+if [ -n "$WORKFLOW_ID" ]; then
+    # 工作流也要删掉，否则下次运行会因同名冲突在创建处失败。
+    # 先删它下面的实例——Fix #308 之后有实例的工作流会被拒绝删除。
+    WF_DELETE_STATUS=$(delete_workflow_with_instances "$WORKFLOW_ID" "$TOKEN")
+    assert_status "200" "$WF_DELETE_STATUS" "Delete workflow"
 fi
 
 # ==================== 测试结果 ====================

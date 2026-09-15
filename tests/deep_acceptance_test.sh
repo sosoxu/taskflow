@@ -3,8 +3,17 @@
 # 覆盖：任务重试、Cron调度、SQL任务、超时处理、并发执行、暂停/恢复、SSE日志流、前端实例列表
 set -o pipefail
 
-BASE_URL="http://localhost:8080/api/v1"
-FRONTEND_DIR="/workspace/taskflow/frontend"
+BASE_URL="${BASE_URL:-http://localhost:8080/api/v1}"
+# 前端目录按脚本所在位置推导（此前硬编码 /workspace/taskflow/frontend，
+# 换台机器跑就会把"前端缺实例列表页"报成失败）
+FRONTEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../frontend" 2>/dev/null && pwd)"
+
+# SQL 任务的数据库连接：默认本机，容器化部署时用环境变量指向 worker 可达的地址
+SQL_DB_HOST="${SQL_DB_HOST:-127.0.0.1}"
+SQL_DB_PORT="${SQL_DB_PORT:-5432}"
+SQL_DB_NAME="${SQL_DB_NAME:-taskflow}"
+SQL_DB_USER="${SQL_DB_USER:-taskflow}"
+SQL_DB_PASSWORD="${SQL_DB_PASSWORD:-taskflow123}"
 PASS=0
 FAIL=0
 ISSUES=()
@@ -92,11 +101,13 @@ if [ -n "$FAIL_TASK_ID" ]; then
                 fail_test "任务重试接口调用失败 (code=$RETRY_CODE)"
             fi
 
-            # 1.6 验证实例状态变为 RUNNING（重试后）
+            # 1.6 验证实例被重新拉起（重试后）
+            # 注意：重试的任务可能很快跑完，2s 后已经是 SUCCESS，因此三者都算通过；
+            # 这里要排除的是"重试没生效、实例仍停在原来的失败态"。
             sleep 2
             INSTANCE2=$(api_get "/instances/${RI_ID}")
             INST_STATUS2=$(jfield "$INSTANCE2" "['data']['status']")
-            if [ "$INST_STATUS2" = "RUNNING" ] || [ "$INST_STATUS2" = "PENDING" ]; then
+            if [ "$INST_STATUS2" = "RUNNING" ] || [ "$INST_STATUS2" = "PENDING" ] || [ "$INST_STATUS2" = "SUCCESS" ]; then
                 pass_test "重试后实例状态变为活跃 (status=$INST_STATUS2)"
             else
                 fail_test "重试后实例状态未变为活跃 (status=$INST_STATUS2)"
@@ -185,7 +196,7 @@ fi
 info "===== 3. SQL 任务 ====="
 
 # 3.1 创建 SQL 任务（查询 tasks 表）
-SQL_TASK=$(api_post "/tasks" "{\"name\":\"sql-task-${TS}\",\"type\":\"sql\",\"config_json\":{\"db_host\":\"127.0.0.1\",\"db_port\":5432,\"db_name\":\"taskflow\",\"db_user\":\"taskflow\",\"db_password\":\"taskflow123\",\"sql_statement\":\"SELECT COUNT(*) AS cnt FROM tasks\"},\"timeout\":30}")
+SQL_TASK=$(api_post "/tasks" "{\"name\":\"sql-task-${TS}\",\"type\":\"sql\",\"config_json\":{\"db_host\":\"${SQL_DB_HOST}\",\"db_port\":${SQL_DB_PORT},\"db_name\":\"${SQL_DB_NAME}\",\"db_user\":\"${SQL_DB_USER}\",\"db_password\":\"${SQL_DB_PASSWORD}\",\"sql_statement\":\"SELECT COUNT(*) AS cnt FROM tasks\"},\"timeout\":30}")
 SQL_TASK_ID=$(jfield "$SQL_TASK" "['data']['id']")
 if [ "$(jcode "$SQL_TASK")" = "0" ] && [ -n "$SQL_TASK_ID" ]; then
     pass_test "创建 SQL 任务成功"
@@ -225,7 +236,7 @@ if [ -n "$SQL_TASK_ID" ]; then
 fi
 
 # 3.4 创建无效 SQL 任务（语法错误）
-BAD_SQL_TASK=$(api_post "/tasks" "{\"name\":\"bad-sql-${TS}\",\"type\":\"sql\",\"config_json\":{\"db_host\":\"127.0.0.1\",\"db_port\":5432,\"db_name\":\"taskflow\",\"db_user\":\"taskflow\",\"db_password\":\"taskflow123\",\"sql_statement\":\"SELECT FROM nonexistent_table\"},\"timeout\":30}")
+BAD_SQL_TASK=$(api_post "/tasks" "{\"name\":\"bad-sql-${TS}\",\"type\":\"sql\",\"config_json\":{\"db_host\":\"${SQL_DB_HOST}\",\"db_port\":${SQL_DB_PORT},\"db_name\":\"${SQL_DB_NAME}\",\"db_user\":\"${SQL_DB_USER}\",\"db_password\":\"${SQL_DB_PASSWORD}\",\"sql_statement\":\"SELECT FROM nonexistent_table\"},\"timeout\":30}")
 BAD_SQL_ID=$(jfield "$BAD_SQL_TASK" "['data']['id']")
 if [ -n "$BAD_SQL_ID" ]; then
     BAD_SQL_WF=$(api_post "/workflows" "{\"name\":\"bad-sql-wf-${TS}\",\"dag_json\":{\"nodes\":[{\"id\":\"n1\",\"task_id\":\"${BAD_SQL_ID}\"}],\"edges\":[]}}")
@@ -390,18 +401,45 @@ info "===== 7. SSE 日志流 ====="
 
 # 7.1 使用一个已完成的实例获取日志流
 if [ -n "$RI_ID" ] && [ -n "$TI_ID" ]; then
-    SSE_HTTP=$(curl -s -o /tmp/sse_out.txt -w "%{http_code}" "$BASE_URL/instances/${RI_ID}/tasks/${TI_ID}/logs/stream" -H "Authorization: Bearer $TOKEN" --max-time 3 2>/dev/null)
+    # Fix #343: SSE 改为一次性票据认证——先用带 Bearer 头的请求换票，
+    # 再用 ticket 建立流（票据 30s 有效、单次使用）。
+    TICKET=$(jfield "$(api_get "/instances/${RI_ID}/tasks/${TI_ID}/logs/ticket")" "['data']['ticket']")
+    if [ -n "$TICKET" ]; then
+        pass_test "换发一次性 SSE 票据成功"
+    else
+        fail_test "换发一次性 SSE 票据失败"
+    fi
+
+    SSE_HTTP=$(curl -s -o /tmp/sse_out.txt -w "%{http_code}" "$BASE_URL/instances/${RI_ID}/tasks/${TI_ID}/logs/stream?ticket=${TICKET}" --max-time 3 2>/dev/null)
     if [ "$SSE_HTTP" = "200" ]; then
         pass_test "SSE 日志流端点返回 200"
     else
         fail_test "SSE 日志流端点异常 (HTTP=$SSE_HTTP)"
     fi
     # 7.2 验证 Content-Type 为 text/event-stream
-    SSE_CT=$(curl -s -o /dev/null -w "%{content_type}" "$BASE_URL/instances/${RI_ID}/tasks/${TI_ID}/logs/stream" -H "Authorization: Bearer $TOKEN" --max-time 3 2>/dev/null)
+    # 票据单次有效，这里必须重新换一张
+    TICKET2=$(jfield "$(api_get "/instances/${RI_ID}/tasks/${TI_ID}/logs/ticket")" "['data']['ticket']")
+    SSE_CT=$(curl -s -o /dev/null -w "%{content_type}" "$BASE_URL/instances/${RI_ID}/tasks/${TI_ID}/logs/stream?ticket=${TICKET2}" --max-time 3 2>/dev/null)
     if echo "$SSE_CT" | grep -q "text/event-stream"; then
         pass_test "SSE 日志流 Content-Type 正确 (text/event-stream)"
     else
         fail_test "SSE 日志流 Content-Type 异常 (ct=$SSE_CT)"
+    fi
+    # 7.2b Fix #343: URL query 里的 access_token 必须被拒绝（旧行为已移除）。
+    # 注意 Bearer 头本身仍然有效——那是普通 API 客户端的正常用法，
+    # 被移除的只是"把长期 token 放进 URL"这条路径。
+    QUERY_TOKEN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/instances/${RI_ID}/tasks/${TI_ID}/logs/stream?token=${TOKEN}" --max-time 3 2>/dev/null)
+    if [ "$QUERY_TOKEN_HTTP" = "401" ]; then
+        pass_test "流端点拒绝 URL 里的 access_token (401)"
+    else
+        fail_test "流端点仍接受 URL 里的 access_token (HTTP=$QUERY_TOKEN_HTTP)"
+    fi
+    # 7.2c 已使用的票据不能复用
+    REUSE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/instances/${RI_ID}/tasks/${TI_ID}/logs/stream?ticket=${TICKET2}" --max-time 3 2>/dev/null)
+    if [ "$REUSE_HTTP" = "401" ]; then
+        pass_test "已使用的票据不可复用 (401)"
+    else
+        fail_test "票据可被复用 (HTTP=$REUSE_HTTP)"
     fi
     # 7.3 验证响应包含 data: 前缀（SSE 格式）
     if grep -q "^data:" /tmp/sse_out.txt 2>/dev/null; then
