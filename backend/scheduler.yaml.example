@@ -1,5 +1,9 @@
 server:
   http_port: 8080
+  # Fix #344: HTTP 监听地址。默认 0.0.0.0（容器内全部网卡）。
+  # TLS 部署（nginx 前置终止）时建议收紧为容器内网地址，例如 172.16.0.0/12
+  # 网段内的地址，确保明文 HTTP 端口不直接暴露。
+  http_bind_address: "0.0.0.0"
   grpc_port: 50051
   # Fix #326: gRPC 内部认证 token。为空表示不启用（仅限本地开发）。
   # 生产部署必须设置随机值，且与所有 worker 的 worker.yaml 保持一致，

@@ -40,3 +40,8 @@ __pycache__/
 # Large image archives (offline distribution artifacts, keep out of git)
 *.tar
 *.tar.gz
+
+# TLS 证书与私钥（Fix #344）：只放宿主机，绝不入库
+certs/
+*.pem
+*.key

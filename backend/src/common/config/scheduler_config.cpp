@@ -21,6 +21,10 @@ SchedulerConfig SchedulerConfig::load(const std::string& config_path) {
     if (root["server"]) {
         auto s = root["server"];
         if (s["http_port"]) config.server.http_port = s["http_port"].as<int>();
+        // Fix #344: HTTP 监听地址（TLS 部署下收紧为内网地址）
+        if (s["http_bind_address"]) {
+            config.server.http_bind_address = s["http_bind_address"].as<std::string>();
+        }
         if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
         // Fix #312: configurable IO thread count
         if (s["thread_num"]) config.server.thread_num = s["thread_num"].as<int>();
@@ -119,6 +123,10 @@ void SchedulerConfig::validate() const {
     }
     if (server.http_port <= 0 || server.http_port > 65535) {
         throw std::runtime_error("配置错误: server.http_port 无效");
+    }
+    // Fix #344: 监听地址不能为空（drogon addListener 传入空串会绑定失败）
+    if (server.http_bind_address.empty()) {
+        throw std::runtime_error("配置错误: server.http_bind_address 不能为空");
     }
     if (server.grpc_port <= 0 || server.grpc_port > 65535) {
         throw std::runtime_error("配置错误: server.grpc_port 无效");

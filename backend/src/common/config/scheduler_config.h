@@ -77,6 +77,10 @@ struct TlsConfig {
 
 struct ServerConfig {
     int http_port = 8080;
+    // Fix #344: HTTP 监听地址。默认 0.0.0.0（容器内所有网卡，由是否发布端口
+    // 决定对外暴露）；TLS 部署（nginx 前置终止）时可收紧为容器内网地址，
+    // 保证明文 HTTP 端口不出内网。
+    std::string http_bind_address = "0.0.0.0";
     int grpc_port = 50051;
     // Fix #312: Configurable drogon IO thread count. Default 16 (was hardcoded 4).
     // bcrypt password verification (~100ms) blocks IO threads; more threads

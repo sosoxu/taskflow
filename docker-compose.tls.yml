@@ -1,0 +1,42 @@
+# Fix #344: TLS 部署 overlay（方案 B —— nginx 前置终止 TLS，scheduler 只听内网）。
+#
+# 用法：
+#   1) 准备证书到 ./certs（自签自测：bash scripts/gen-self-signed-cert.sh localhost）
+#   2) docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#   3) 浏览器访问 https://<主机>；80 端口只做 301 跳转
+#
+# 与基础 compose 的差异：
+# - frontend 用 TLS 模板（8443 终止 TLS）+ 证书挂载，映射 443:8443 与 80:8080；
+# - scheduler 与 postgres 不再向宿主机发布端口（ports: !reset），
+#   只在 compose 内网可达——明文 HTTP/gRPC/数据库端口都不出内网；
+# - 需要 Docker Compose v2.24+（!reset 清空 / !override 整体替换的语法）：
+#   postgres 与 scheduler 用 !reset 去掉基础 compose 里的端口发布，
+#   frontend 用 !override 把端口整体换成 80 与 443（列表是追加语义，不能用 !reset）。
+#
+# 证书与密钥不进仓库（见 .gitignore 的 certs/）。
+
+services:
+  postgres:
+    # 数据库只在内网可达
+    ports: !reset []
+
+  scheduler:
+    # 明文 HTTP(8080)/gRPC(50051) 只在内网可达，由 frontend 的 nginx 代理进来。
+    # 需要更严格的绑定（例如 K8s hostNetwork、扁平网络）时，在 scheduler.yaml 里
+    # 设置 server.http_bind_address 为内网地址即可。
+    ports: !reset []
+
+  frontend:
+    ports: !override
+      - "80:8080"
+      - "443:8443"
+    environment:
+      # 只替换 TLS_/TASKFLOW_ 前缀的变量，避免误伤 nginx 自身的 $host/$uri 等
+      NGINX_ENVSUBST_FILTER: "^(TLS_|TASKFLOW_)"
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-server.crt}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-server.key}
+      # HSTS。自签证书环境请设为 0，避免浏览器把该主机永久锁定到 HTTPS。
+      TASKFLOW_HSTS_MAX_AGE: ${TASKFLOW_HSTS_MAX_AGE:-31536000}
+    volumes:
+      - ./frontend/nginx.tls.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./certs:/etc/nginx/certs:ro

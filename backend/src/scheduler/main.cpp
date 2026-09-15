@@ -208,7 +208,9 @@ int main(int argc, char* argv[]) {
     // password verification (~100ms) blocks the calling IO thread.
     drogon::app()
         .setLogPath("./logs")
-        .addListener("0.0.0.0", config.server.http_port)
+        // Fix #344: 监听地址可配置——TLS 部署（nginx 前置终止）时收紧为内网
+        // 地址，避免明文 HTTP 端口直接暴露在公网。
+        .addListener(config.server.http_bind_address, config.server.http_port)
         .setThreadNum(config.server.thread_num);
 
     // 配置静态资源服务
