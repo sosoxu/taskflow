@@ -271,7 +271,49 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
         result.steps.push_back(log);
     }
 
-    // Step 5: start the worker with setsid, detaching it from the SSH session.
+    // Step 5: stop a worker previously deployed for the same node.
+    // 重复部署同一节点时若把旧进程留着，两个 worker 会注册成同一个 worker 名：
+    // 端口自动分配后虽然不会撞端口，但注册行的地址/心跳会在两条进程之间来回
+    // 覆盖，running_tasks 等状态也会抖动。这里按「配置文件路径」精确匹配，
+    // 不会误杀同机上的其他 worker（每个 worker 的配置文件名就是它的 name）。
+    {
+        DeployStepLog log{"停止旧进程", false, ""};
+        // 用 [w]orker 的括号写法：pgrep/pkill -f 会匹配整条命令行，直接写
+        // worker 会让它们匹配到执行这段脚本的 shell 自身。
+        const std::string pattern = "[w]orker --config " + config_path;
+        const std::string quoted_pattern = shellSingleQuote(pattern);
+        std::string stop_cmd =
+            "if command -v pgrep >/dev/null 2>&1 && pgrep -f " + quoted_pattern + " >/dev/null 2>&1; then "
+            "pkill -TERM -f " + quoted_pattern + " || true; "
+            "for i in $(seq 1 10); do pgrep -f " + quoted_pattern + " >/dev/null 2>&1 || break; sleep 1; done; "
+            "if pgrep -f " + quoted_pattern + " >/dev/null 2>&1; then "
+            "pkill -KILL -f " + quoted_pattern + " || true; sleep 1; "
+            "fi; "
+            "if pgrep -f " + quoted_pattern + " >/dev/null 2>&1; then echo still_running; else echo stopped; fi; "
+            "else echo not_running; fi";
+
+        auto r = ssh.execute(stop_cmd, 30);
+        if (!r.ok()) {
+            log.message = r.error();
+            result.steps.push_back(log);
+            result.success = false;
+            result.message = "停止旧 worker 失败: " + r.error();
+            return result;
+        }
+        const std::string& out = r.value().output;
+        if (out.find("still_running") != std::string::npos) {
+            log.message = "旧进程未能在 10s 内退出（SIGTERM/SIGKILL 均已尝试）";
+            result.steps.push_back(log);
+            result.success = false;
+            result.message = "停止旧 worker 失败：进程仍在运行，请先手工处理该节点上的 worker";
+            return result;
+        }
+        log.success = true;
+        log.message = out.find("stopped") != std::string::npos ? "旧 worker 已停止" : "未发现旧进程";
+        result.steps.push_back(log);
+    }
+
+    // Step 6: start the worker with setsid, detaching it from the SSH session.
     // The worker reads its config via --config and self-registers with the
     // scheduler over gRPC on startup.
     {
@@ -328,7 +370,7 @@ common::result::Result<WorkerDeployResult> WorkerDeployService::deploy(const Wor
         }
     }
 
-    // Step 6: briefly verify the process is still alive (not crashed on boot).
+    // Step 7: briefly verify the process is still alive (not crashed on boot).
     // Non-fatal: this is a best-effort diagnostic. The worker self-registers
     // via gRPC, so the worker list is the source of truth. A detection miss
     // (race, unusual ps format) should NOT fail an otherwise-successful deploy.

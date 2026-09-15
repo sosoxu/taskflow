@@ -8,7 +8,7 @@
 #   4. 任务日志接口能看到远程节点的输出
 #   5. worker 收到 SIGTERM 后优雅注销，节点立即离线
 #   6. 重新部署后恢复在线并能继续执行
-#   7. 重复部署：端口自动分配，两个 worker 不会复用同一端口
+#   7. 重复部署：先停掉旧 worker 再启动新的（端口自动分配，不残留双进程）
 #
 # 使用方式:
 #   ./tests/ssh_deploy_e2e.sh
@@ -234,18 +234,31 @@ docker exec "$NODE" bash -c "grep -q '$MARKER' /home/$SSH_USER/taskflow-worker/l
     && log_pass "远程节点本地日志文件存在" || log_fail "远程节点本地日志缺失"
 
 # ---------------------------------------------------------------------------
-log_info "步骤 4: 重复部署（端口自动分配，不复用同一端口）"
-api_post /workers/deploy "$DEPLOY_BODY" >/dev/null
-sleep 3
+log_info "步骤 4: 重复部署（替换旧进程，端口自动分配）"
+PID1="$(docker exec "$NODE" bash -c "ps -ef | awk '/[w]orker --config/ {print \$2}' | head -1")"
+DEPLOY2="$(api_post /workers/deploy "$DEPLOY_BODY")"
+STOP_STEP="$(echo "$DEPLOY2" | jget 'next((s["message"] for s in d["data"]["steps"] if s["step"]=="停止旧进程"), "")')"
+[ "$(echo "$DEPLOY2" | jget 'd["data"]["success"]')" = "True" ] \
+    && log_pass "重复部署成功（停止旧进程: ${STOP_STEP:-无此步骤}）" || log_fail "重复部署失败: $(echo "$DEPLOY2" | head -c 300)"
+
+procs="$(docker exec "$NODE" bash -c "ps -ef | grep -c '[w]orker --config'")"
+[ "$procs" = "1" ] && log_pass "远程节点上只剩 1 个 worker 进程" \
+    || log_fail "远程节点上有 $procs 个 worker 进程（应替换旧进程）"
+if [ -n "$PID1" ] && docker exec "$NODE" bash -c "kill -0 $PID1 2>/dev/null"; then
+    log_fail "旧 worker 进程 (pid=$PID1) 仍在运行"
+else
+    log_pass "旧 worker 进程 (pid=$PID1) 已被停止"
+fi
+wait_for 30 "重新注册上线" bash -c "[ \"\$(curl -s -H 'Authorization: Bearer $TOKEN' $BASE/workers | python3 -c \"import json,sys; d=json.load(sys.stdin)['data']; items=d.get('items') or d; print(next((w['status'] for w in items if w['name']=='e2e-node-1'), ''))\")\" = online ]" \
+    || log_fail "重复部署后节点未上线"
+
 ADDR2="$(addr_of)"
 PORT2="${ADDR2##*:}"
-if [ -n "$PORT2" ] && [ "$PORT2" -gt 0 ] 2>/dev/null && [ "$PORT1" != "$PORT2" ]; then
-    log_pass "重复部署后使用不同端口: $PORT1 -> $PORT2"
+if [ -n "$PORT2" ] && [ "$PORT2" -gt 0 ] 2>/dev/null; then
+    log_pass "重新部署后注册地址: $ADDR2"
 else
-    log_fail "重复部署未换端口（addr1=$ADDR1 addr2=$ADDR2）"
+    log_fail "注册地址异常: '$ADDR2'"
 fi
-procs="$(docker exec "$NODE" bash -c "ps -ef | grep -c '[w]orker --config'")"
-[ "$procs" -ge 2 ] && log_info "远程节点上有 $procs 个 worker 进程（重复部署不替换旧进程，见脚本头部说明）"
 docker exec "$NODE" bash -c "grep -q 'gRPC 服务启动失败' /home/$SSH_USER/taskflow-worker/logs/worker.log" \
     && log_fail "worker 日志出现 gRPC 启动失败" || log_pass "worker 日志无 gRPC 启动失败"
 
