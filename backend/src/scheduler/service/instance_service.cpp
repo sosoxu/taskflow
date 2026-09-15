@@ -27,8 +27,8 @@ InstanceService::InstanceService(common::config::TlsConfig worker_tls,
     : worker_tls_(std::move(worker_tls)), grpc_auth_token_(grpc_auth_token) {}
 
 // Fix #134: Resource-level permission check. Admins bypass; non-admin users
-// must own the workflow that created the instance. Empty user_id skips
-// (internal calls from DagDriver/CronScheduler).
+// must own the instance itself（实例归属触发者，与工作流的共享语义无关）。
+// Empty user_id skips (internal calls from DagDriver/CronScheduler).
 common::result::Result<void> InstanceService::checkInstanceAccess(
     const std::string& instance_id, const std::string& user_id, const std::string& role) {
     if (user_id.empty() || role == "admin") {
@@ -39,12 +39,11 @@ common::result::Result<void> InstanceService::checkInstanceAccess(
         return common::result::Result<void>::failure(
             "Workflow instance not found: " + instance_result.error());
     }
-    auto workflow_result = workflow_dao_.findById(instance_result.value().workflow_id);
-    if (!workflow_result.ok()) {
-        return common::result::Result<void>::failure(
-            "Workflow not found: " + workflow_result.error());
-    }
-    if (workflow_result.value().creator_id != user_id) {
+    // 归属判断看「实例的创建者」，不是工作流的创建者：工作流是共享资产，
+    // operator 触发别人（含 admin）的工作流是正常用法，触发产生的实例归
+    // 触发者本人。此前用 workflow.creator_id 比较，导致 operator 触发共享
+    // 工作流后连自己刚创建的实例都无权查看/暂停/取消。
+    if (instance_result.value().creator_id != user_id) {
         return common::result::Result<void>::failure(
             "Permission denied: you do not own this workflow instance");
     }

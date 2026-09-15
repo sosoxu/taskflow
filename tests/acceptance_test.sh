@@ -554,16 +554,25 @@ fi
 # ============================================================
 info "===== 10. 资源级权限校验 ====="
 
-# 已知问题（待确认设计）：triggerWorkflow 接收 creator_id/role 但未做归属校验，
-# 因此 operator 目前可以触发 admin 创建的工作流（实例归属触发者本人）。
-# 而实例级操作（查看/暂停/取消）是有归属校验的——两者不一致。
-# 这里保留断言不掩盖问题：若确认"operator 可运行任意工作流"是预期行为，
-# 再改为断言 200 并补文档。
+# 设计约定（已确认）：工作流是共享资产，operator 的职责就是执行——只要不是
+# viewer，任何登录用户都可以触发任意工作流。触发产生的实例归属触发者本人，
+# 因此实例级操作（查看/暂停/取消）仍受归属校验保护（见下面两条断言）。
 OPERATOR_TRIGGER=$(curl -s "$BASE_URL/workflows/${SIMPLE_WF_ID}/trigger" -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' -d '{}')
-if [ "$(jcode "$OPERATOR_TRIGGER")" != "0" ]; then
-    pass_test "operator不能触发admin的工作流（资源级权限正确）"
+if [ "$(jcode "$OPERATOR_TRIGGER")" = "0" ]; then
+    pass_test "operator 可触发共享工作流（工作流为共享资产）"
 else
-    fail_test "operator可以触发admin的工作流（资源级权限缺失）"
+    fail_test "operator 触发共享工作流被拒 (code=$(jcode "$OPERATOR_TRIGGER"))"
+fi
+
+# 触发产生的实例归属触发者，因此 operator 能查看它
+OPERATOR_INST_ID=$(jfield "$OPERATOR_TRIGGER" "['data']['instance_id']")
+if [ -n "$OPERATOR_INST_ID" ]; then
+    OPERATOR_OWN_INST=$(curl -s "$BASE_URL/instances/${OPERATOR_INST_ID}" -H "Authorization: Bearer $OPERATOR_TOKEN")
+    if [ "$(jcode "$OPERATOR_OWN_INST")" = "0" ]; then
+        pass_test "operator 可查看自己触发产生的实例（实例归属触发者）"
+    else
+        fail_test "operator 无法查看自己触发产生的实例 (code=$(jcode "$OPERATOR_OWN_INST"))"
+    fi
 fi
 
 OPERATOR_INST=$(curl -s "$BASE_URL/instances/${INSTANCE_ID}" -H "Authorization: Bearer $OPERATOR_TOKEN")
