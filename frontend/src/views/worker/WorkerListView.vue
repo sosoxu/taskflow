@@ -111,8 +111,8 @@
           <el-input v-model="deployForm.host" placeholder="远程节点 IP，如 192.168.1.100" />
         </el-form-item>
         <el-form-item label="gRPC 端口" prop="grpc_port">
-          <el-input-number v-model="deployForm.grpc_port" :min="1" :max="65535" />
-          <span class="form-hint">worker 配置中的 address = IP:gRPC端口</span>
+          <el-input-number v-model="deployForm.grpc_port" :min="0" :max="65535" />
+          <span class="form-hint">0 = 自动分配（推荐，同一环境重复部署不会撞端口）</span>
         </el-form-item>
 
         <el-divider content-position="left">SSH 登录</el-divider>
@@ -224,7 +224,8 @@ const deployFormRef = ref<FormInstance>()
 const deployForm = reactive<DeployWorkerRequest>({
   name: '',
   host: '',
-  grpc_port: 50052,
+  // 0 = 自动分配，由 worker 启动时向内核申请空闲端口
+  grpc_port: 0,
   ssh_port: 22,
   ssh_username: '',
   ssh_password: '',

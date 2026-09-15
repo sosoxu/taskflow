@@ -16,6 +16,7 @@ export interface WorkerInfo {
 export interface DeployWorkerRequest {
   name: string
   host: string
+  // 0 = 自动分配（默认）：worker 启动时由内核挑空闲端口，注册时上报实际地址
   grpc_port: number
   ssh_port?: number
   ssh_username: string

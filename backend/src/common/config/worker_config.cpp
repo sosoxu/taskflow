@@ -19,7 +19,15 @@ WorkerConfig WorkerConfig::load(const std::string& config_path) {
     // server
     if (root["server"]) {
         auto s = root["server"];
-        if (s["grpc_port"]) config.server.grpc_port = s["grpc_port"].as<int>();
+        // grpc_port 支持整数或字符串 "auto"（0 与 "auto" 等价，均为自动分配）
+        if (s["grpc_port"]) {
+            const auto& port_node = s["grpc_port"];
+            if (port_node.IsScalar() && port_node.as<std::string>() == "auto") {
+                config.server.grpc_port = 0;
+            } else {
+                config.server.grpc_port = port_node.as<int>();
+            }
+        }
         if (s["advertise_address"]) config.server.advertise_address = s["advertise_address"].as<std::string>();
         // Fix #326: gRPC 内部认证 token（服务端校验 + 作为客户端访问 scheduler 的凭证）
         if (s["grpc_auth_token"]) config.server.grpc_auth_token = s["grpc_auth_token"].as<std::string>();
@@ -81,8 +89,9 @@ WorkerConfig WorkerConfig::load(const std::string& config_path) {
 }
 
 void WorkerConfig::validate() const {
-    if (server.grpc_port <= 0 || server.grpc_port > 65535) {
-        throw std::runtime_error("配置错误: server.grpc_port 无效");
+    // 0 = 自动分配（默认）；负数与超过 65535 视为配置错误
+    if (server.grpc_port < 0 || server.grpc_port > 65535) {
+        throw std::runtime_error("配置错误: server.grpc_port 无效（0 或 auto 表示自动分配）");
     }
     if (scheduler.address.empty()) {
         throw std::runtime_error("配置错误: scheduler.address 不能为空");

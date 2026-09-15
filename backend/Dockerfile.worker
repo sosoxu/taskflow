@@ -40,6 +40,7 @@ RUN groupadd -r -g 10001 taskflow && useradd -r -u 10001 -g taskflow -d /app tas
     && chown -R taskflow:taskflow /app
 USER taskflow
 
-EXPOSE 50052
+# 端口默认为 auto（启动时由内核分配，见 worker.yaml.example），因此不再固定
+# 声明 EXPOSE；scheduler 通过 worker 注册上来的实际地址回连。
 
 CMD ["/app/worker", "--config", "/app/worker.yaml"]

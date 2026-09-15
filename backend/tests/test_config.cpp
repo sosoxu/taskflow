@@ -219,9 +219,17 @@ TEST_CASE("WorkerConfig: valid config passes validation", "[config_worker]") {
 // WorkerConfig::validate() - grpc_port
 // ---------------------------------------------------------------------------
 
-TEST_CASE("WorkerConfig: grpc_port 0 throws", "[config_worker]") {
+TEST_CASE("WorkerConfig: grpc_port 0 passes (auto)", "[config_worker]") {
+    // 0 = 自动分配端口（默认）。同一环境重复部署时由内核挑空闲端口，
+    // 避免两个 worker 复用同一端口。
     auto cfg = makeValidWorkerConfig();
     cfg.server.grpc_port = 0;
+    REQUIRE_NOTHROW(cfg.validate());
+}
+
+TEST_CASE("WorkerConfig: negative grpc_port throws", "[config_worker]") {
+    auto cfg = makeValidWorkerConfig();
+    cfg.server.grpc_port = -1;
     REQUIRE_THROWS_AS(cfg.validate(), std::runtime_error);
 }
 
@@ -423,6 +431,26 @@ worker_client:
     std::remove(path.c_str());
 }
 
+TEST_CASE("WorkerConfig: grpc_port 'auto' parses to auto (0)", "[config_worker_load]") {
+    // 端口自动分配：配置里写 "auto" 与写 0 等价
+    const std::string path = "/tmp/taskflow_test_worker_auto_port.yaml";
+    {
+        std::ofstream ofs(path);
+        ofs << R"(
+server:
+  grpc_port: auto
+  advertise_address: "auto"
+)";
+    }
+
+    auto cfg = WorkerConfig::load(path);
+    REQUIRE(cfg.server.grpc_port == 0);
+    REQUIRE(cfg.server.advertise_address == "auto");
+    REQUIRE_NOTHROW(cfg.validate());
+
+    std::remove(path.c_str());
+}
+
 TEST_CASE("SchedulerConfig: load non-existent file throws", "[config_load]") {
     // Fix #263: 文件不存在时抛 std::runtime_error
     REQUIRE_THROWS_AS(SchedulerConfig::load("/tmp/taskflow_nonexistent_config.yaml"),
@@ -568,7 +596,8 @@ worker:
     }
 
     auto cfg = WorkerConfig::load(path);
-    REQUIRE(cfg.server.grpc_port == 50052);  // 默认值
+    // 默认端口为 auto（0）：由内核分配空闲端口，避免同环境复用同一端口
+    REQUIRE(cfg.server.grpc_port == 0);
     REQUIRE(cfg.scheduler.address == "localhost:50051");  // 默认值
     REQUIRE(cfg.worker.max_tasks == 15);  // 配置值
     REQUIRE(cfg.task_log.retention_days == 30);  // 默认值

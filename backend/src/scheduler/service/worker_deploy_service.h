@@ -12,7 +12,9 @@ namespace taskflow::scheduler::service {
 struct WorkerDeployRequest {
     std::string name;                 // worker name
     std::string host;                 // remote machine IP (SSH host + advertise host)
-    int grpc_port = 50052;            // worker gRPC port (server.grpc_port)
+    // worker gRPC 端口。0 = 自动分配（默认）：worker 启动时由内核挑空闲端口，
+    // 避免同一环境重复部署时两个 worker 复用同一端口。
+    int grpc_port = 0;
     int ssh_port = 22;                // SSH port
     std::string ssh_username;
     std::string ssh_password;

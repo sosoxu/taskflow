@@ -1,5 +1,8 @@
 server:
-  grpc_port: 50052
+  # 默认 auto：启动时向内核申请空闲端口。同一环境重复部署/多实例时不会撞端口，
+  # 注册给 scheduler 的地址由 worker 用「本机可路由 IPv4 + 实际端口」自行上报。
+  # 需要固定端口时写成数字（如 50052）。
+  grpc_port: auto
   # Fix #326: gRPC 内部认证 token。为空表示不启用（仅限本地开发）。
   # 必须与 scheduler.yaml 的 server.grpc_auth_token 保持一致；
   # 同时作为访问 scheduler 的注册/心跳凭证。

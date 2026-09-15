@@ -110,7 +110,9 @@ configs:
   worker_config:
     content: |
       server:
-        grpc_port: 50052
+        # 自动分配端口：每个 worker 副本由内核挑空闲端口，避免固定端口在
+        # 同机多实例（或重复部署）时被复用；实际地址随注册上报。
+        grpc_port: auto
         # Fix #326: 与 scheduler_config 中 server.grpc_auth_token 一致，
         # 同时用于注册/心跳（客户端）与本地 gRPC 服务（服务端校验）
         grpc_auth_token: "taskflow-internal-grpc-token-change-me"

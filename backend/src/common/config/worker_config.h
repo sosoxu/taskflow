@@ -14,9 +14,16 @@ struct WorkerTlsConfig {
 };
 
 struct WorkerServerConfig {
-    int grpc_port = 50052;
+    // gRPC 监听端口。0（或配置里写 "auto"）= 自动分配：绑定 0.0.0.0:0 由内核
+    // 挑一个空闲端口。默认即自动，避免同一环境里启动第二个 worker 时复用同一
+    // 端口——gRPC 默认带 SO_REUSEPORT，固定端口会让两个进程同时"监听成功"，
+    // 内核把连接轮询给两个进程，注册出同一个 worker 却各自维护内存态。
+    // 显式指定固定端口仍然支持（单机单实例部署）。
+    int grpc_port = 0;
     // Address advertised to the scheduler for inbound gRPC (host:port).
-    // Empty falls back to "localhost:<grpc_port>". Use "auto" in Docker to
+    // "auto" = 本机可路由 IPv4 + 实际监听端口（端口自动分配时必须用 auto，
+    // 否则调度器无从得知内核选了哪个端口）。
+    // Empty falls back to "localhost:<实际端口>". Use "auto" in Docker to
     // register this instance's routable IPv4 address, rather than a load-
     // balanced service name shared by multiple worker replicas.
     std::string advertise_address;

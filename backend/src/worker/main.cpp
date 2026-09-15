@@ -402,7 +402,9 @@ int main(int argc, char* argv[]) {
     initLogger(config.log);
 
     spdlog::info("TaskFlow Worker 启动中...");
-    spdlog::info("gRPC 端口: {}", config.server.grpc_port);
+    spdlog::info("gRPC 端口: {}",
+                 config.server.grpc_port > 0 ? std::to_string(config.server.grpc_port)
+                                             : std::string("auto（由内核分配）"));
     spdlog::info("Scheduler 地址: {}", config.scheduler.address);
 
     // 创建任务日志目录
@@ -447,11 +449,18 @@ int main(int argc, char* argv[]) {
     // Start accepting callbacks before registering the worker. Registration
     // makes the worker immediately eligible for scheduling, so doing it first
     // exposes a window where the scheduler can select an unreachable worker.
+    // 端口 0（默认）= 自动分配：由内核挑一个空闲端口，因此同一环境里再起一个
+    // worker 不会复用端口。selected_port 拿回实际端口，后续注册地址必须用它。
     std::string server_address = "0.0.0.0:" + std::to_string(config.server.grpc_port);
+    int selected_port = 0;
     WorkerServiceImpl service(executor, scheduler_client, config.task_log.dir,
                               config.server.grpc_auth_token);
 
     ::grpc::ServerBuilder builder;
+    // 关闭 SO_REUSEPORT：gRPC 默认允许两个进程绑定同一端口（都"启动成功"，
+    // 连接被内核轮询分配）。端口自动分配后正常不会撞车；若运维显式指定了固定
+    // 端口且已被占用，这里让启动直接失败，而不是静默共存。
+    builder.AddChannelArgument("grpc.so_reuseport", 0);
     if (config.server.tls.enabled) {
         grpc::SslServerCredentialsOptions ssl_opts;
         std::ifstream cert_file(config.server.tls.cert_path);
@@ -470,9 +479,9 @@ int main(int argc, char* argv[]) {
                                std::istreambuf_iterator<char>());
             ssl_opts.pem_root_certs = ca_str;
         }
-        builder.AddListeningPort(server_address, grpc::SslServerCredentials(ssl_opts));
+        builder.AddListeningPort(server_address, grpc::SslServerCredentials(ssl_opts), &selected_port);
     } else {
-        builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials());
+        builder.AddListeningPort(server_address, ::grpc::InsecureServerCredentials(), &selected_port);
     }
     builder.RegisterService(&service);
 
@@ -481,13 +490,24 @@ int main(int argc, char* argv[]) {
         spdlog::error("gRPC 服务启动失败");
         return 1;
     }
-    spdlog::info("TaskFlow Worker 已监听, 等待向 Scheduler 注册: {}", server_address);
+    // 自动分配时以 gRPC 回填的实际端口为准
+    const int effective_grpc_port =
+        config.server.grpc_port > 0 ? config.server.grpc_port : selected_port;
+    if (effective_grpc_port <= 0) {
+        spdlog::error("无法确定 gRPC 监听端口 (配置 {} / 实际 {})",
+                      config.server.grpc_port, selected_port);
+        server->Shutdown();
+        return 1;
+    }
+    spdlog::info("TaskFlow Worker 已监听, 等待向 Scheduler 注册: 0.0.0.0:{} (端口{})",
+                 effective_grpc_port,
+                 config.server.grpc_port > 0 ? "固定" : "自动分配");
 
     // 向 Scheduler 注册（带重试）
     std::string worker_name = config.worker.name;
     if (worker_name.empty()) {
         worker_name = "worker-" + localHostname() + "-" +
-                      std::to_string(config.server.grpc_port);
+                      std::to_string(effective_grpc_port);
     }
 
     std::string worker_address = config.server.advertise_address;
@@ -498,12 +518,12 @@ int main(int argc, char* argv[]) {
             server->Shutdown();
             return 1;
         }
-        worker_address = interface_address + ":" + std::to_string(config.server.grpc_port);
+        worker_address = interface_address + ":" + std::to_string(effective_grpc_port);
     } else if (worker_address.empty()) {
         // Fix #146: Fall back to localhost:<port> for single-host dev setups.
         // Operators must set server.advertise_address when running in Docker
         // or on a remote host so the scheduler can dial back this worker.
-        worker_address = "localhost:" + std::to_string(config.server.grpc_port);
+        worker_address = "localhost:" + std::to_string(effective_grpc_port);
     }
 
     std::string worker_id;

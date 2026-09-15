@@ -223,7 +223,8 @@ BEGIN
         ALTER TABLE token_blacklist OWNER TO taskflow;
         ALTER TABLE sse_tickets OWNER TO taskflow;
         -- 索引和序列也需一并修改所有权
-        ALTER INDEX idx_users_username OWNER TO taskflow;
+        -- Fix #356 已删除 idx_users_username（username 的 UNIQUE 约束已隐式建索引）。
+        -- 这里若继续引用它，PL/pgSQL 块会整块回滚，导致下面所有属主修改都不生效。
         ALTER INDEX idx_tasks_name_active OWNER TO taskflow;
         ALTER INDEX idx_tasks_creator OWNER TO taskflow;
         ALTER INDEX idx_tasks_type OWNER TO taskflow;

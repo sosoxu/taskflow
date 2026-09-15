@@ -54,7 +54,8 @@ void WorkerController::deployWorker(
     service::WorkerDeployRequest deployReq;
     deployReq.name = (*json).get("name", "").asString();
     deployReq.host = (*json).get("host", "").asString();
-    deployReq.grpc_port = (*json).get("grpc_port", 50052).asInt();
+    // 默认 0 = 自动分配端口（见 worker_deploy_service.h）
+    deployReq.grpc_port = (*json).get("grpc_port", 0).asInt();
     deployReq.ssh_port = (*json).get("ssh_port", 22).asInt();
     deployReq.ssh_username = (*json).get("ssh_username", "").asString();
     deployReq.ssh_password = (*json).get("ssh_password", "").asString();

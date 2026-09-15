@@ -58,7 +58,7 @@ docker-compose logs postgres
 | 50051 | Scheduler gRPC | Worker 通信端口 |
 | 5432 | PostgreSQL | 数据库端口 |
 
-> 注意：Docker Compose 部署时，仅暴露 80（前端）、8080（API）、5432（数据库）端口。Worker gRPC 端口（50052）仅在内部网络通信。
+> 注意：Docker Compose 部署时，仅暴露 80（前端）、8080（API）、5432（数据库）端口。Worker gRPC 端口默认自动分配（`grpc_port: auto`），仅在内部网络通信。
 > 启用 TLS overlay（第 10 节）后，只有 80/443 会发布到宿主机，scheduler 与 postgres 端口都会收回内网。
 
 > Fix #331 升级注意：scheduler/worker/frontend 容器现以非 root 用户运行，前端容器内监听 8080（宿主机仍映射 80:8080）。从旧版（root 容器）升级时，日志 named volume 属主为 root 会导致启动失败，需删除日志卷后重建：`docker compose down && docker volume rm <project>_scheduler-logs <project>_worker-logs <project>_worker-task-logs && docker compose up -d`（仅丢失历史日志）。
@@ -114,7 +114,9 @@ schedule:
 
 ```yaml
 server:
-  grpc_port: 50052          # gRPC 监听端口
+  # 默认 auto：内核分配空闲端口，同一环境多实例/重复部署不会复用同一端口。
+  # 需要固定端口时写成数字（如 50052）。
+  grpc_port: auto
   # Fix #326: 与 scheduler.yaml 的 server.grpc_auth_token 保持一致。
   # 同时作为访问 scheduler 的注册/心跳凭证与本机 gRPC 服务的校验凭证。
   grpc_auth_token: "change-me-to-a-random-token"

@@ -417,7 +417,8 @@ schedule:
 
 ```yaml
 server:
-  grpc_port: 50052
+  # 默认 auto：启动时由内核分配空闲端口，同一环境多实例/重复部署不会撞端口
+  grpc_port: auto
   # Docker 多 Worker 部署使用 "auto"，每个副本会注册自己的容器 IP。
   # 远程主机部署时填写 Scheduler 可访问的 host:port。
   advertise_address: "auto"
@@ -508,7 +509,7 @@ npm run type-check
 | 50051 | Scheduler gRPC | Worker 通信端口 |
 | 5432 | PostgreSQL | 数据库 |
 
-> Docker Compose 部署时，Worker gRPC 端口（50052）仅在内部网络通信，不对外暴露。
+> Docker Compose 部署时，Worker gRPC 端口默认自动分配（`grpc_port: auto`），仅在内部网络通信，不对外暴露。
 
 ### 高可用部署
 
