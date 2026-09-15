@@ -3,7 +3,7 @@
 # 覆盖之前未测试的边界场景
 set -uo pipefail
 
-BASE="http://localhost:8080"
+BASE="${BASE:-http://localhost:8080}"
 LOG_DIR="/tmp/round4_tests"
 mkdir -p "$LOG_DIR"
 

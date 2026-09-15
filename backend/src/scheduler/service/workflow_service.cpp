@@ -440,6 +440,14 @@ common::result::Result<nlohmann::json> WorkflowService::triggerWorkflow(
             "工作流不存在或已删除");
     }
 
+    // 工作流对所有登录用户「可见」，但只有创建者（与 admin）可以「操作」——
+    // 触发属于高危操作：别人的工作流里可能有敏感的运行时参数、数据库凭据等，
+    // 执行它会把这些内容带进实例与日志。编辑/删除同理（在各自接口校验）。
+    if (role != "admin" && workflow.creator_id != creator_id) {
+        return common::result::Result<nlohmann::json>::failure(
+            "权限不足：只能触发自己创建的工作流");
+    }
+
     // All authenticated users can trigger any non-deleted workflow.
     // Write operations (update/delete) still enforce ownership checks.
 

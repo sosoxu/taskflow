@@ -2,7 +2,7 @@
 # Round 5: 长耗时任务和实时任务测试
 set -uo pipefail
 
-BASE="http://localhost:8080"
+BASE="${BASE:-http://localhost:8080}"
 
 # 登录获取 token
 TOKEN=$(curl -s -X POST "$BASE/api/v1/auth/login" -H "Content-Type: application/json" \

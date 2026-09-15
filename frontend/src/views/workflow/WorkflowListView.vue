@@ -52,9 +52,10 @@
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="handleView(row)">查看</el-button>
           <!-- Fix #172: viewer 角色隐藏写操作按钮 -->
-          <el-button v-if="userStore.isOperator" link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-          <el-button v-if="userStore.isOperator" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-          <el-button v-if="userStore.isOperator" link type="success" size="small" @click="handleTrigger(row)">触发</el-button>
+          <!-- 工作流对所有人可见，但只有创建者（与 admin）能编辑/删除/触发 -->
+          <el-button v-if="canOperate(row)" link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+          <el-button v-if="canOperate(row)" link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          <el-button v-if="canOperate(row)" link type="success" size="small" @click="handleTrigger(row)">触发</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -134,6 +135,12 @@ import { useUserStore } from '../../stores/userStore'
 const router = useRouter()
 // Fix #172: viewer 角色隐藏写操作按钮
 const userStore = useUserStore()
+
+// 工作流对所有人可见，但只有创建者本人（与 admin）可以操作。
+// 触发是写操作且可能带出敏感参数，因此同样受限。
+function canOperate(row: WorkflowItem) {
+  return userStore.isOperator && (userStore.isAdmin || row.creator_id === userStore.userId)
+}
 
 const loading = ref(false)
 const workflows = ref<WorkflowItem[]>([])

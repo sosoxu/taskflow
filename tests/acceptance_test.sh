@@ -41,7 +41,7 @@ jcount() { echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); item
 # 0. 健康检查
 # ============================================================
 info "===== 0. 健康检查 ====="
-HEALTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/health)
+HEALTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/health")
 if [ "$HEALTH_HTTP" = "200" ]; then
     pass_test "健康检查端点正常"
 else
@@ -554,24 +554,46 @@ fi
 # ============================================================
 info "===== 10. 资源级权限校验 ====="
 
-# 设计约定（已确认）：工作流是共享资产，operator 的职责就是执行——只要不是
-# viewer，任何登录用户都可以触发任意工作流。触发产生的实例归属触发者本人，
-# 因此实例级操作（查看/暂停/取消）仍受归属校验保护（见下面两条断言）。
+# 设计约定（已确认）：工作流对所有人「可见」，但只能「操作」自己创建的——
+# 执行别人的工作流可能接触其运行时参数、数据库凭据等敏感内容，属高危操作。
+# 因此非创建者触发必须被拒绝（403）。
 OPERATOR_TRIGGER=$(curl -s "$BASE_URL/workflows/${SIMPLE_WF_ID}/trigger" -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' -d '{}')
-if [ "$(jcode "$OPERATOR_TRIGGER")" = "0" ]; then
-    pass_test "operator 可触发共享工作流（工作流为共享资产）"
+if [ "$(jcode "$OPERATOR_TRIGGER")" != "0" ]; then
+    pass_test "operator 不能触发他人创建的工作流（403）"
 else
-    fail_test "operator 触发共享工作流被拒 (code=$(jcode "$OPERATOR_TRIGGER"))"
+    fail_test "operator 触发了他人创建的工作流（应为 403）"
 fi
 
-# 触发产生的实例归属触发者，因此 operator 能查看它
-OPERATOR_INST_ID=$(jfield "$OPERATOR_TRIGGER" "['data']['instance_id']")
-if [ -n "$OPERATOR_INST_ID" ]; then
-    OPERATOR_OWN_INST=$(curl -s "$BASE_URL/instances/${OPERATOR_INST_ID}" -H "Authorization: Bearer $OPERATOR_TOKEN")
-    if [ "$(jcode "$OPERATOR_OWN_INST")" = "0" ]; then
-        pass_test "operator 可查看自己触发产生的实例（实例归属触发者）"
+# 但工作流本身对所有人可见（只读）
+OPERATOR_VIEW_WF=$(curl -s "$BASE_URL/workflows/${SIMPLE_WF_ID}" -H "Authorization: Bearer $OPERATOR_TOKEN")
+if [ "$(jcode "$OPERATOR_VIEW_WF")" = "0" ]; then
+    pass_test "operator 可以查看他人创建的工作流（只读可见）"
+else
+    fail_test "operator 无法查看他人创建的工作流 (code=$(jcode "$OPERATOR_VIEW_WF"))"
+fi
+
+# operator 触发自己创建的工作流应当成功（对照，证明限制只在归属上）
+OPERATOR_OWN_TASK=$(curl -s -X POST "$BASE_URL/tasks" -H "Authorization: Bearer $OPERATOR_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"operator-own-task-${TS}\",\"type\":\"command\",\"config\":{\"command\":\"echo operator-ok\"},\"timeout\":30}")
+OPERATOR_OWN_TASK_ID=$(jfield "$OPERATOR_OWN_TASK" "['data']['id']")
+OPERATOR_OWN_WF=$(curl -s -X POST "$BASE_URL/workflows" -H "Authorization: Bearer $OPERATOR_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"operator-own-wf-${TS}\",\"dag_json\":{\"nodes\":[{\"id\":\"n1\",\"task_id\":\"${OPERATOR_OWN_TASK_ID}\"}],\"edges\":[]}}")
+OPERATOR_OWN_WF_ID=$(jfield "$OPERATOR_OWN_WF" "['data']['id']")
+if [ -n "$OPERATOR_OWN_WF_ID" ]; then
+    OPERATOR_OWN_TRIGGER=$(curl -s -X POST "$BASE_URL/workflows/${OPERATOR_OWN_WF_ID}/trigger" -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'Content-Type: application/json' -d '{}')
+    if [ "$(jcode "$OPERATOR_OWN_TRIGGER")" = "0" ]; then
+        pass_test "operator 可以触发自己创建的工作流"
+        OPERATOR_INST_ID=$(jfield "$OPERATOR_OWN_TRIGGER" "['data']['instance_id']")
+        OPERATOR_OWN_INST=$(curl -s "$BASE_URL/instances/${OPERATOR_INST_ID}" -H "Authorization: Bearer $OPERATOR_TOKEN")
+        if [ "$(jcode "$OPERATOR_OWN_INST")" = "0" ]; then
+            pass_test "operator 可查看自己触发产生的实例"
+        else
+            fail_test "operator 无法查看自己触发产生的实例 (code=$(jcode "$OPERATOR_OWN_INST"))"
+        fi
     else
-        fail_test "operator 无法查看自己触发产生的实例 (code=$(jcode "$OPERATOR_OWN_INST"))"
+        fail_test "operator 无法触发自己创建的工作流 (code=$(jcode "$OPERATOR_OWN_TRIGGER"))"
     fi
 fi
 

@@ -6,8 +6,10 @@
         <el-button @click="goBack">返回</el-button>
         <!-- Fix #178: WorkflowDetailView 缺少编辑入口 -->
         <!-- Fix #335: 编辑/触发属于写操作，viewer 不可见（与列表页守卫一致） -->
-        <el-button v-if="userStore.isOperator" type="warning" @click="handleEdit">编辑</el-button>
-        <el-button v-if="userStore.isOperator" type="primary" :loading="triggering" @click="handleTrigger">触发</el-button>
+        <!-- 工作流对所有人可见，但只有创建者（与 admin）能编辑/触发 -->
+        <el-button v-if="canOperate" type="warning" @click="handleEdit">编辑</el-button>
+        <el-button v-if="canOperate" type="primary" :loading="triggering" @click="handleTrigger">触发</el-button>
+        <el-tag v-else type="info" size="large">只读（非创建者）</el-tag>
       </div>
     </div>
 
@@ -74,7 +76,10 @@
 
     <el-card class="section-card">
       <template #header>最近实例</template>
-      <el-table :data="instances" v-loading="instancesLoading" stripe>
+      <div v-if="!canOperate" class="readonly-hint">
+        仅工作流创建者可查看该工作流的执行记录。
+      </div>
+      <el-table v-else :data="instances" v-loading="instancesLoading" stripe>
         <el-table-column prop="id" label="实例 ID" min-width="180" show-overflow-tooltip />
         <el-table-column label="状态" width="120" align="center">
           <template #default="{ row }">
@@ -204,6 +209,12 @@ const userStore = useUserStore()
 
 const workflowId = computed(() => route.params.id as string)
 
+// 工作流对所有人可见，但只有创建者本人（与 admin）可以操作：
+// 编辑、触发，以及查看该工作流的执行记录（实例按创建者隔离）。
+const canOperate = computed(() =>
+  userStore.isOperator && (userStore.isAdmin || workflow.value?.creator_id === userStore.userId),
+)
+
 const loading = ref(false)
 const workflow = ref<WorkflowItem | null>(null)
 
@@ -268,6 +279,12 @@ async function fetchWorkflow() {
 }
 
 async function fetchInstances() {
+  // 非创建者看不了该工作流的执行记录（后端 403），直接跳过避免无谓报错
+  if (!canOperate.value) {
+    instances.value = []
+    instanceTotal.value = 0
+    return
+  }
   instancesLoading.value = true
   try {
     const { data: resp } = await getWorkflowInstances(workflowId.value, {
@@ -429,6 +446,12 @@ watch(workflowId, (newId, oldId) => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.readonly-hint {
+  color: #909399;
+  font-size: 14px;
+  padding: 8px 0;
 }
 
 .trigger-param-editor {
